@@ -28,6 +28,7 @@ class ServerCase(unittest.TestCase):
         (cls.root / "2026" / "spring").mkdir(parents=True)
         (cls.root / ".hidden").mkdir()
         (cls.root / "a.wav").write_bytes(BYTES)
+        (cls.root / "old-dictaphone.WMA").write_bytes(BYTES[:500])
         (cls.root / "2026" / "spring" / "b.m4a").write_bytes(BYTES[:1000])
         (cls.root / "notes.txt").write_text("not audio")
         (cls.root / ".hidden" / "c.mp3").write_bytes(b"x")
@@ -81,7 +82,7 @@ class Discovery(ServerCase):
         status, _, raw = self.call("GET", "/api/files", self.auth())
         self.assertEqual(status, 200)
         body = json.loads(raw)
-        self.assertEqual([f["path"] for f in body["files"]], ["2026/spring/b.m4a", "a.wav"])
+        self.assertEqual([f["path"] for f in body["files"]], ["2026/spring/b.m4a", "a.wav", "old-dictaphone.WMA"])
         self.assertEqual(body["folder"], "interviews")
         a = next(f for f in body["files"] if f["path"] == "a.wav")
         self.assertEqual((a["size"], a["mime"], a["name"]), (len(BYTES), "audio/wav", "a.wav"))
@@ -218,6 +219,11 @@ class Streaming(ServerCase):
         self.assertEqual((status, raw), (200, b""))
         self.assertEqual(h["content-length"], str(len(BYTES)))
 
+    def test_wma_is_listed_and_served_in_any_letter_case(self):
+        status, h, raw = self.call("GET", self.link("old-dictaphone.WMA"))
+        self.assertEqual((status, raw), (200, BYTES[:500]))
+        self.assertEqual(h["content-type"], "audio/x-ms-wma")
+
     def test_a_file_in_a_subfolder(self):
         status, _, raw = self.call("GET", self.link("2026/spring/b.m4a"))
         self.assertEqual((status, raw), (200, BYTES[:1000]))
@@ -284,6 +290,135 @@ class Units(unittest.TestCase):
             p.write_text("{not json")
             c = srv.Config.load(p)
             self.assertFalse(c.has_secret())
+
+
+class EnvFile(unittest.TestCase):
+    def write(self, text):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        path = Path(d.name, ".env")
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_reads_keys_comments_quotes_and_windows_paths(self):
+        nl, bs, bom = chr(10), chr(92), chr(0xFEFF)
+        path = self.write(
+            nl.join(
+                [
+                    bom + "# a comment",
+                    "CLEW_AUDIO_FOLDER=D:" + bs + "interviews" + bs + "2026",
+                    'CLEW_AUDIO_ALLOW_ORIGINS="https://a.example, https://b.example"',
+                    "export CLEW_AUDIO_PORT=5000 # a trailing comment",
+                    "",
+                ]
+            )
+        )
+        values, warnings = srv.load_env(path)
+        self.assertEqual(values["CLEW_AUDIO_FOLDER"], "D:" + bs + "interviews" + bs + "2026")
+        self.assertEqual(values["CLEW_AUDIO_ALLOW_ORIGINS"], "https://a.example, https://b.example")
+        self.assertEqual(values["CLEW_AUDIO_PORT"], "5000")
+        self.assertEqual(warnings, [])
+
+    def test_warns_about_what_it_cannot_use_and_keeps_going(self):
+        nl = chr(10)
+        values, warnings = srv.load_env(self.write(nl.join(["nonsense", "CLEW_AUDIO_TYPO=1", "CLEW_AUDIO_PORT=80"])))
+        self.assertEqual(values, {"CLEW_AUDIO_PORT": "80"})
+        self.assertEqual(len(warnings), 2)
+
+    def test_a_missing_file_is_not_an_error(self):
+        self.assertEqual(srv.load_env(Path("/no/such/.env")), ({}, []))
+
+    def test_a_bad_number_is_ignored_with_a_warning(self):
+        warnings = []
+        self.assertIsNone(srv.env_int({"CLEW_AUDIO_PORT": "abc"}, "CLEW_AUDIO_PORT", warnings))
+        self.assertIsNone(srv.env_int({"CLEW_AUDIO_PORT": "-3"}, "CLEW_AUDIO_PORT", warnings))
+        self.assertEqual(srv.env_int({"CLEW_AUDIO_PORT": "12"}, "CLEW_AUDIO_PORT", warnings), 12)
+        self.assertEqual(len(warnings), 2)
+
+
+class StartFromEnv(unittest.TestCase):
+    """The program itself, started the way a researcher starts it, from nothing but a .env."""
+
+    def start(self, lines, *extra):
+        import socket
+        import subprocess
+        import sys
+        from types import SimpleNamespace
+
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        base = Path(d.name)
+        for name, audio in (("from-env", "a.mp3"), ("from-cli", "b.mp3")):
+            (base / name).mkdir()
+            (base / name / audio).write_bytes(b"x")
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        fill = dict(env=base / "from-env", cli=base / "from-cli", port=port)
+        (base / ".env").write_text(chr(10).join(lines).format(**fill), encoding="utf-8")
+        proc = subprocess.Popen(
+            [sys.executable, "-u", srv.__file__, "--env", str(base / ".env"),
+             "--config", str(base / "c.json"), *[x.format(**fill) for x in extra]],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        self.addCleanup(proc.kill)
+        self.addCleanup(proc.stdout.close)
+        out = ""
+        for line in proc.stdout:
+            out += line
+            if "Press Ctrl+C" in line:
+                break
+        secret = out.split("paste it into Clew):")[1].split()[0]
+        return SimpleNamespace(port=port, secret=secret, out=out, dir=base)
+
+    def get(self, port, path, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            c.request("GET", path, headers=headers or {})
+            r = c.getresponse()
+            return r.status, {k.lower(): v for k, v in r.getheaders()}, r.read()
+        finally:
+            c.close()
+
+    def paths(self, run):
+        _, _, raw = self.get(run.port, "/api/files", {"Authorization": f"Bearer {run.secret}"})
+        return [f["path"] for f in json.loads(raw)["files"]]
+
+    def test_folder_port_and_origin_come_from_the_env_file(self):
+        run = self.start(
+            [
+                "CLEW_AUDIO_FOLDER={env}",
+                "CLEW_AUDIO_PORT={port}",
+                "CLEW_AUDIO_ALLOW_ORIGINS=https://clew.example",
+            ]
+        )
+        self.assertIn(f"127.0.0.1:{run.port}", run.out)
+        status, headers, _ = self.get(run.port, "/api/ping", {"Origin": "https://clew.example"})
+        self.assertEqual((status, headers["access-control-allow-origin"]), (200, "https://clew.example"))
+        self.assertEqual(self.paths(run), ["a.mp3"])
+
+    def test_the_command_line_wins_over_the_env_file(self):
+        run = self.start(["CLEW_AUDIO_FOLDER={env}", "CLEW_AUDIO_PORT={port}"], "--folder", "{cli}")
+        self.assertEqual(self.paths(run), ["b.mp3"])
+
+    def test_an_origin_from_the_env_file_is_not_written_to_the_remembered_config(self):
+        run = self.start(
+            [
+                "CLEW_AUDIO_FOLDER={env}",
+                "CLEW_AUDIO_PORT={port}",
+                "CLEW_AUDIO_ALLOW_ORIGINS=https://temp.example",
+            ]
+        )
+        self.assertIn("https://temp.example", run.out)
+        saved = json.loads((run.dir / "c.json").read_text(encoding="utf-8"))
+        self.assertNotIn("origins", saved)
+
+    def test_a_bad_line_is_warned_about_and_the_rest_still_applies(self):
+        run = self.start(["CLEW_AUDIO_FOLDER={env}", "CLEW_AUDIO_PORT={port}", "CLEW_AUDIO_TYPO=1"])
+        self.assertIn("unknown key CLEW_AUDIO_TYPO", run.out)
+        self.assertEqual(self.paths(run), ["a.mp3"])
 
 
 if __name__ == "__main__":
