@@ -22,6 +22,36 @@ Clew ("From server"). Later starts remember the folder and the secret's hash:
 
 It listens on 127.0.0.1 only.
 
+## Settings in a `.env` file
+
+Copy `.env.example` to `.env` **next to `clew_audio_server.py`** (or next to the `.exe`) and edit it,
+so nothing has to be typed at each start. `.env` is ignored by git.
+
+| Key | Same as | |
+|---|---|---|
+| `CLEW_AUDIO_FOLDER` | `--folder` | the folder to serve; a Windows path needs no quotes |
+| `CLEW_AUDIO_PORT` | `--port` | default 47821 |
+| `CLEW_AUDIO_ALLOW_ORIGINS` | `--allow-origin` | a hosted Clew's address(es), comma separated |
+| `CLEW_AUDIO_LINK_HOURS` | | how long a stream link lasts; default 4 |
+| `CLEW_AUDIO_CONFIG` | `--config` | where the secret's hash is kept |
+
+Order, strongest first: command-line option, `.env`, what the last start remembered, a question on the
+console. Origins from `.env` are used but not written to the remembered settings, so deleting the line
+removes it. The secret is not a `.env` setting on purpose: it is generated, shown once, and only its hash
+is stored. `--env <file>` reads another file.
+
+## Run it with Clew
+
+From the repository root, `npm run dev` (or `dev.cmd` / `./dev.sh`) starts this server and the Clew dev
+server together, output prefixed `[audio]` and `[clew]`. See `scripts/dev.mjs`.
+
+## Formats
+
+mp3, m4a, aac, wav, ogg, oga, opus, flac, weba, webm, mp4, 3gp, amr, **wma** (any letter case). The server
+sends any of them, but **the browser has to play it**: Chrome, Firefox and Safari cannot play `.wma`
+(Edge on Windows may, depending on its codecs) — from what is known of those browsers, not tested here. Clew then says the browser cannot play the file; an mp3 or
+m4a copy plays everywhere.
+
 ## Run it (standalone, no Python needed)
 
 ```

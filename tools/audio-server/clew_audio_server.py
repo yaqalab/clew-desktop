@@ -18,6 +18,9 @@ What it promises
   are not followed.
 - Only Clew's own origins get CORS headers. Loopback origins always; a hosted Clew with --allow-origin.
 - Nothing from a request beyond method and path is logged, and never the secret or a link's query.
+
+Settings, strongest first: command-line options, then a `.env` file next to this program
+(`.env.example` lists every key), then what the last start remembered, then a question on the console.
 """
 
 from __future__ import annotations
@@ -63,10 +66,77 @@ MIME_BY_EXT = {
     ".mp4": "audio/mp4",
     ".3gp": "audio/3gpp",
     ".amr": "audio/amr",
+    ".wma": "audio/x-ms-wma",
 }
 
 LOOPBACK_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
 LOOPBACK_HOST = re.compile(r"^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$", re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------------------------
+# The .env file
+# ---------------------------------------------------------------------------------------------
+
+ENV_KEYS = {
+    "CLEW_AUDIO_FOLDER",
+    "CLEW_AUDIO_PORT",
+    "CLEW_AUDIO_ALLOW_ORIGINS",
+    "CLEW_AUDIO_CONFIG",
+    "CLEW_AUDIO_LINK_HOURS",
+}
+
+
+def app_dir() -> Path:
+    """Where this program lives: beside the script, or beside the .exe when packed."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def load_env(path: Path) -> tuple[dict[str, str], list[str]]:
+    """KEY=VALUE lines. `#` starts a comment line, a value may be quoted, `export ` is ignored.
+    No interpolation, so a Windows path needs no escaping. Returns (values, warnings); a missing
+    file is not an error."""
+    values: dict[str, str] = {}
+    warnings: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return values, warnings
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, eq, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if not eq or not key:
+            warnings.append(f"{path.name} line {n}: not KEY=VALUE, ignored")
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        elif " #" in value:
+            value = value.split(" #", 1)[0].rstrip()
+        if key not in ENV_KEYS:
+            warnings.append(f"{path.name} line {n}: unknown key {key}, ignored")
+            continue
+        values[key] = value
+    return values, warnings
+
+
+def env_int(values: dict[str, str], key: str, warnings: list[str]) -> int | None:
+    v = values.get(key, "")
+    if not v:
+        return None
+    try:
+        n = int(v)
+        if n > 0:
+            return n
+    except ValueError:
+        pass
+    warnings.append(f"{key}={v} is not a positive whole number, ignored")
+    return None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -245,8 +315,11 @@ def parse_range(header: str | None, size: int) -> tuple[int, int] | None | str:
 
 
 class State:
-    def __init__(self, root: Path, config: Config, extra_origins: list[str]) -> None:
+    def __init__(
+        self, root: Path, config: Config, extra_origins: list[str], link_ttl_sec: int = LINK_TTL_SEC
+    ) -> None:
         self.root = root
+        self.link_ttl_sec = link_ttl_sec
         self.config = config
         self.origins = set(extra_origins) | set(config.origins)
         # In memory only: a restart revokes every stream link.
@@ -262,7 +335,7 @@ class State:
         return base64.urlsafe_b64encode(mac).decode("ascii").rstrip("=")
 
     def link_for(self, rel: str, now: float | None = None) -> tuple[str, int]:
-        exp = int((now if now is not None else time.time()) + LINK_TTL_SEC)
+        exp = int((now if now is not None else time.time()) + self.link_ttl_sec)
         return f"/api/stream?p={quote(rel, safe='')}&exp={exp}&sig={self.sign(rel, exp)}", exp * 1000
 
     def link_ok(self, rel: str, exp: str, sig: str) -> bool:
@@ -501,7 +574,7 @@ def ask_folder() -> str:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Serve the audio files of one folder to Clew.")
     p.add_argument("--folder", help="the folder to serve (remembered for the next start)")
-    p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--port", type=int, default=None, help=f"default {DEFAULT_PORT}")
     p.add_argument(
         "--allow-origin",
         action="append",
@@ -511,6 +584,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--reset-secret", action="store_true", help="make a new secret; the old one stops working")
     p.add_argument("--config", type=Path, default=None, help="where the settings are kept")
+    p.add_argument("--env", type=Path, default=None, help="a .env file; default: .env beside this program")
     args = p.parse_args(argv)
 
     # A console in a legacy code page (cp932, cp1252...) must never crash the start-up: the secret is
@@ -519,31 +593,52 @@ def main(argv: list[str] | None = None) -> int:
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace", line_buffering=True)
 
-    config = Config.load(args.config or default_config_path())
+    env_path = args.env or app_dir() / ".env"
+    env, warnings = load_env(env_path)
+    if args.env is not None and not env_path.is_file():
+        raise SystemExit(f"No such .env file: {env_path}")
+    port = args.port or env_int(env, "CLEW_AUDIO_PORT", warnings) or DEFAULT_PORT
+    link_hours = env_int(env, "CLEW_AUDIO_LINK_HOURS", warnings)
+    env_config = env.get("CLEW_AUDIO_CONFIG")
+    config = Config.load(args.config or (Path(env_config).expanduser() if env_config else default_config_path()))
     shown_secret: str | None = None
     if args.reset_secret or not config.has_secret():
         shown_secret = new_secret()
         config.set_secret(shown_secret)
 
-    folder = args.folder or config.folder or ask_folder()
+    folder = args.folder or env.get("CLEW_AUDIO_FOLDER") or config.folder or ask_folder()
     root = Path(folder).expanduser()
     if not root.is_dir():
         raise SystemExit(f"Not a folder: {root}")
     root = root.resolve()
     config.data["folder"] = str(root)
-    origins = sorted({*config.origins, *(o.rstrip("/") for o in args.allow_origin)})
-    if origins:
-        config.data["origins"] = origins
+    # Origins from the command line and the remembered ones are kept; the .env's are used
+    # without being written to the remembered config, so removing a line from .env removes it.
+    env_origins = [o.rstrip("/") for o in re.split(r"[,\s]+", env.get("CLEW_AUDIO_ALLOW_ORIGINS", "")) if o]
+    remembered = sorted({*config.origins, *(o.rstrip("/") for o in args.allow_origin)})
+    if remembered:
+        config.data["origins"] = remembered
     config.save()
 
-    state = State(root, config, origins)
+    state = State(
+        root,
+        config,
+        sorted({*remembered, *env_origins}),
+        link_hours * 3600 if link_hours else LINK_TTL_SEC,
+    )
     try:
-        server = create_server(state, args.port)
+        server = create_server(state, port)
     except OSError as e:
-        raise SystemExit(f"Port {args.port} is not available ({e}). Try --port <number>.") from e
+        raise SystemExit(f"Port {port} is not available ({e}). Try --port <number>.") from e
 
     files, truncated = list_audio(root)
-    print(f"Clew audio server  ->  http://127.0.0.1:{args.port}")
+    for w in warnings:
+        print(f"Warning: {w}")
+    if env_path.is_file():
+        print(f"Settings from {env_path}")
+    print(f"Clew audio server  ->  http://127.0.0.1:{port}")
+    if state.origins:
+        print(f"Also allowed to call it: {', '.join(sorted(state.origins))}")
     print(f"Folder: {root}  ({len(files)} audio files{', more than shown' if truncated else ''})")
     if shown_secret:
         print()
