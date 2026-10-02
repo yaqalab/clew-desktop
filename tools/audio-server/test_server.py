@@ -229,6 +229,185 @@ class Streaming(ServerCase):
         self.assertEqual((status, raw), (200, BYTES[:1000]))
 
 
+def mp3_frame(fill: int, kbps_index: int = 9, padding: int = 0) -> bytes:
+    """One MPEG1 layer III stereo frame at 44.1 kHz (128 kbit/s by default: 417 bytes), body all `fill`."""
+    length = 144 * [32, 40, 48, 56, 64, 80, 96, 112, 128][kbps_index - 1] * 1000 // 44100 + padding
+    return bytes([0xFF, 0xFB, kbps_index << 4 | padding << 1, 0x00]) + bytes([fill]) * (length - 4)
+
+
+ID3_OF_20_BYTES = b"ID3\x04\x00\x00\x00\x00\x00\x0a" + bytes(10)
+
+
+def mp3_with_tag(tag: bytes, lead: bytes = b"") -> bytes:
+    """A file that starts with a frame holding `tag` and a nonsense seek table, then 40 frames of sound."""
+    first = bytearray(mp3_frame(0))
+    first[36:40] = tag
+    first[40:140] = bytes([0xAA]) * 100
+    return lead + bytes(first) + b"".join(mp3_frame(0x55) for _ in range(40))
+
+
+def ffmpeg_can_make_mp3() -> str | None:
+    exe = srv.find_ffmpeg(None)
+    if exe is None:
+        return None
+    try:
+        made = subprocess.run([exe, "-hide_banner", "-encoders"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return exe if b"libmp3lame" in made.stdout else None
+
+
+class Mp3Case(ServerCase):
+    """mp3 files shaped like a long recording's: a first frame that is only a tag."""
+
+    FFMPEG: str | None = None
+    INFO = mp3_with_tag(b"Info")
+    XING = mp3_with_tag(b"Xing")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        (cls.root / "cbr.mp3").write_bytes(cls.INFO)
+        (cls.root / "vbr.mp3").write_bytes(cls.XING)
+        (cls.root / "tagged.mp3").write_bytes(mp3_with_tag(b"Info", lead=ID3_OF_20_BYTES))
+        (cls.root / "plain.mp3").write_bytes(mp3_frame(0x55) * 40)
+        cls.state.seek = srv.Mp3Seek(cls.FFMPEG, Path(cls.tmp.name, "cache"))
+
+
+class Mp3Heads(unittest.TestCase):
+    def head(self, data: bytes) -> srv.Mp3Head:
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "x.mp3")
+            p.write_bytes(data)
+            return srv.read_mp3_head(p)
+
+    def test_a_constant_bit_rate_tag(self):
+        h = self.head(Mp3Case.INFO)
+        self.assertEqual((h.kind, h.tag_start, h.frame_end, h.blank), ("info", 36, 417, (36, 417)))
+
+    def test_a_variable_bit_rate_tag_is_not_blanked(self):
+        h = self.head(Mp3Case.XING)
+        self.assertEqual((h.kind, h.blank), ("xing", None))
+
+    def test_a_tag_after_an_id3_tag(self):
+        h = self.head(mp3_with_tag(b"Info", lead=ID3_OF_20_BYTES))
+        self.assertEqual((h.kind, h.tag_start, h.frame_end), ("info", 20 + 36, 20 + 417))
+
+    def test_a_file_without_a_tag_and_a_file_that_is_not_an_mp3(self):
+        self.assertEqual(self.head(mp3_frame(0x55) * 40).kind, "none")
+        self.assertEqual(self.head(BYTES).kind, "none")
+        self.assertEqual(self.head(b"").kind, "none")
+
+
+class Mp3Blanking(Mp3Case):
+    def test_the_tag_of_a_constant_bit_rate_file_is_sent_as_zeros_at_the_same_length(self):
+        status, h, raw = self.call("GET", self.link("cbr.mp3"))
+        self.assertEqual(status, 200)
+        self.assertEqual(len(raw), len(self.INFO))
+        self.assertEqual(raw[:36], self.INFO[:36])
+        self.assertEqual(raw[36:417], bytes(417 - 36))
+        self.assertEqual(raw[417:], self.INFO[417:])
+        self.assertEqual(h["content-length"], str(len(self.INFO)))
+
+    def test_a_range_inside_the_tag_and_one_across_its_edges(self):
+        _, _, inside = self.call("GET", self.link("cbr.mp3"), {"Range": "bytes=100-199"})
+        self.assertEqual(inside, bytes(100))
+        _, h, across = self.call("GET", self.link("cbr.mp3"), {"Range": "bytes=30-420"})
+        self.assertEqual(across, self.INFO[30:36] + bytes(417 - 36) + self.INFO[417:421])
+        self.assertEqual(h["content-range"], f"bytes 30-420/{len(self.INFO)}")
+
+    def test_a_range_after_the_tag_is_untouched(self):
+        _, _, after = self.call("GET", self.link("cbr.mp3"), {"Range": "bytes=417-"})
+        self.assertEqual(after, self.INFO[417:])
+
+    def test_blanking_survives_chunk_boundaries(self):
+        old = srv.CHUNK
+        srv.CHUNK = 50
+        try:
+            _, _, raw = self.call("GET", self.link("cbr.mp3"))
+        finally:
+            srv.CHUNK = old
+        self.assertEqual(raw, self.INFO[:36] + bytes(417 - 36) + self.INFO[417:])
+
+    def test_the_tag_behind_an_id3_tag(self):
+        _, _, raw = self.call("GET", self.link("tagged.mp3"))
+        self.assertEqual(raw[20 + 36 : 20 + 417], bytes(417 - 36))
+
+    def test_other_files_are_sent_as_they_are(self):
+        _, _, vbr = self.call("GET", self.link("vbr.mp3"))
+        self.assertEqual(vbr, self.XING)
+        _, _, plain = self.call("GET", self.link("plain.mp3"))
+        self.assertEqual(plain, mp3_frame(0x55) * 40)
+        _, _, wav = self.call("GET", self.link("a.wav"))
+        self.assertEqual(wav, BYTES)
+
+    def test_without_ffmpeg_the_link_tells_the_files_own_size(self):
+        _, _, raw = self.call("POST", "/api/url", self.auth(), {"path": "vbr.mp3"})
+        self.assertEqual(json.loads(raw)["size"], len(self.XING))
+
+
+class Mp3Conversion(Mp3Case):
+    FFMPEG = ffmpeg_can_make_mp3()
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if cls.FFMPEG is None:
+            raise unittest.SkipTest("no ffmpeg with libmp3lame")
+        super().setUpClass()
+        # A real variable-bit-rate mp3 (with a Xing tag): 20 seconds of a tone.
+        made = subprocess.run(
+            [
+                cls.FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+                "-c:a", "libmp3lame", "-q:a", "4", "-write_xing", "1", str(cls.root / "real-vbr.mp3"),
+            ],
+            capture_output=True,
+        )
+        assert made.returncode == 0, made.stderr
+
+    def test_a_variable_bit_rate_file_is_converted_once_and_sent_without_a_table(self):
+        original = (self.root / "real-vbr.mp3").read_bytes()
+        self.assertEqual(srv.read_mp3_head(self.root / "real-vbr.mp3").kind, "xing")
+        _, _, raw = self.call("POST", "/api/url", self.auth(), {"path": "real-vbr.mp3"})
+        told = json.loads(raw)
+        _, h, body = self.call("GET", told["url"])
+        self.assertEqual(h["content-type"], "audio/mpeg")
+        self.assertEqual(len(body), told["size"])
+        self.assertNotEqual(body, original)
+        with tempfile.TemporaryDirectory() as d:
+            sent = Path(d, "sent.mp3")
+            sent.write_bytes(body)
+            self.assertEqual(srv.read_mp3_head(sent).kind, "none")
+        # Ranges are those of the converted file.
+        _, h, part = self.call("GET", told["url"], {"Range": "bytes=100-199"})
+        self.assertEqual((part, h["content-range"]), (body[100:200], f"bytes 100-199/{len(body)}"))
+        # The second time nothing is converted again.
+        runs = []
+        real_run = srv.subprocess.run
+        srv.subprocess.run = lambda *a, **k: runs.append(a) or real_run(*a, **k)
+        try:
+            self.call("POST", "/api/url", self.auth(), {"path": "real-vbr.mp3"})
+        finally:
+            srv.subprocess.run = real_run
+        self.assertEqual(runs, [])
+        self.assertEqual(len(list(Path(self.tmp.name, "cache").glob("*.mp3"))), 1)
+
+    def test_a_constant_bit_rate_file_is_not_converted(self):
+        _, _, raw = self.call("POST", "/api/url", self.auth(), {"path": "cbr.mp3"})
+        self.assertEqual(json.loads(raw)["size"], len(self.INFO))
+
+
+class Ffmpeg(unittest.TestCase):
+    def test_off_and_a_missing_path_mean_none(self):
+        self.assertIsNone(srv.find_ffmpeg("off"))
+        self.assertIsNone(srv.find_ffmpeg(str(Path(tempfile.gettempdir(), "no-such-dir", "ffmpeg"))))
+
+    def test_a_given_path_wins(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d, "ffmpeg")
+            fake.write_text("")
+            self.assertEqual(srv.find_ffmpeg(str(fake)), str(fake))
+
+
 class Browser(ServerCase):
     def test_the_hosts_other_than_loopback_are_refused(self):
         # A page on another name pointing at 127.0.0.1 (DNS rebinding) arrives with its own Host.
