@@ -18,6 +18,10 @@ What it promises
   are not followed.
 - Only Clew's own origins get CORS headers. Loopback origins always; a hosted Clew with --allow-origin.
 - Nothing from a request beyond method and path is logged, and never the secret or a link's query.
+- Firefox seeks badly in a long mp3 that carries a seek table (docs/22 section 8). So a constant-bit-rate
+  mp3's table is blanked as it is sent (same length, nothing shifts), and a variable-bit-rate one is
+  converted once, with ffmpeg, to a constant-bit-rate mp3 kept in a cache folder. Without ffmpeg it is
+  sent as it is.
 
 Settings, strongest first: command-line options, then a `.env` file next to this program
 (`.env.example` lists every key), then what the last start remembered, then a question on the console.
@@ -33,7 +37,9 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -83,6 +89,7 @@ ENV_KEYS = {
     "CLEW_AUDIO_ALLOW_ORIGINS",
     "CLEW_AUDIO_CONFIG",
     "CLEW_AUDIO_LINK_HOURS",
+    "CLEW_AUDIO_FFMPEG",
 }
 
 
@@ -310,17 +317,220 @@ def parse_range(header: str | None, size: int) -> tuple[int, int] | None | str:
 
 
 # ---------------------------------------------------------------------------------------------
+# Long mp3 files and Firefox's seeking
+# ---------------------------------------------------------------------------------------------
+#
+# An mp3 usually starts with one frame that holds no sound, only a "Xing" (variable bit rate) or
+# "Info" (constant bit rate) tag with a table of 100 seek points. Firefox seeks by that table, so in a
+# long recording it lands up to a minute from where it was asked and stalls in silence on the way
+# (docs/22 section 8). With no table it works the length out from the file's size, which is exact for a
+# constant bit rate, and seeks exactly. So:
+#   - "Info": the tag is blanked in what is sent. The frame keeps its length, so every size and every
+#     Range request stays what the listing says.
+#   - "Xing" or "VBRI": the file is converted once to a constant-bit-rate mp3 with no table.
+
+# Layer III bit rates in kbit/s by the header's index 1..14: MPEG1, then MPEG2 and 2.5.
+MP3_KBPS = {
+    3: [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+    2: [8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+    0: [8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+}
+MP3_HZ = {3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000]}
+CONVERT_KBPS = 128
+# The cache of converted files is cut back to this when a new one is made.
+CACHE_LIMIT_BYTES = 4 * 1024**3
+
+
+class Mp3Head:
+    """What the first frame of an mp3 carries: the kind of tag, and where the tag sits in the file."""
+
+    def __init__(self, kind: str, tag_start: int = 0, frame_end: int = 0) -> None:
+        self.kind = kind  # "info", "xing", "vbri" or "none"
+        self.tag_start = tag_start
+        self.frame_end = frame_end  # the first byte after the frame
+
+    @property
+    def blank(self) -> tuple[int, int] | None:
+        """The bytes of a constant-bit-rate file's tag that are sent as zeros, as (first, end)."""
+        return (self.tag_start, self.frame_end) if self.kind == "info" else None
+
+
+def mp3_frame_at(buf: bytes, at: int) -> tuple[int, int] | None:
+    """(length of the frame, offset of a Xing/Info tag in it) for a layer III header at `at`, else None."""
+    if at + 4 > len(buf) or buf[at] != 0xFF or buf[at + 1] & 0xE0 != 0xE0:
+        return None
+    version = (buf[at + 1] >> 3) & 3  # 3 is MPEG1, 2 is MPEG2, 0 is MPEG2.5, 1 is reserved
+    if version == 1 or (buf[at + 1] >> 1) & 3 != 1:  # reserved, or not layer III
+        return None
+    bitrate_index, rate_index = buf[at + 2] >> 4, (buf[at + 2] >> 2) & 3
+    if bitrate_index in (0, 15) or rate_index == 3:
+        return None
+    padding = (buf[at + 2] >> 1) & 1
+    mono = buf[at + 3] >> 6 == 3
+    length = (144 if version == 3 else 72) * MP3_KBPS[version][bitrate_index - 1] * 1000 // MP3_HZ[version][rate_index] + padding
+    side = (17 if mono else 32) if version == 3 else (9 if mono else 17)
+    checksum = 0 if buf[at + 1] & 1 else 2  # the protection bit is 0 when a checksum follows
+    return length, 4 + checksum + side
+
+
+def read_mp3_head(path: Path) -> Mp3Head:
+    """Looks at the start of the file only. Anything unexpected reads as "none": it is sent as it is."""
+    try:
+        with open(path, "rb") as f:
+            start = 0
+            lead = f.read(10)
+            if lead[:3] == b"ID3" and len(lead) == 10:
+                size = (lead[6] & 0x7F) << 21 | (lead[7] & 0x7F) << 14 | (lead[8] & 0x7F) << 7 | (lead[9] & 0x7F)
+                start = 10 + size + (10 if lead[5] & 0x10 else 0)
+            f.seek(start)
+            buf = f.read(8192)
+    except OSError:
+        return Mp3Head("none")
+    # The first frame follows the ID3 tag directly; a little junk before it is tolerated.
+    for i in range(min(len(buf), 2048)):
+        found = mp3_frame_at(buf, i)
+        if found is None:
+            continue
+        length, tag_at = found
+        # A real frame is followed by another one, unless the file ends there.
+        if i + length + 4 <= len(buf) and mp3_frame_at(buf, i + length) is None:
+            continue
+        for kind, tag, at in (("info", b"Info", tag_at), ("xing", b"Xing", tag_at), ("vbri", b"VBRI", 36)):
+            if buf[i + at : i + at + 4] == tag:
+                return Mp3Head(kind, start + i + at, start + i + length)
+        return Mp3Head("none")
+    return Mp3Head("none")
+
+
+def find_ffmpeg(setting: str | None) -> str | None:
+    """The ffmpeg to use: `setting` (a path), else beside this program, else on PATH. "off" means none."""
+    if setting is not None and setting.strip().lower() in ("off", "no", "none", "0"):
+        return None
+    if setting:
+        given = Path(setting).expanduser()
+        return str(given) if given.is_file() else None
+    beside = app_dir() / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    return str(beside) if beside.is_file() else shutil.which("ffmpeg")
+
+
+class Mp3Seek:
+    """What the server does about Firefox's seeking in a long mp3: reads each file's first frame once,
+    and converts a variable-bit-rate file to a constant-bit-rate one with ffmpeg, once, into a cache."""
+
+    def __init__(self, ffmpeg: str | None, cache_dir: Path) -> None:
+        self.ffmpeg = ffmpeg
+        self.cache_dir = cache_dir
+        self.lock = threading.Lock()
+        self.locks: dict[str, threading.Lock] = {}
+        self.heads: dict[str, tuple[int, int, Mp3Head]] = {}
+
+    def head_of(self, path: Path) -> Mp3Head:
+        """The first frame's tag, remembered until the file changes."""
+        st = path.stat()
+        with self.lock:
+            seen = self.heads.get(str(path))
+        if seen and seen[0] == st.st_mtime_ns and seen[1] == st.st_size:
+            return seen[2]
+        head = read_mp3_head(path)
+        with self.lock:
+            self.heads[str(path)] = (st.st_mtime_ns, st.st_size, head)
+        return head
+
+    def _target(self, path: Path) -> Path:
+        st = path.stat()
+        key = hashlib.sha256(f"{path}\n{st.st_mtime_ns}\n{st.st_size}\n{CONVERT_KBPS}".encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{key[:32]}.mp3"
+
+    def converted(self, path: Path) -> Path | None:
+        """The converted copy of `path`, if one was made."""
+        try:
+            hit = self._target(path)
+            if hit.is_file():
+                os.utime(hit)  # the most recently used survives the trimming
+                return hit
+        except OSError:
+            pass
+        return None
+
+    def convert(self, path: Path) -> Path | None:
+        """The converted copy of a variable-bit-rate mp3, making it first (a long file takes a while);
+        None when the file needs none, there is no ffmpeg, or ffmpeg failed. Concurrent calls for one
+        file wait for the one conversion."""
+        if self.ffmpeg is None or path.suffix.lower() != ".mp3":
+            return None
+        try:
+            if self.head_of(path).kind not in ("xing", "vbri"):
+                return None
+            target = self._target(path)
+        except OSError:
+            return None
+        with self.lock:
+            once = self.locks.setdefault(target.name, threading.Lock())
+        with once:
+            hit = self.converted(path)
+            if hit is not None:
+                return hit
+            part = target.with_suffix(".part")
+            try:
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                done = subprocess.run(
+                    [
+                        self.ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(path),
+                        "-map", "0:a:0", "-map_metadata", "-1",
+                        "-c:a", "libmp3lame", "-b:a", f"{CONVERT_KBPS}k", "-write_xing", "0", "-id3v2_version", "0",
+                        "-f", "mp3", str(part),
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if done.returncode != 0 or not part.is_file() or part.stat().st_size == 0:
+                    part.unlink(missing_ok=True)
+                    return None
+                os.replace(part, target)
+            except OSError:
+                return None
+        self._trim(keep=target)
+        return target
+
+    def _trim(self, keep: Path) -> None:
+        """Deletes the least recently used copies until the cache is under its limit."""
+        try:
+            files = [(p.stat().st_mtime, p.stat().st_size, p) for p in self.cache_dir.glob("*.mp3")]
+        except OSError:
+            return
+        total = sum(size for _, size, _ in files)
+        for _, size, p in sorted(files, key=lambda f: f[0]):
+            if total <= CACHE_LIMIT_BYTES:
+                break
+            if p == keep:
+                continue
+            try:
+                p.unlink()
+                total -= size
+            except OSError:
+                pass
+
+
+# ---------------------------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------------------------
 
 
 class State:
     def __init__(
-        self, root: Path, config: Config, extra_origins: list[str], link_ttl_sec: int = LINK_TTL_SEC
+        self,
+        root: Path,
+        config: Config,
+        extra_origins: list[str],
+        link_ttl_sec: int = LINK_TTL_SEC,
+        seek: Mp3Seek | None = None,
     ) -> None:
         self.root = root
         self.link_ttl_sec = link_ttl_sec
         self.config = config
+        self.seek = seek or Mp3Seek(None, config.path.parent / "cache")
         self.origins = set(extra_origins) | set(config.origins)
         # In memory only: a restart revokes every stream link.
         self.link_key = secrets.token_bytes(32)
@@ -484,11 +694,20 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
             if not self._auth():
                 return
             rel = body.get("path") if body else None
-            if not isinstance(rel, str) or resolve_audio(state.root, rel) is None:
+            path = resolve_audio(state.root, rel) if isinstance(rel, str) else None
+            if path is None or not isinstance(rel, str):
+                self._refuse(HTTPStatus.NOT_FOUND, "no such file")
+                return
+            # A variable-bit-rate mp3 is converted here, before the link, so that what the link
+            # plays is settled and its size can be told: the player reads the waveform by ranges.
+            sent = state.seek.convert(path) or path
+            try:
+                size = sent.stat().st_size
+            except OSError:
                 self._refuse(HTTPStatus.NOT_FOUND, "no such file")
                 return
             url, expires = state.link_for(rel)
-            self._json(HTTPStatus.OK, {"url": url, "expires": expires})
+            self._json(HTTPStatus.OK, {"url": url, "expires": expires, "size": size})
 
         def _stream(self, query: dict[str, list[str]]) -> None:
             rel = (query.get("p") or [""])[0]
@@ -501,7 +720,14 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
             if path is None:
                 self._refuse(HTTPStatus.NOT_FOUND, "no such file")
                 return
+            mime = mime_of(path) or "application/octet-stream"
+            blank: tuple[int, int] | None = None
             try:
+                converted = state.seek.converted(path)
+                if converted is not None:
+                    path = converted
+                elif mime == "audio/mpeg":
+                    blank = state.seek.head_of(path).blank
                 size = path.stat().st_size
                 span = parse_range(self.headers.get("Range"), size)
                 f = open(path, "rb")
@@ -520,7 +746,7 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
                 length = max(0, last - first + 1) if size else 0
                 self.send_response(HTTPStatus.PARTIAL_CONTENT if isinstance(span, tuple) else HTTPStatus.OK)
                 self._cors()
-                self.send_header("Content-Type", mime_of(path) or "application/octet-stream")
+                self.send_header("Content-Type", mime)
                 self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Content-Length", str(length))
                 if isinstance(span, tuple):
@@ -531,12 +757,20 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
                     return
                 f.seek(first)
                 left = length
+                at = first
                 try:
                     while left > 0:
                         chunk = f.read(min(CHUNK, left))
                         if not chunk:
                             break
+                        if blank is not None and at < blank[1] and at + len(chunk) > blank[0]:
+                            # A constant-bit-rate file's seek table, sent as silence (see above).
+                            data = bytearray(chunk)
+                            lo, hi = max(blank[0], at) - at, min(blank[1], at + len(chunk)) - at
+                            data[lo:hi] = bytes(hi - lo)
+                            chunk = bytes(data)
                         self.wfile.write(chunk)
+                        at += len(chunk)
                         left -= len(chunk)
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     # The player moved on (a seek) and closed this request.
@@ -599,6 +833,9 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"No such .env file: {env_path}")
     port = args.port or env_int(env, "CLEW_AUDIO_PORT", warnings) or DEFAULT_PORT
     link_hours = env_int(env, "CLEW_AUDIO_LINK_HOURS", warnings)
+    ffmpeg = find_ffmpeg(env.get("CLEW_AUDIO_FFMPEG"))
+    if env.get("CLEW_AUDIO_FFMPEG", "").strip().lower() not in ("", "off", "no", "none", "0") and ffmpeg is None:
+        warnings.append(f"CLEW_AUDIO_FFMPEG is not a file: {env['CLEW_AUDIO_FFMPEG']}")
     env_config = env.get("CLEW_AUDIO_CONFIG")
     config = Config.load(args.config or (Path(env_config).expanduser() if env_config else default_config_path()))
     shown_secret: str | None = None
@@ -625,6 +862,7 @@ def main(argv: list[str] | None = None) -> int:
         config,
         sorted({*remembered, *env_origins}),
         link_hours * 3600 if link_hours else LINK_TTL_SEC,
+        Mp3Seek(ffmpeg, config.path.parent / "cache"),
     )
     try:
         server = create_server(state, port)
@@ -640,6 +878,11 @@ def main(argv: list[str] | None = None) -> int:
     if state.origins:
         print(f"Also allowed to call it: {', '.join(sorted(state.origins))}")
     print(f"Folder: {root}  ({len(files)} audio files{', more than shown' if truncated else ''})")
+    print(
+        f"ffmpeg: {ffmpeg} (variable-bit-rate mp3 files are converted for Firefox)"
+        if ffmpeg
+        else "ffmpeg: not found (variable-bit-rate mp3 files are sent as they are; docs/22 section 8)"
+    )
     if shown_secret:
         print()
         print("Secret (shown once - paste it into Clew):")

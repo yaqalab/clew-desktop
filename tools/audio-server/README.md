@@ -34,6 +34,7 @@ so nothing has to be typed at each start. `.env` is ignored by git.
 | `CLEW_AUDIO_ALLOW_ORIGINS` | `--allow-origin` | a hosted Clew's address(es), comma separated |
 | `CLEW_AUDIO_LINK_HOURS` | | how long a stream link lasts; default 4 |
 | `CLEW_AUDIO_CONFIG` | `--config` | where the secret's hash is kept |
+| `CLEW_AUDIO_FFMPEG` | | path to ffmpeg, or `off`; default beside the program, else on `PATH` |
 
 Order, strongest first: command-line option, `.env`, what the last start remembered, a question on the
 console. Origins from `.env` are used but not written to the remembered settings, so deleting the line
@@ -51,6 +52,23 @@ mp3, m4a, aac, wav, ogg, oga, opus, flac, weba, webm, mp4, 3gp, amr, **wma** (an
 sends any of them, but **the browser has to play it**: Chrome, Firefox and Safari cannot play `.wma`
 (Edge on Windows may, depending on its codecs) — from what is known of those browsers, not tested here. Clew then says the browser cannot play the file; an mp3 or
 m4a copy plays everywhere.
+
+## Long mp3 files and Firefox
+
+Firefox seeks badly in a long mp3 that starts with a seek table (most do): after a click on a timestamp it can
+play in silence for seconds. The server sends such a file in a form that seeks exactly (`docs/22-audio-server.md`
+§8):
+
+- a **constant-bit-rate** mp3 (tag `Info`): the table is sent as zeros, the same length, so every size and
+  every `Range` is unchanged. Nothing to install.
+- a **variable-bit-rate** mp3 (tag `Xing` or `VBRI`): converted **once** with **ffmpeg** to a 128 kbit/s
+  constant-bit-rate mp3 and kept in a `cache` folder beside the config (at most 4 GB, least recently used
+  first). The first time a recording is opened it waits for the conversion (80 s for 89 minutes of sound on the
+  development machine). ffmpeg is looked for beside the program, then on `PATH`; `CLEW_AUDIO_FFMPEG` names it, or `off`
+  turns the conversion off. Without ffmpeg the file is sent as it is.
+
+The original file is never touched. The first sound of a re-encoded recording is about 25 ms later than in
+the original.
 
 ## Run it (standalone, no Python needed)
 
