@@ -391,6 +391,38 @@ class Mp3Conversion(Mp3Case):
         self.assertEqual(runs, [])
         self.assertEqual(len(list(Path(self.tmp.name, "cache").glob("*.mp3"))), 1)
 
+    def test_a_wma_file_is_sent_as_an_mp3(self):
+        made = subprocess.run(
+            [
+                self.FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=5",
+                "-c:a", "wmav2", str(self.root / "dictaphone.wma"),
+            ],
+            capture_output=True,
+        )
+        if made.returncode != 0:
+            self.skipTest("this ffmpeg cannot write wma")
+        _, _, raw = self.call("POST", "/api/url", self.auth(), {"path": "dictaphone.wma"})
+        told = json.loads(raw)
+        status, h, body = self.call("GET", told["url"])
+        self.assertEqual((status, h["content-type"]), (200, "audio/mpeg"))
+        self.assertEqual(len(body), told["size"])
+        self.assertTrue(body[0] == 0xFF or body.startswith(b"ID3"), body[:4])
+        # What the listing says about the file is still the file's own.
+        _, _, listing = self.call("GET", "/api/files", self.auth())
+        entry = next(f for f in json.loads(listing)["files"] if f["path"] == "dictaphone.wma")
+        self.assertEqual(entry["mime"], "audio/x-ms-wma")
+
+    def test_without_ffmpeg_a_wma_file_is_sent_as_it_is(self):
+        srv_seek = self.state.seek
+        self.state.seek = srv.Mp3Seek(None, Path(self.tmp.name, "cache2"))
+        try:
+            _, _, raw = self.call("POST", "/api/url", self.auth(), {"path": "old-dictaphone.WMA"})
+            told = json.loads(raw)
+            _, h, body = self.call("GET", told["url"])
+        finally:
+            self.state.seek = srv_seek
+        self.assertEqual((h["content-type"], body), ("audio/x-ms-wma", BYTES[:500]))
+
     def test_a_constant_bit_rate_file_is_not_converted(self):
         _, _, raw = self.call("POST", "/api/url", self.auth(), {"path": "cbr.mp3"})
         self.assertEqual(json.loads(raw)["size"], len(self.INFO))

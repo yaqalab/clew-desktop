@@ -49,13 +49,19 @@ server together, output prefixed `[audio]` and `[clew]`. See `scripts/dev.mjs`.
 ## Formats
 
 mp3, m4a, aac, wav, ogg, oga, opus, flac, weba, webm, mp4, 3gp, amr, **wma** (any letter case). The server
-sends any of them, but **the browser has to play it**: Chrome, Firefox and Safari cannot play `.wma`
-(Edge on Windows may, depending on its codecs) — from what is known of those browsers, not tested here. Clew then says the browser cannot play the file; an mp3 or
-m4a copy plays everywhere.
+sends any of them, but **the browser has to play it**. Chrome, Firefox and Safari cannot play `.wma` or
+`.amr` (Edge on Windows may play `.wma`, depending on its codecs: from what is known of those browsers).
+**With ffmpeg, the server converts a `.wma` or `.amr` file to an mp3 the first time it is opened** (below),
+and Clew plays that. Without ffmpeg Clew says the browser cannot play the file, and an mp3 or m4a copy
+plays everywhere.
 
-## Long mp3 files and Firefox
+## Conversion with ffmpeg: long mp3 files, .wma and .amr
 
-Firefox seeks badly in a long mp3 that starts with a seek table (most do): after a click on a timestamp it can
+**.wma and .amr:** no browser plays them, so with ffmpeg the server converts each to a 128 kbit/s
+constant-bit-rate mp3, once (checked in Firefox and Chromium on a .wma file made with ffmpeg's `wmav2`). Same
+cache, same wait on first open (a short recording is seconds), same `CLEW_AUDIO_FFMPEG` setting, below.
+
+**Long mp3 and Firefox.** Firefox seeks badly in a long mp3 that starts with a seek table (most do): after a click on a timestamp it can
 play in silence for seconds. The server sends such a file in a form that seeks exactly (`docs/22-audio-server.md`
 §8):
 
