@@ -22,6 +22,7 @@ What it promises
   mp3's table is blanked as it is sent (same length, nothing shifts), and a variable-bit-rate one is
   converted once, with ffmpeg, to a constant-bit-rate mp3 kept in a cache folder. Without ffmpeg it is
   sent as it is.
+- No browser plays .wma or .amr: with ffmpeg they are converted the same way, once, to an mp3.
 
 Settings, strongest first: command-line options, then a `.env` file next to this program
 (`.env.example` lists every key), then what the last start remembered, then a question on the console.
@@ -413,9 +414,15 @@ def find_ffmpeg(setting: str | None) -> str | None:
     return str(beside) if beside.is_file() else shutil.which("ffmpeg")
 
 
+# What no browser plays (the player's own message is "the browser cannot play this file"): these are
+# converted to an mp3 whenever ffmpeg is there.
+UNPLAYABLE = {".wma", ".amr"}
+
+
 class Mp3Seek:
-    """What the server does about Firefox's seeking in a long mp3: reads each file's first frame once,
-    and converts a variable-bit-rate file to a constant-bit-rate one with ffmpeg, once, into a cache."""
+    """What the server does to make a file play and seek: reads each mp3's first frame once, and converts
+    with ffmpeg, once, into a cache, a variable-bit-rate mp3 to a constant-bit-rate one and a format no
+    browser plays (`UNPLAYABLE`, such as .wma) to an mp3."""
 
     def __init__(self, ffmpeg: str | None, cache_dir: Path) -> None:
         self.ffmpeg = ffmpeg
@@ -453,13 +460,13 @@ class Mp3Seek:
         return None
 
     def convert(self, path: Path) -> Path | None:
-        """The converted copy of a variable-bit-rate mp3, making it first (a long file takes a while);
-        None when the file needs none, there is no ffmpeg, or ffmpeg failed. Concurrent calls for one
-        file wait for the one conversion."""
-        if self.ffmpeg is None or path.suffix.lower() != ".mp3":
+        """The converted copy, making it first (a long file takes a while); None when the file needs none,
+        there is no ffmpeg, or ffmpeg failed. Concurrent calls for one file wait for the one conversion."""
+        suffix = path.suffix.lower()
+        if self.ffmpeg is None or (suffix != ".mp3" and suffix not in UNPLAYABLE):
             return None
         try:
-            if self.head_of(path).kind not in ("xing", "vbri"):
+            if suffix == ".mp3" and self.head_of(path).kind not in ("xing", "vbri"):
                 return None
             target = self._target(path)
         except OSError:
@@ -725,7 +732,7 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
             try:
                 converted = state.seek.converted(path)
                 if converted is not None:
-                    path = converted
+                    path, mime = converted, "audio/mpeg"
                 elif mime == "audio/mpeg":
                     blank = state.seek.head_of(path).blank
                 size = path.stat().st_size
@@ -879,9 +886,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Also allowed to call it: {', '.join(sorted(state.origins))}")
     print(f"Folder: {root}  ({len(files)} audio files{', more than shown' if truncated else ''})")
     print(
-        f"ffmpeg: {ffmpeg} (variable-bit-rate mp3 files are converted for Firefox)"
+        f"ffmpeg: {ffmpeg} (variable-bit-rate mp3, .wma and .amr files are converted so that browsers play them)"
         if ffmpeg
-        else "ffmpeg: not found (variable-bit-rate mp3 files are sent as they are; docs/22 section 8)"
+        else "ffmpeg: not found (.wma and .amr cannot be played, and long variable-bit-rate mp3 files seek badly in Firefox; docs/22 section 8)"
     )
     if shown_secret:
         print()
