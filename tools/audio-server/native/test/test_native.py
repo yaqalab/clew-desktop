@@ -560,6 +560,47 @@ class Conversion(Case):
         finally:
             other.stop()
 
+    def test_the_file_being_opened_goes_before_preparing_ahead(self):
+        folder = Path(self.tmp.name, "priority")
+        folder.mkdir()
+        assert make(["-f", "lavfi", "-i", "sine=frequency=300:duration=2400", "-c:a", "wmav2"], folder / "a-long.wma")
+        assert make(["-f", "lavfi", "-i", "sine=frequency=500:duration=600", "-c:a", "wmav2"], folder / "b-open.wma")
+        cache = folder / ".clew-converted"
+        other = Server(folder, Path(self.tmp.name, "home-priority"))
+        try:
+            other.call("GET", "/api/files", other.auth())  # starts preparing a-long.wma
+            deadline = time.time() + 20
+            while time.time() < deadline and "converting a-long.wma" not in other.log:
+                time.sleep(0.05)
+            self.assertIn("converting a-long.wma", other.log)
+            counts = []
+            done = threading.Event()
+
+            def watch():
+                while not done.is_set():
+                    counts.append(converter_count())
+
+            watcher = threading.Thread(target=watch)
+            watcher.start()
+            try:
+                info = other.link("b-open.wma")
+            finally:
+                done.set()
+                watcher.join()
+            # Only the opened file was converting: preparing ahead stopped and waited.
+            self.assertTrue(counts and max(counts) <= 1, counts)
+            self.assertIn("preparing a-long.wma paused for the file being opened", other.log)
+            self.assertEqual(len(list(cache.glob("*.mp3"))), 1)  # the opened one only
+            self.assertGreater(info["size"], 0)
+            # Then preparing resumes and finishes.
+            deadline = time.time() + 120
+            while time.time() < deadline and len(list(cache.glob("*.mp3"))) < 2:
+                time.sleep(0.25)
+            self.assertEqual(len(list(cache.glob("*.mp3"))), 2)
+            self.assertFalse([line for line in other.log if line.startswith("could not convert")])
+        finally:
+            other.stop()
+
     def test_the_converter_runs_sandboxed_at_low_integrity(self):
         long = Path(self.tmp.name, "long")
         long.mkdir()
@@ -592,6 +633,36 @@ def converter_pid():
         capture_output=True, text=True,
     ).stdout.split()
     return int(out[0]) if out else None
+
+
+def converter_count():
+    """How many converter children run now (Windows' process list, via the Tool Help API)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Entry(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_void_p), ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_wchar * 260),
+        ]
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    entry = Entry()
+    entry.dwSize = ctypes.sizeof(Entry)
+    by_pid, ok = {}, k32.Process32FirstW(snap, ctypes.byref(entry))
+    while ok:
+        by_pid[entry.th32ProcessID] = (entry.szExeFile.lower(), entry.th32ParentProcessID)
+        ok = k32.Process32NextW(snap, ctypes.byref(entry))
+    k32.CloseHandle(snap)
+    # A converter is the program started by the program.
+    return sum(
+        1 for name, parent in by_pid.values()
+        if name == "clew-audio-server.exe" and by_pid.get(parent, ("",))[0] == "clew-audio-server.exe"
+    )
 
 
 def integrity_of(pid):

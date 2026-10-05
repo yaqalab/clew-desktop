@@ -24,6 +24,7 @@
 #include <thread>
 
 #include "mp3.h"
+#include "platform.h"
 
 namespace clew {
 
@@ -31,9 +32,12 @@ namespace fs = std::filesystem;
 
 class ConvertCache {
 public:
-    using ConvertFn = std::function<bool(const fs::path& in, const fs::path& out, std::string* why)>;
+    using ConvertFn = std::function<bool(const fs::path& in, const fs::path& out,
+                                         const platform::ConvertControl& control, std::string* why)>;
     // Called with the file's name when a conversion starts, and with "" when none is running.
     using BusyFn = std::function<void(const std::string& name)>;
+    // A line for the activity list.
+    using NoteFn = std::function<void(const std::string& line)>;
 
     ConvertCache(fs::path dir, ConvertFn convert);
 
@@ -47,6 +51,7 @@ public:
     void set_limit_bytes(std::uint64_t n) { limit_ = n; }
     void set_prepare(bool on) { prepare_ = on; }
     void set_on_busy(BusyFn fn);
+    void set_on_note(NoteFn fn);
 
     Mp3Head head_of(const fs::path& path);
     // Whether `path` is converted before it is sent (a variable-bit-rate mp3, .wma or .amr).
@@ -55,6 +60,8 @@ public:
     std::optional<fs::path> converted(const fs::path& path);
     // The converted copy, made first if needed (a long file takes a while); nothing when the file
     // needs none, conversion is off, or it failed. Concurrent calls for one file share one run.
+    // This is the file someone is opening: it goes first. Preparing another file ahead is stopped
+    // and put back in the queue, and nothing is prepared until every such call has finished.
     std::optional<fs::path> convert(const fs::path& path);
 
     // Converts these ahead, one at a time, in the background, while the cache is under half its
@@ -66,6 +73,8 @@ public:
 
 private:
     fs::path target_of(const fs::path& path, const fs::path& dir) const;
+    std::optional<fs::path> run(const fs::path& path, bool background);
+    void note(const std::string& line);
     void trim(const fs::path& keep);
     void worker();
     void busy(const std::string& name);
@@ -86,7 +95,13 @@ private:
     std::map<fs::path, Seen> heads_;
     std::set<fs::path> failed_;  // not retried by the background queue in this run
     BusyFn on_busy_;
+    NoteFn on_note_;
     int running_ = 0;
+    std::atomic<int> opening_{0};          // conversions of files someone is opening
+    std::atomic<bool> stop_preparing_{false};
+    fs::path preparing_;                   // the file being prepared ahead, under lock_
+    bool preparing_runs_ = false;          // its converter process is running, under lock_
+    std::condition_variable preparing_ended_;
 
     std::mutex queue_lock_;
     std::condition_variable queue_cv_;

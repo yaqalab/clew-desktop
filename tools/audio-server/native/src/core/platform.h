@@ -2,6 +2,7 @@
 // (compatible, not built or tested yet; see the README).
 #pragma once
 
+#include <atomic>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -28,13 +29,22 @@ fs::path config_dir();
 // Whether this system can convert audio without any extra program.
 bool can_convert();
 
+// How one conversion runs: the file someone is opening goes first; preparing ahead runs at idle
+// priority and stops at once when `cancel` is set (it is put back in the queue, not marked failed).
+struct ConvertControl {
+    bool background = false;
+    const std::atomic<bool>* cancel = nullptr;
+    bool cancelled() const { return cancel && cancel->load(); }
+};
+
 // Writes `in` as a 128 kbit/s constant-bit-rate mp3 with no seek table to `out`, with the system's
 // own codecs. Runs isolated from the server where the system allows (Windows: a low-integrity child
 // process in a job object).
-bool convert_to_mp3(const fs::path& in, const fs::path& out, std::string* why);
+bool convert_to_mp3(const fs::path& in, const fs::path& out, const ConvertControl& control, std::string* why);
 
 // The same with an ffmpeg program the user chose (optional, a fallback; nothing is linked).
-bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& out, std::string* why);
+bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& out, const ConvertControl& control,
+                   std::string* why);
 
 // An ffmpeg beside this program, else on PATH; empty when none.
 fs::path find_ffmpeg();

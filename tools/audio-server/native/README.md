@@ -39,7 +39,7 @@ the server running.
 | Other Clew addresses | a Clew hosted on the web (`https://you.github.io`); a Clew on this computer is always allowed |
 | Secret | Show / Copy / New secret. A new secret stops the old one at once |
 | Convert … | converts .wma, .amr and long variable-bit-rate .mp3 so every browser plays and seeks them |
-| Prepare … in the background | converts .wma and .amr files as soon as Clew lists the folder, so they open at once |
+| Prepare … in the background | converts .wma and .amr files as soon as Clew lists the folder, so they open at once. The file you open always goes first: preparing stops, waits, and picks up again afterwards |
 | ffmpeg (optional) | only used when Windows itself cannot convert a file |
 | Cache limit | converted copies are kept up to this size, the oldest removed first |
 

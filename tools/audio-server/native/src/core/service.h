@@ -62,7 +62,8 @@ public:
 private:
     void notify();
     void record(const std::string& line);
-    bool convert(const std::filesystem::path& in, const std::filesystem::path& out, std::string* why);
+    bool convert(const std::filesystem::path& in, const std::filesystem::path& out,
+                 const platform::ConvertControl& control, std::string* why);
     ServerConfig server_config(const Settings& s, std::string* problem);
 
     std::filesystem::path settings_file_;
