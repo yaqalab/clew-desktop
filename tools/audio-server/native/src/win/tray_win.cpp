@@ -1,5 +1,5 @@
-// The tray icon and the settings window. The icon is Clew's "c" mark, ink on a light taskbar and cream
-// on a dark one: as it is when Clew can reach the files, faded when stopped or something needs the
+// The tray icon and the settings window. The icon is Clew's labyrinth tile, the dark one on a light taskbar and
+// the light one on a dark taskbar: as it is when Clew can reach the files, faded when stopped or something needs the
 // user, with a badge while converting. One click opens the settings; the right-click
 // menu has the everyday actions. Closing the window keeps the server running; "Quit" stops it.
 #include <windows.h>
@@ -47,7 +47,23 @@ struct App {
     std::atomic<bool> status_pending{false};
     bool secret_visible = false;
     bool stopped_by_user = false;
+    // A fixed identity for the tray icon: Windows then keeps the user's "show in the taskbar" choice
+    // across updates. Windows ties it to the signed program; when it refuses, the icon goes by id.
+    bool use_guid = true;
 } g;
+
+// {9C2E6B1A-4F7D-4E3B-8A1C-5D0F2B7E9A43}
+const GUID kTrayGuid = {0x9c2e6b1a, 0x4f7d, 0x4e3b, {0x8a, 0x1c, 0x5d, 0x0f, 0x2b, 0x7e, 0x9a, 0x43}};
+
+void identify(NOTIFYICONDATAW& nid) {
+    nid.cbSize = sizeof nid;
+    nid.hWnd = g.hwnd;
+    nid.uID = 1;
+    if (g.use_guid) {
+        nid.uFlags |= NIF_GUID;
+        nid.guidItem = kTrayGuid;
+    }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -186,14 +202,23 @@ void tray(DWORD message) {
                        : !st.problem.empty()             ? trf(S::TipProblem, problem_text(st.problem, st.port).c_str())
                                                          : trf(S::TipRunning, st.port);
     NOTIFYICONDATAW nid{};
-    nid.cbSize = sizeof nid;
-    nid.hWnd = g.hwnd;
-    nid.uID = 1;
     nid.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP | NIF_MESSAGE;
+    identify(nid);
     nid.uCallbackMessage = WM_APP_TRAY;
     LoadIconMetric(g.inst, MAKEINTRESOURCEW(icon), LIM_SMALL, &nid.hIcon);
     wcsncpy_s(nid.szTip, tip.c_str(), _TRUNCATE);
-    Shell_NotifyIconW(message, &nid);
+    if (!Shell_NotifyIconW(message, &nid) && message == NIM_ADD && g.use_guid) {
+        // A copy that ended without removing its icon still holds the identity: remove, then retry.
+        NOTIFYICONDATAW stale{};
+        identify(stale);
+        Shell_NotifyIconW(NIM_DELETE, &stale);
+        if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
+            // Windows ties the identity to another copy of the program: go by id instead.
+            g.use_guid = false;
+            nid.uFlags &= ~NIF_GUID;
+            Shell_NotifyIconW(NIM_ADD, &nid);
+        }
+    }
     if (message == NIM_ADD) {
         nid.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIconW(NIM_SETVERSION, &nid);
@@ -497,9 +522,7 @@ LRESULT CALLBACK tray_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_DESTROY: {
             NOTIFYICONDATAW nid{};
-            nid.cbSize = sizeof nid;
-            nid.hWnd = hwnd;
-            nid.uID = 1;
+            identify(nid);
             Shell_NotifyIconW(NIM_DELETE, &nid);
             PostQuitMessage(0);
             return 0;

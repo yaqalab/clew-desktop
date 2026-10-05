@@ -8,18 +8,22 @@ tray icon and a settings window; it needs no Python and no ffmpeg.
 
 1. Install it with `clew-audio-server-setup-<version>.exe` (no administrator rights needed).
 2. The settings window opens. Choose **the folder of your audio files** and press **Save**.
-   The tray icon, Clew's "c" mark, shows in full: Clew can reach the files.
+   The tray icon, Clew's labyrinth, shows in full: Clew can reach the files.
 3. Press **Copy** next to the secret, and paste it into Clew under **"From the audio server…"**.
 
 After that the server starts with Windows (if you left that ticked) and Clew finds it on its own.
 
+Windows 11 first puts a new tray icon under the **^** beside the clock. To keep it in sight, drag it onto
+the taskbar, or turn it on in *Settings → Personalization → Taskbar → Other system tray icons*; the
+choice is kept when the program is updated.
+
 | Tray icon | Means |
 |---|---|
-| the "c" mark in full | running; Clew can list and play the folder |
+| the labyrinth in full | running; Clew can list and play the folder |
 | with a round badge | converting a file (a .wma, .amr or long variable-bit-rate .mp3) |
 | faded | stopped, or something needs you (the window says what) |
 
-The mark is ink on a light taskbar and cream on a dark one, and follows a switch at once.
+The dark tile shows on a light taskbar and the light tile on a dark one; it follows a switch at once.
 
 One click on the icon opens the settings; a right click has *Copy the secret*, *Copy the address*,
 *Open the audio folder*, *Stop / Start*, *Start with Windows* and *Quit*. Closing the window keeps
