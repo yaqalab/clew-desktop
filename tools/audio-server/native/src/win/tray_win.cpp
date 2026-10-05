@@ -1,5 +1,5 @@
-// The tray icon and the settings window. The icon is Clew's labyrinth tile, the dark one on a light taskbar and
-// the light one on a dark taskbar: as it is when Clew can reach the files, faded when stopped or something needs the
+// The tray icon and the settings window. The icon is Clew's "c" mark, ink on a light taskbar and cream
+// on a dark one: as it is when Clew can reach the files, faded when stopped or something needs the
 // user, with a badge while converting. One click opens the settings; the right-click
 // menu has the everyday actions. Closing the window keeps the server running; "Quit" stops it.
 #include <windows.h>
