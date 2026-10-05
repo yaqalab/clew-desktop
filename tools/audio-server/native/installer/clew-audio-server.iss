@@ -17,7 +17,7 @@ AppId={{6F3C1E2A-8B4D-4C9E-9A57-2D1B7E0C4F93}
 AppName=Clew Audio Server
 AppVersion={#AppVersion}
 AppVerName=Clew Audio Server {#AppVersion}
-AppPublisher=F. R. Andriariniaina
+AppPublisher=YaqaLab
 VersionInfoVersion={#AppVersion}
 DefaultDirName={autopf}\Clew Audio Server
 DefaultGroupName=Clew
@@ -35,6 +35,12 @@ UninstallDisplayName=Clew Audio Server
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Signed with the YaqaLab certificate when build-installer.cmd finds one (it defines Sign and the
+; "yaqalab" sign tool); the uninstaller is signed too.
+#ifdef Sign
+SignTool=yaqalab
+SignedUninstaller=yes
+#endif
 ; Close a running copy before files are replaced (it answers the session-end messages).
 CloseApplications=yes
 RestartApplications=no
