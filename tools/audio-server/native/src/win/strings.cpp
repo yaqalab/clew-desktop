@@ -46,20 +46,20 @@ const Pair kStrings[] = {
     {S::LinkHours, L"Play links last (hours)", L"再生リンクの有効期間（時間）"},
     {S::Origins, L"Other Clew addresses allowed to connect, one per line (a Clew on this computer is always allowed):", L"接続を許可する他の Clew のアドレス（1 行に 1 つ。このコンピューター上の Clew は常に許可されます）："},
     {S::GroupSecret, L"Secret", L"シークレット"},
-    {S::SecretHint, L"Paste it into Clew under “From the audio server…”. It is kept encrypted for your Windows account.", L"Clew の「オーディオサーバーから…」に貼り付けてください。Windows アカウント用に暗号化して保存されています。"},
+    {S::SecretHint, L"Paste it into Clew (“From the audio server…”). Kept encrypted for your Windows account.", L"Clew の「オーディオサーバーから…」に貼り付けてください。Windows アカウント用に暗号化して保存。"},
     {S::Show, L"Show", L"表示"},
     {S::Hide, L"Hide", L"隠す"},
     {S::Copy, L"Copy", L"コピー"},
-    {S::NewSecret, L"New secret…", L"新しいシークレット…"},
+    {S::NewSecret, L"New secret…", L"作り直す…"},
     {S::NewSecretConfirm, L"Make a new secret?\n\nThe one Clew has stops working at once; you then paste the new one into Clew.", L"新しいシークレットを作成しますか？\n\nClew に保存されているシークレットはすぐに使えなくなります。新しいシークレットを Clew に貼り付けてください。"},
     {S::GroupConversion, L"Conversion", L"変換"},
     {S::Convert, L"Convert what browsers cannot play well (WMA, AMR, variable-bit-rate MP3) with Windows' own codecs", L"ブラウザーで正しく再生できないファイル（WMA、AMR、可変ビットレート MP3）を Windows 標準のコーデックで変換する"},
     {S::Prepare, L"Prepare WMA and AMR files in the background, so they open at once", L"WMA と AMR ファイルをバックグラウンドで事前に変換し、すぐに開けるようにする"},
     {S::Ffmpeg, L"ffmpeg (optional)", L"ffmpeg（任意）"},
     {S::FfmpegFind, L"Find", L"検索"},
-    {S::FfmpegHint, L"Only used when Windows cannot convert a file. Leave empty to never use it.", L"Windows で変換できない場合にのみ使用します。使用しない場合は空欄のままにしてください。"},
+    {S::FfmpegHint, L"Used only when Windows cannot convert a file; empty: never.", L"Windows で変換できない場合のみ使用（空欄：使用しない）。"},
     {S::FfmpegNotFound, L"No ffmpeg.exe was found beside this program or on PATH.", L"このプログラムと同じ場所や PATH に ffmpeg.exe が見つかりませんでした。"},
-    {S::CacheLimit, L"Cache limit (MB)", L"キャッシュ上限（MB）"},
+    {S::CacheLimit, L"Cache limit (MB)", L"キャッシュ（MB）"},
     {S::CacheUsed, L"%s in use", L"使用中: %s"},
     {S::ClearCache, L"Clear cache", L"キャッシュを消去"},
     {S::Autostart, L"Start with Windows", L"Windows の起動時に開始"},
@@ -83,8 +83,13 @@ const Pair kStrings[] = {
 };
 // clang-format on
 
+// Windows' display language, unless CLEW_AUDIO_LANG says "en" or "ja".
 bool japanese() {
-    static const bool ja = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_JAPANESE;
+    static const bool ja = [] {
+        wchar_t forced[8] = {};
+        if (GetEnvironmentVariableW(L"CLEW_AUDIO_LANG", forced, 8) > 0) return wcscmp(forced, L"ja") == 0;
+        return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_JAPANESE;
+    }();
     return ja;
 }
 

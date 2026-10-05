@@ -169,9 +169,11 @@ std::string Service::apply(Settings s, bool persist) {
     cache_->set_prepare(s.prepare);
     cache_->set_limit_bytes(std::uint64_t(s.cache_mb) * 1024 * 1024);
     std::string problem;
-    server_->configure(server_config(s, &problem));
-    if (server_->running() && old_port != s.port) server_->stop();
-    std::string start_problem = server_->running() ? "" : start();
+    ServerConfig config = server_config(s, &problem);
+    server_->configure(config);
+    // Without a folder there is nothing to serve: not listening says so more plainly than a 503.
+    if (server_->running() && (old_port != s.port || config.root.empty())) server_->stop();
+    std::string start_problem = server_->running() || config.root.empty() ? "" : start();
     {
         std::lock_guard<std::mutex> g(lock_);
         problem_ = !start_problem.empty() ? start_problem : problem;
