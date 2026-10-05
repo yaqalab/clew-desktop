@@ -32,7 +32,7 @@ const Pair kStrings[] = {
     {S::MenuStart, L"Start the server", L"サーバーを開始"},
     {S::MenuAutostart, L"Start with Windows", L"Windows の起動時に開始"},
     {S::MenuQuit, L"Quit", L"終了"},
-    {S::StatusRunning, L"Running — http://127.0.0.1:%d · %llu requests so far", L"実行中 — http://127.0.0.1:%d · これまでのリクエスト %llu 件"},
+    {S::StatusRunning, L"Running — http://127.0.0.1:%d · requests so far: %llu", L"実行中 — http://127.0.0.1:%d · これまでのリクエスト: %llu 件"},
     {S::StatusStopped, L"Stopped. Clew cannot reach your audio files until it starts again.", L"停止中です。再開するまで Clew から音声ファイルにアクセスできません。"},
     {S::StatusProblem, L"Not running: %s", L"停止中: %s"},
     {S::ProblemNoFolder, L"choose the folder of your audio files below.", L"下で音声ファイルのフォルダーを選択してください。"},

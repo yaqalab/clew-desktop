@@ -51,7 +51,7 @@ class Server:
         self.proc = subprocess.Popen(
             [
                 str(EXE), "--headless", "--folder", str(folder), "--port", "0",
-                "--config", str(Path(home, "settings.json")), "--cache-dir", str(Path(home, "cache")), *extra,
+                "--config", str(Path(home, "settings.json")), *extra,
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -498,6 +498,19 @@ class Conversion(Case):
         self.assertEqual(again["size"], info["size"])
         self.assertEqual(sum(1 for line in self.server.log if line == "converting real-vbr.mp3"), 1)
 
+    def test_copies_stay_beside_the_recordings_and_are_never_listed_or_served(self):
+        self.converted("dictaphone.wma")
+        cache = self.root / ".clew-converted"
+        copies = list(cache.glob("*.mp3"))
+        self.assertTrue(copies)
+        self.assertTrue((cache / "README.txt").is_file())
+        # Nothing about the recording's name in the copy's name.
+        self.assertFalse([c for c in copies if "dictaphone" in c.name])
+        _, _, listing = self.call("GET", "/api/files", self.server.auth())
+        self.assertFalse([f for f in json.loads(listing)["files"] if ".clew-converted" in f["path"]])
+        rel = ".clew-converted/" + copies[0].name
+        self.assertEqual(self.call("POST", "/api/url", self.server.auth(), {"path": rel})[0], 404)
+
     def test_a_constant_bit_rate_file_is_not_converted(self):
         info = self.server.link("real-cbr.mp3")
         self.assertEqual(info["size"], (self.root / "real-cbr.mp3").stat().st_size)
@@ -538,9 +551,9 @@ class Conversion(Case):
         try:
             other.call("GET", "/api/files", other.auth())
             deadline = time.time() + 30
-            while time.time() < deadline and not list(Path(self.tmp.name, "home2", "cache").glob("*.mp3")):
+            while time.time() < deadline and not list((fresh / ".clew-converted").glob("*.mp3")):
                 time.sleep(0.2)
-            self.assertEqual(len(list(Path(self.tmp.name, "home2", "cache").glob("*.mp3"))), 1)
+            self.assertEqual(len(list((fresh / ".clew-converted").glob("*.mp3"))), 1)
             t = time.time()
             other.link("later.amr")
             self.assertLess(time.time() - t, 1.0)

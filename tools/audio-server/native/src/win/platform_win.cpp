@@ -243,7 +243,6 @@ std::optional<std::string> open_secret(const Sealed& sealed) {
 
 fs::path config_dir() { return known_folder(FOLDERID_RoamingAppData) / "clew-audio-server"; }
 
-fs::path cache_dir() { return known_folder(FOLDERID_LocalAppData) / "clew-audio-server" / "cache"; }
 
 fs::path self_path() {
     std::wstring buf(MAX_PATH, L'\0');

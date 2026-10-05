@@ -122,5 +122,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         if (a == L"--headless" || a == L"--help" || a == L"-h" || a == L"--version") console_mode = true;
     }
     if (console_mode) return headless(args);
+    if (wargs.size() == 1 && wargs[0] == L"--quit") return clew::win::quit_running();
     return clew::win::run_tray(instance);
 }

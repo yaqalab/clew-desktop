@@ -64,16 +64,6 @@ fs::path config_dir() {
 #endif
 }
 
-fs::path cache_dir() {
-    const char* home = std::getenv("HOME");
-#if defined(__APPLE__)
-    return fs::path(home ? home : ".") / "Library" / "Caches" / "clew-audio-server";
-#else
-    const char* xdg = std::getenv("XDG_CACHE_HOME");
-    return (xdg && *xdg ? fs::path(xdg) : fs::path(home ? home : ".") / ".cache") / "clew-audio-server";
-#endif
-}
-
 fs::path self_path() {
 #if defined(__APPLE__)
     char buf[4096];

@@ -24,7 +24,7 @@ const char* const kHeadlessHelp =
     "  --show-secret          print the secret\n"
     "  --reset-secret         make a new secret (saved); the old one stops working\n"
     "  --config <file>        the settings file (default: the settings window's)\n"
-    "  --cache-dir <dir>      where converted files are kept\n"
+    "  --cache-dir <dir>      where converted copies go (default: .clew-converted in the folder)\n"
     "  --version\n";
 
 namespace {
@@ -91,7 +91,7 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
     }
 
     Service svc(config.empty() ? default_settings_file() : path_from_utf8(config),
-                cache_dir.empty() ? platform::cache_dir() : path_from_utf8(cache_dir), console.err);
+                cache_dir.empty() ? std::filesystem::path() : path_from_utf8(cache_dir), console.err);
     Settings s = svc.settings();
     if (!folder.empty()) s.folder = path_to_utf8(std::filesystem::absolute(path_from_utf8(folder)));
     if (port >= 0) s.port = port;

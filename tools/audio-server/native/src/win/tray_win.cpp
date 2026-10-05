@@ -495,6 +495,18 @@ LRESULT CALLBACK tray_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
+int quit_running() {
+    HWND other = FindWindowW(kWindowClass, nullptr);
+    if (!other) return 0;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(other, &pid);
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    PostMessageW(other, WM_CLOSE, 0, 0);
+    DWORD waited = process ? WaitForSingleObject(process, 10000) : WAIT_FAILED;
+    if (process) CloseHandle(process);
+    return waited == WAIT_OBJECT_0 ? 0 : 1;
+}
+
 int run_tray(HINSTANCE instance) {
     // One server per Windows session: a second start opens the first one's window instead.
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutex);
@@ -515,7 +527,7 @@ int run_tray(HINSTANCE instance) {
     InitCommonControlsEx(&icc);
 
     g.inst = instance;
-    static Service svc(default_settings_file(), platform::cache_dir(), nullptr);
+    static Service svc(default_settings_file(), {}, nullptr);
     g.svc = &svc;
 
     WNDCLASSEXW wc{sizeof wc};

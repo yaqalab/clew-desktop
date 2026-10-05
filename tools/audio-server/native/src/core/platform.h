@@ -22,9 +22,8 @@ struct Sealed {
 std::optional<Sealed> seal_secret(const std::string& plain);
 std::optional<std::string> open_secret(const Sealed& sealed);
 
-// Roaming settings, and a machine-local cache (converted files are large).
+// Where the settings are kept (roaming). Converted copies stay in the served folder (convert_cache.h).
 fs::path config_dir();
-fs::path cache_dir();
 
 // Whether this system can convert audio without any extra program.
 bool can_convert();

@@ -1,6 +1,7 @@
 #include "convert_cache.h"
 
 #include <algorithm>
+#include <fstream>
 #include <vector>
 
 #include "files.h"
@@ -33,6 +34,37 @@ bool unplayable(const fs::path& path) {
 ConvertCache::ConvertCache(fs::path dir, ConvertFn convert) : dir_(std::move(dir)), convert_(std::move(convert)) {
     worker_ = std::thread([this] { worker(); });
 }
+
+void ConvertCache::set_dir(fs::path dir) {
+    std::lock_guard<std::mutex> g(lock_);
+    dir_ = std::move(dir);
+}
+
+fs::path ConvertCache::dir() const {
+    std::lock_guard<std::mutex> g(lock_);
+    return dir_;
+}
+
+namespace {
+
+// Said once, inside the cache folder, for whoever opens it.
+const char kReadme[] =
+    "Clew audio server: converted copies\r\n"
+    "\r\n"
+    "These are copies of recordings in the folder above, converted so that every browser can play\r\n"
+    "them (.wma and .amr files, and long variable-bit-rate .mp3 files). The originals are untouched.\r\n"
+    "They are as private as the recordings themselves, which is why they are kept here, beside them.\r\n"
+    "\r\n"
+    "Deleting this folder is safe: a copy is made again when the recording is next opened in Clew.\r\n";
+
+void write_readme(const fs::path& dir) {
+    std::error_code ec;
+    auto file = dir / "README.txt";
+    if (fs::exists(file, ec)) return;
+    std::ofstream(file, std::ios::binary) << kReadme;
+}
+
+}  // namespace
 
 ConvertCache::~ConvertCache() {
     {
@@ -83,27 +115,31 @@ bool ConvertCache::needs(const fs::path& path) {
     return kind == Mp3Head::Xing || kind == Mp3Head::Vbri;
 }
 
-fs::path ConvertCache::target_of(const fs::path& path) const {
+fs::path ConvertCache::target_of(const fs::path& path, const fs::path& dir) const {
     std::error_code ec;
     auto size = fs::file_size(path, ec);
     auto mtime = fs::last_write_time(path, ec).time_since_epoch().count();
     std::string key = path_to_utf8(path) + "\n" + std::to_string(mtime) + "\n" + std::to_string(size) + "\n" +
                       std::to_string(kConvertKbps) + "\nsystem-codec-1";
-    return dir_ / (hex(sha256(key), 16) + ".mp3");
+    return dir / (hex(sha256(key), 16) + ".mp3");
 }
 
 std::optional<fs::path> ConvertCache::converted(const fs::path& path) {
+    fs::path d = dir();
+    if (d.empty()) return std::nullopt;
     std::error_code ec;
-    auto hit = target_of(path);
+    auto hit = target_of(path, d);
+    // Its time is not touched on use: in a synced folder that would upload the copy again at every
+    // play. So the trimming removes the oldest copies first.
     if (!fs::is_regular_file(hit, ec)) return std::nullopt;
-    // The most recently used survives the trimming.
-    fs::last_write_time(hit, fs::file_time_type::clock::now(), ec);
     return hit;
 }
 
 std::optional<fs::path> ConvertCache::convert(const fs::path& path) {
     if (!needs(path)) return std::nullopt;
-    auto target = target_of(path);
+    fs::path d = dir();
+    if (d.empty()) return std::nullopt;
+    auto target = target_of(path, d);
     std::shared_ptr<std::mutex> once;
     {
         std::lock_guard<std::mutex> g(lock_);
@@ -115,7 +151,8 @@ std::optional<fs::path> ConvertCache::convert(const fs::path& path) {
         std::lock_guard<std::mutex> g(*once);
         if (auto hit = converted(path)) return hit;
         std::error_code ec;
-        fs::create_directories(dir_, ec);
+        fs::create_directories(d, ec);
+        write_readme(d);
         auto part = target;
         part.replace_extension(".part");
         {
@@ -154,7 +191,7 @@ void ConvertCache::trim(const fs::path& keep) {
     std::vector<Item> items;
     std::uint64_t total = 0;
     std::error_code ec;
-    for (const auto& e : fs::directory_iterator(dir_, ec)) {
+    for (const auto& e : fs::directory_iterator(keep.parent_path(), ec)) {
         if (e.path().extension() != ".mp3") continue;
         std::error_code ec2;
         Item it{e.last_write_time(ec2), e.file_size(ec2), e.path()};
@@ -206,17 +243,21 @@ void ConvertCache::worker() {
 
 std::uint64_t ConvertCache::bytes_on_disk() const {
     std::uint64_t total = 0;
+    fs::path d = dir();
+    if (d.empty()) return 0;
     std::error_code ec;
-    for (const auto& e : fs::directory_iterator(dir_, ec)) {
+    for (const auto& e : fs::directory_iterator(d, ec)) {
         std::error_code ec2;
-        if (e.is_regular_file(ec2)) total += e.file_size(ec2);
+        if (e.is_regular_file(ec2) && e.path().extension() == ".mp3") total += e.file_size(ec2);
     }
     return total;
 }
 
 void ConvertCache::clear() {
+    fs::path d = dir();
+    if (d.empty()) return;
     std::error_code ec;
-    for (const auto& e : fs::directory_iterator(dir_, ec)) {
+    for (const auto& e : fs::directory_iterator(d, ec)) {
         auto ext = e.path().extension();
         if (ext == ".mp3" || ext == ".part") {
             std::error_code ec2;

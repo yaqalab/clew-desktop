@@ -2,6 +2,11 @@
 // once, and converts, once, into a cache, a variable-bit-rate mp3 to a constant-bit-rate one and a
 // format no browser plays (.wma, .amr) to an mp3. The conversion itself is the system's
 // (platform::convert_to_mp3: Media Foundation on Windows); no ffmpeg.
+//
+// The cache lives inside the served folder (kCacheFolder), not in the user's profile: the copies are
+// as sensitive as the interviews, so they stay wherever the researcher chose to keep those (an
+// encrypted drive, a synced folder...). Its name starts with a dot, so the folder rules never list
+// it or serve from it directly.
 #pragma once
 
 #include <atomic>
@@ -31,6 +36,10 @@ public:
     using BusyFn = std::function<void(const std::string& name)>;
 
     ConvertCache(fs::path dir, ConvertFn convert);
+
+    // Where copies go from now on; empty: nowhere (nothing is converted).
+    void set_dir(fs::path dir);
+    fs::path dir() const;
     ~ConvertCache();
 
     void set_enabled(bool on) { enabled_ = on; }
@@ -38,7 +47,6 @@ public:
     void set_limit_bytes(std::uint64_t n) { limit_ = n; }
     void set_prepare(bool on) { prepare_ = on; }
     void set_on_busy(BusyFn fn);
-    const fs::path& dir() const { return dir_; }
 
     Mp3Head head_of(const fs::path& path);
     // Whether `path` is converted before it is sent (a variable-bit-rate mp3, .wma or .amr).
@@ -57,7 +65,7 @@ public:
     void clear();
 
 private:
-    fs::path target_of(const fs::path& path) const;
+    fs::path target_of(const fs::path& path, const fs::path& dir) const;
     void trim(const fs::path& keep);
     void worker();
     void busy(const std::string& name);
@@ -68,7 +76,7 @@ private:
     std::atomic<bool> prepare_{true};
     std::atomic<std::uint64_t> limit_{4ull * 1024 * 1024 * 1024};
 
-    std::mutex lock_;
+    mutable std::mutex lock_;
     std::map<std::string, std::shared_ptr<std::mutex>> once_;
     struct Seen {
         std::int64_t mtime;
@@ -90,5 +98,8 @@ private:
 
 // The extensions no browser plays.
 bool unplayable(const fs::path& path);
+
+// The cache's name inside the served folder.
+constexpr const char* kCacheFolder = ".clew-converted";
 
 }  // namespace clew

@@ -25,7 +25,7 @@ std::string clock_now() {
 }  // namespace
 
 Service::Service(std::filesystem::path settings_file, std::filesystem::path cache_dir, LogFn log)
-    : settings_file_(std::move(settings_file)), log_(std::move(log)) {
+    : settings_file_(std::move(settings_file)), forced_cache_dir_(cache_dir), log_(std::move(log)) {
     settings_ = Settings::load(settings_file_);
     cache_ = std::make_unique<ConvertCache>(
         std::move(cache_dir), [this](const auto& in, const auto& out, std::string* why) { return convert(in, out, why); });
@@ -170,6 +170,9 @@ std::string Service::apply(Settings s, bool persist) {
     cache_->set_limit_bytes(std::uint64_t(s.cache_mb) * 1024 * 1024);
     std::string problem;
     ServerConfig config = server_config(s, &problem);
+    cache_->set_dir(!forced_cache_dir_.empty() ? forced_cache_dir_
+                    : config.root.empty()      ? std::filesystem::path()
+                                               : config.root / kCacheFolder);
     server_->configure(config);
     // Without a folder there is nothing to serve: not listening says so more plainly than a 503.
     if (server_->running() && (old_port != s.port || config.root.empty())) server_->stop();

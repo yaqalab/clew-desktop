@@ -21,6 +21,8 @@ class Service {
 public:
     using LogFn = std::function<void(const std::string& line)>;
 
+    // `cache_dir` empty: converted copies go to kCacheFolder inside the served folder (the normal
+    // case); otherwise there (the tests).
     Service(std::filesystem::path settings_file, std::filesystem::path cache_dir, LogFn log);
     ~Service();
 
@@ -64,6 +66,7 @@ private:
     ServerConfig server_config(const Settings& s, std::string* problem);
 
     std::filesystem::path settings_file_;
+    std::filesystem::path forced_cache_dir_;
     LogFn log_;
     mutable std::mutex lock_;
     Settings settings_;
