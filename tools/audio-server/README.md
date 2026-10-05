@@ -3,6 +3,10 @@
 Lets Clew list and play the audio files in one folder of your computer, without asking for the
 file with the browser's chooser each visit. Design and security model: `docs/22-audio-server.md`.
 
+**On Windows, use the native server instead:** `native/` (a tray icon, a settings window, an
+installer, conversion with Windows' own codecs; no Python, no ffmpeg; `docs/22` §10). This Python
+server stays as a backup and for macOS and Linux. The two keep different secrets.
+
 ## Run it (development)
 
 ```

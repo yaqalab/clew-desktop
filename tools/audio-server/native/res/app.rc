@@ -1,0 +1,86 @@
+// Texts are set at run time from src/win/strings.cpp (English or Japanese); the ones here are
+// placeholders for the resource editor only.
+#include <windows.h>
+#include "resource.h"
+
+IDI_APP       ICON "icons/app.ico"
+IDI_TRAY_ON   ICON "icons/tray-on.ico"
+IDI_TRAY_OFF  ICON "icons/tray-off.ico"
+IDI_TRAY_BUSY ICON "icons/tray-busy.ico"
+
+IDD_SETTINGS DIALOGEX 0, 0, 340, 352
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Clew audio server"
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "status", IDC_STATUS, 10, 8, 262, 18
+    PUSHBUTTON      "Stop", IDC_STARTSTOP, 278, 6, 52, 14
+
+    GROUPBOX        "Folder", IDC_G_FOLDER, 7, 27, 326, 30
+    EDITTEXT        IDC_FOLDER, 14, 38, 208, 14, ES_AUTOHSCROLL
+    PUSHBUTTON      "Browse", IDC_BROWSE, 226, 38, 52, 14
+    PUSHBUTTON      "Open", IDC_OPENFOLDER, 281, 38, 45, 14
+
+    GROUPBOX        "Connection", IDC_G_CONN, 7, 60, 326, 74
+    LTEXT           "Port", IDC_L_PORT, 14, 73, 40, 10
+    EDITTEXT        IDC_PORT, 58, 71, 42, 14, ES_NUMBER
+    LTEXT           "Hours", IDC_L_HOURS, 120, 73, 150, 10
+    EDITTEXT        IDC_HOURS, 284, 71, 42, 14, ES_NUMBER
+    LTEXT           "Origins", IDC_L_ORIGINS, 14, 88, 312, 18
+    EDITTEXT        IDC_ORIGINS, 14, 107, 312, 22, ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL
+
+    GROUPBOX        "Secret", IDC_G_SECRET, 7, 137, 326, 44
+    EDITTEXT        IDC_SECRET, 14, 148, 150, 14, ES_AUTOHSCROLL | ES_READONLY | ES_PASSWORD
+    PUSHBUTTON      "Show", IDC_SHOW, 168, 148, 46, 14
+    PUSHBUTTON      "Copy", IDC_COPY, 217, 148, 46, 14
+    PUSHBUTTON      "New", IDC_NEWSECRET, 266, 148, 60, 14
+    LTEXT           "hint", IDC_L_SECRET, 14, 165, 312, 14
+
+    GROUPBOX        "Conversion", IDC_G_CONVERT, 7, 184, 326, 92
+    AUTOCHECKBOX    "Convert", IDC_CONVERT, 14, 195, 312, 18, BS_MULTILINE | BS_TOP
+    AUTOCHECKBOX    "Prepare", IDC_PREPARE, 14, 214, 312, 10
+    LTEXT           "ffmpeg", IDC_L_FFMPEG, 14, 230, 66, 10
+    EDITTEXT        IDC_FFMPEG, 82, 228, 140, 14, ES_AUTOHSCROLL
+    PUSHBUTTON      "Browse", IDC_FFBROWSE, 226, 228, 52, 14
+    PUSHBUTTON      "Find", IDC_FFFIND, 281, 228, 45, 14
+    LTEXT           "hint", IDC_L_FFHINT, 82, 244, 244, 10
+    LTEXT           "Cache", IDC_L_CACHE, 14, 259, 66, 10
+    EDITTEXT        IDC_CACHEMB, 82, 257, 46, 14, ES_NUMBER
+    LTEXT           "used", IDC_CACHEUSED, 134, 259, 120, 10
+    PUSHBUTTON      "Clear", IDC_CLEARCACHE, 258, 257, 68, 14
+
+    AUTOCHECKBOX    "Autostart", IDC_AUTOSTART, 10, 281, 200, 10
+
+    LTEXT           "Activity", IDC_L_ACTIVITY, 10, 294, 320, 10
+    LISTBOX         IDC_ACTIVITY, 10, 304, 320, 24, LBS_NOINTEGRALHEIGHT | LBS_NOSEL | WS_VSCROLL | WS_BORDER
+
+    LTEXT           "", IDC_MESSAGE, 10, 335, 200, 10
+    DEFPUSHBUTTON   "Save", IDOK, 220, 333, 54, 14
+    PUSHBUTTON      "Close", IDCANCEL, 278, 333, 54, 14
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "F. R. Andriariniaina"
+            VALUE "FileDescription", "Clew audio server"
+            VALUE "FileVersion", "1.0.0"
+            VALUE "InternalName", "clew-audio-server"
+            VALUE "OriginalFilename", "clew-audio-server.exe"
+            VALUE "ProductName", "Clew"
+            VALUE "ProductVersion", "1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
