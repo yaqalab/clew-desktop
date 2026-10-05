@@ -1,112 +1,91 @@
 """
-Draws the program's icons (res/icons/*.ico): a rounded square with a waveform, in three colours for
-the tray (running, stopped, converting). Standard library only:
+Composes the native server's icons (res/icons/*.ico) from Clew's own brand files
+(packages/kit/brand, the source of truth; nothing is drawn here):
 
-    python tools/audio-server/native/res/make_icons.py
+- app.ico (the program, its window, the Start menu, the installer): the light app tile from 64 px up;
+  below that the tile's detail cannot be read, so the "c" mark is set on the tile's cream, which
+  stays visible on a light or a dark taskbar.
+- tray-{on,off,busy}[-dark].ico: the "c" mark, ink for a light taskbar and cream for a dark one
+  (-dark). Running: the mark as it is. Stopped: faded and grey. Converting: the mark with a small
+  badge in the accent colour.
+
+    python tools/audio-server/native/res/make_icons.py      (needs Pillow; only to regenerate)
 """
 
-import struct
-import zlib
 from pathlib import Path
 
-SIZES = [16, 20, 24, 32, 40, 48, 64, 256]
-COLOURS = {
-    "app": (0x1F, 0x7A, 0x74),
-    "tray-on": (0x1F, 0x7A, 0x74),
-    "tray-off": (0x86, 0x8C, 0x96),
-    "tray-busy": (0xC4, 0x7F, 0x17),
-}
-# The waveform: bar heights as a share of the square.
-BARS = [0.28, 0.55, 0.78, 0.46, 0.64, 0.30]
+from PIL import Image, ImageDraw, ImageOps
+
+HERE = Path(__file__).resolve().parent
+BRAND = HERE.parents[3] / "packages" / "kit" / "brand"
+OUT = HERE / "icons"
+
+CREAM = (0xF7, 0xF2, 0xE9)
+INK = (0x16, 0x32, 0x3F)
+ACCENT = {"light": (0x16, 0x53, 0x66), "dark": (0x8F, 0xBD, 0xD0)}  # --ar-accent, theme.css
+APP_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
+TRAY_SIZES = [16, 20, 24, 32, 40, 48, 64]
 
 
-def inside_round_rect(x, y, size, radius):
-    cx = min(max(x, radius), size - radius)
-    cy = min(max(y, radius), size - radius)
-    return (x - cx) ** 2 + (y - cy) ** 2 <= radius**2
+def mark(variant):
+    ico = Image.open(BRAND / ("favicon.ico" if variant == "light" else "favicon-dark.ico"))
+    return ico.ico.getimage((256, 256)).convert("RGBA")
 
 
-def inside_bar(x, y, size):
-    n = len(BARS)
-    pitch = size * 0.72 / n
-    left = size * 0.14
-    width = pitch * 0.56
-    for i, h in enumerate(BARS):
-        x0 = left + i * pitch + (pitch - width) / 2
-        half = size * h / 2
-        y0, y1 = size / 2 - half, size / 2 + half
-        r = width / 2
-        if x0 <= x <= x0 + width and y0 <= y <= y1:
-            # rounded ends
-            cy = min(max(y, y0 + r), y1 - r)
-            if (x - (x0 + r)) ** 2 + (y - cy) ** 2 <= r * r:
-                return True
-    return False
+def rounded(img, radius_share=0.2):
+    n = img.size[0] * 4
+    mask = Image.new("L", (n, n), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, n - 1, n - 1), radius=int(n * radius_share), fill=255)
+    out = img.convert("RGBA")
+    out.putalpha(mask.resize(img.size, Image.LANCZOS))
+    return out
 
 
-def render(size, colour):
-    ss = 4 if size < 64 else 2  # supersampling for smooth edges
-    radius = size * 0.22
-    rows = []
-    for py in range(size):
-        row = bytearray()
-        for px in range(size):
-            bg = fg = 0
-            for sy in range(ss):
-                for sx in range(ss):
-                    x = px + (sx + 0.5) / ss
-                    y = py + (sy + 0.5) / ss
-                    if inside_round_rect(x, y, size, radius):
-                        if inside_bar(x, y, size):
-                            fg += 1
-                        else:
-                            bg += 1
-            total = ss * ss
-            a = (bg + fg) / total
-            if a == 0:
-                row += b"\0\0\0\0"
-                continue
-            mix = fg / (bg + fg)
-            r, g, b = (round(c * (1 - mix) + 255 * mix) for c in colour)
-            row += bytes((r, g, b, round(a * 255)))
-        rows.append(bytes(row))
-    return rows
+def app_icon(size):
+    if size >= 64:
+        tile = Image.open(BRAND / "app-icons" / "icon-light-1024.png").convert("RGB")
+        return rounded(tile.resize((size, size), Image.LANCZOS))
+    big = 256
+    base = Image.new("RGBA", (big, big), CREAM + (255,))
+    m = mark("light").resize((int(big * 0.84),) * 2, Image.LANCZOS)
+    base.alpha_composite(m, ((big - m.size[0]) // 2, (big - m.size[1]) // 2))
+    edge = ImageDraw.Draw(base)
+    edge.rounded_rectangle((2, 2, big - 3, big - 3), radius=int(big * 0.2), outline=INK + (255,), width=10)
+    return rounded(base).resize((size, size), Image.LANCZOS)
 
 
-def png(size, rows):
-    raw = b"".join(b"\0" + r for r in rows)
+def tray_icon(size, variant, state):
+    m = mark(variant)
+    if state == "off":
+        grey = ImageOps.grayscale(m.convert("RGB")).convert("RGBA")
+        grey.putalpha(m.getchannel("A").point(lambda a: a * 45 // 100))
+        m = grey
+    elif state == "busy":
+        n = m.size[0]
+        r = int(n * 0.22)
+        cx, cy = n - r - 2, n - r - 2
+        # A gap around the badge so it reads apart from the mark.
+        hole = Image.new("L", m.size, 255)
+        ImageDraw.Draw(hole).ellipse((cx - r - 18, cy - r - 18, cx + r + 18, cy + r + 18), fill=0)
+        alpha = Image.composite(m.getchannel("A"), Image.new("L", m.size, 0), hole)
+        m.putalpha(alpha)
+        ImageDraw.Draw(m).ellipse((cx - r, cy - r, cx + r, cy + r), fill=ACCENT[variant] + (255,))
+    return m.resize((size, size), Image.LANCZOS)
 
-    def chunk(kind, data):
-        c = struct.pack(">I", len(data)) + kind + data
-        return c + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
 
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(raw, 9))
-        + chunk(b"IEND", b"")
-    )
-
-
-def ico(images):
-    head = struct.pack("<HHH", 0, 1, len(images))
-    offset = 6 + 16 * len(images)
-    entries, data = b"", b""
-    for size, blob in images:
-        dim = 0 if size >= 256 else size
-        entries += struct.pack("<BBBBHHII", dim, dim, 0, 0, 1, 32, len(blob), offset + len(data))
-        data += blob
-    return head + entries + data
+def save(name, images):
+    images = sorted(images, key=lambda i: i.size[0], reverse=True)
+    images[0].save(OUT / name, format="ICO", sizes=[i.size for i in images], append_images=images[1:])
+    print(name)
 
 
 def main():
-    out = Path(__file__).resolve().parent / "icons"
-    out.mkdir(exist_ok=True)
-    for name, colour in COLOURS.items():
-        sizes = SIZES if name == "app" else [16, 20, 24, 32, 40, 48, 64]
-        images = [(s, png(s, render(s, colour))) for s in sizes]
-        (out / f"{name}.ico").write_bytes(ico(images))
-        print(f"{name}.ico")
+    OUT.mkdir(exist_ok=True)
+    save("app.ico", [app_icon(s) for s in APP_SIZES])
+    for variant in ("light", "dark"):
+        for state in ("on", "off", "busy"):
+            suffix = "" if variant == "light" else "-dark"
+            save(f"tray-{state}{suffix}.ico", [tray_icon(s, variant, state) for s in TRAY_SIZES])
 
 
 if __name__ == "__main__":
