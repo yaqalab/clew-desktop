@@ -1,6 +1,7 @@
 #include "convert_cache.h"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <vector>
 
@@ -81,6 +82,20 @@ void ConvertCache::set_on_busy(BusyFn fn) {
     on_busy_ = std::move(fn);
 }
 
+void ConvertCache::set_on_note(NoteFn fn) {
+    std::lock_guard<std::mutex> g(lock_);
+    on_note_ = std::move(fn);
+}
+
+void ConvertCache::note(const std::string& line) {
+    NoteFn fn;
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        fn = on_note_;
+    }
+    if (fn) fn(line);
+}
+
 void ConvertCache::busy(const std::string& name) {
     BusyFn fn;
     {
@@ -137,6 +152,28 @@ std::optional<fs::path> ConvertCache::converted(const fs::path& path) {
 
 std::optional<fs::path> ConvertCache::convert(const fs::path& path) {
     if (!needs(path)) return std::nullopt;
+    ++opening_;
+    {
+        // Preparing another file ahead gives way at once, and its converter has ended before this one
+        // starts: one conversion at a time. The same file is left to finish: run() below waits for it
+        // and takes its copy.
+        std::unique_lock<std::mutex> g(lock_);
+        if (!preparing_.empty() && preparing_ != path) {
+            stop_preparing_ = true;
+            preparing_ended_.wait_for(g, std::chrono::seconds(5), [this] { return !preparing_runs_; });
+        }
+    }
+    auto copy = run(path, false);
+    {
+        // Under the queue's lock, so the worker cannot miss it between its check and its wait.
+        std::lock_guard<std::mutex> g(queue_lock_);
+        --opening_;
+    }
+    queue_cv_.notify_all();
+    return copy;
+}
+
+std::optional<fs::path> ConvertCache::run(const fs::path& path, bool background) {
     fs::path d = dir();
     if (d.empty()) return std::nullopt;
     auto target = target_of(path, d);
@@ -161,7 +198,22 @@ std::optional<fs::path> ConvertCache::convert(const fs::path& path) {
         }
         busy(path_to_utf8(path.filename()));
         std::string why;
-        bool ok = convert_(path, part, &why) && fs::file_size(part, ec) > 0 && !ec;
+        platform::ConvertControl control;
+        control.background = background;
+        control.cancel = background ? &stop_preparing_ : nullptr;
+        if (background) {
+            std::lock_guard<std::mutex> g2(lock_);
+            preparing_runs_ = true;
+        }
+        bool ok = convert_(path, part, control, &why) && fs::file_size(part, ec) > 0 && !ec;
+        bool gave_way = !ok && control.cancelled();
+        if (background) {
+            {
+                std::lock_guard<std::mutex> g2(lock_);
+                preparing_runs_ = false;
+            }
+            preparing_ended_.notify_all();
+        }
         if (ok) {
             fs::rename(part, target, ec);
             ok = !ec;
@@ -170,7 +222,7 @@ std::optional<fs::path> ConvertCache::convert(const fs::path& path) {
         {
             std::lock_guard<std::mutex> g2(lock_);
             idle = --running_ == 0;
-            if (!ok) failed_.insert(path);
+            if (!ok && !gave_way) failed_.insert(path);
         }
         if (idle) busy("");
         if (!ok) {
@@ -229,15 +281,37 @@ void ConvertCache::worker() {
     while (true) {
         fs::path next;
         {
+            // Nothing is prepared while a file someone opened is converting.
             std::unique_lock<std::mutex> g(queue_lock_);
-            queue_cv_.wait(g, [this] { return stopping_ || !queue_.empty(); });
+            queue_cv_.wait(g, [this] { return stopping_ || (!queue_.empty() && opening_ == 0); });
             if (stopping_) return;
             next = queue_.front();
             queue_.pop_front();
         }
-        if (enabled() && bytes_on_disk() < limit_ / 2 && !converted(next)) convert(next);
+        {
+            std::lock_guard<std::mutex> g(lock_);
+            preparing_ = next;
+            stop_preparing_ = false;
+        }
+        // Checked after `preparing_` is set: an opening that began before is seen here, one that
+        // begins after sees `preparing_` and stops this one (both go through lock_).
+        bool put_back = opening_ > 0;
+        if (!put_back && enabled() && bytes_on_disk() < limit_ / 2 && !converted(next)) {
+            run(next, true);
+            if (stop_preparing_) {
+                put_back = true;
+                note("preparing " + path_to_utf8(next.filename()) + " paused for the file being opened");
+            }
+        }
+        {
+            std::lock_guard<std::mutex> g(lock_);
+            preparing_.clear();
+        }
         std::lock_guard<std::mutex> g(queue_lock_);
-        queued_.erase(next);
+        if (put_back && !stopping_)
+            queue_.push_front(next);  // resumed when the opened files are ready
+        else
+            queued_.erase(next);
     }
 }
 

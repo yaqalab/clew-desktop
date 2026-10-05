@@ -100,7 +100,8 @@ HANDLE sandbox_job() {
 
 // Runs `app` sandboxed; what it writes to its standard output becomes `out`. Its standard error is
 // kept (a little) to say why it failed.
-bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path& out, std::string* why) {
+bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path& out, const ConvertControl& control,
+                   std::string* why) {
     SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
     HANDLE out_r = nullptr, out_w = nullptr, err_r = nullptr, err_w = nullptr;
     if (!CreatePipe(&out_r, &out_w, &sa, 1 << 16) || !CreatePipe(&err_r, &err_w, &sa, 1 << 16)) {
@@ -137,7 +138,9 @@ bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path
         if (why) *why = "no job object";
         return false;
     }
-    DWORD flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS;
+    // The file being opened at normal priority; preparing ahead only with what is left over.
+    DWORD flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW |
+                  (control.background ? IDLE_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS);
     PROCESS_INFORMATION pi{};
     Handle token(low_integrity_token());
     BOOL started = token.h && CreateProcessAsUserW(token.h, app.c_str(), cmdline.data(), nullptr, nullptr, TRUE,
@@ -162,11 +165,21 @@ bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path
     hw.reset();
     ew.reset();
 
-    std::atomic<bool> timed_out{false};
+    std::atomic<bool> timed_out{false}, cancelled{false};
     std::thread watchdog([&] {
-        if (WaitForSingleObject(pi.hProcess, kConvertTimeoutMs) == WAIT_TIMEOUT) {
-            timed_out = true;
-            TerminateJobObject(job.h, 1);
+        ULONGLONG start = GetTickCount64();
+        // A short poll: the file someone is opening waits for this to end.
+        while (WaitForSingleObject(pi.hProcess, 20) == WAIT_TIMEOUT) {
+            if (control.cancelled()) {
+                cancelled = true;
+                TerminateJobObject(job.h, 1);
+                return;
+            }
+            if (GetTickCount64() - start > kConvertTimeoutMs) {
+                timed_out = true;
+                TerminateJobObject(job.h, 1);
+                return;
+            }
         }
     });
     std::string err;
@@ -194,9 +207,12 @@ bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path
     DWORD code = 1;
     GetExitCodeProcess(pi.hProcess, &code);
     file.reset();
-    if (code == 0 && wrote_all && total > 0 && !timed_out) return true;
+    if (code == 0 && wrote_all && total > 0 && !timed_out && !cancelled) return true;
     if (why) {
-        *why = timed_out ? "took longer than 30 minutes" : !wrote_all ? "could not write the cache" : trim(err);
+        *why = cancelled   ? "stopped for the file being opened"
+               : timed_out ? "took longer than 30 minutes"
+               : !wrote_all ? "could not write the cache"
+                            : trim(err);
         if (why->empty()) *why = "the converter stopped (" + std::to_string(code) + ")";
     }
     std::error_code ec;
@@ -258,13 +274,14 @@ fs::path self_path() {
 
 bool can_convert() { return win::media_foundation_present(); }
 
-bool convert_to_mp3(const fs::path& in, const fs::path& out, std::string* why) {
+bool convert_to_mp3(const fs::path& in, const fs::path& out, const ConvertControl& control, std::string* why) {
     std::wstring app = self_path().wstring();
     std::wstring cmd = win::quote_arg(app) + L" --convert-child " + win::quote_arg(in.wstring());
-    return run_sandboxed(app, cmd, out, why);
+    return run_sandboxed(app, cmd, out, control, why);
 }
 
-bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& out, std::string* why) {
+bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& out, const ConvertControl& control,
+                   std::string* why) {
     std::error_code ec;
     if (!fs::is_regular_file(ffmpeg, ec)) {
         if (why) *why = "not a file: " + ffmpeg.u8string();
@@ -275,7 +292,7 @@ bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& o
                        L" -nostdin -hide_banner -loglevel error -i " + win::quote_arg(in.wstring()) +
                        L" -map 0:a:0 -map_metadata -1 -c:a libmp3lame -b:a 128k -write_xing 0 -id3v2_version 0"
                        L" -f mp3 pipe:1";
-    return run_sandboxed(app, cmd, out, why);
+    return run_sandboxed(app, cmd, out, control, why);
 }
 
 fs::path find_ffmpeg() {

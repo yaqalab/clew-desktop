@@ -78,12 +78,13 @@ fs::path self_path() {
 
 bool can_convert() { return false; }
 
-bool convert_to_mp3(const fs::path&, const fs::path&, std::string* why) {
+bool convert_to_mp3(const fs::path&, const fs::path&, const ConvertControl&, std::string* why) {
     if (why) *why = "no system codecs on this system yet";
     return false;
 }
 
-bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& out, std::string* why) {
+bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& out, const ConvertControl& control,
+                   std::string* why) {
     int fd = ::open(out.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd < 0) {
         if (why) *why = "could not write the cache";
@@ -94,6 +95,7 @@ bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& o
         dup2(fd, 1);
         int devnull = ::open("/dev/null", O_RDWR);
         dup2(devnull, 0);
+        if (control.background) (void)nice(19);
         std::vector<std::string> args = {ffmpeg.string(), "-nostdin", "-hide_banner", "-loglevel", "error", "-i",
                                          in.string(), "-map", "0:a:0", "-map_metadata", "-1", "-c:a", "libmp3lame",
                                          "-b:a", "128k", "-write_xing", "0", "-id3v2_version", "0", "-f", "mp3",
@@ -106,8 +108,18 @@ bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& o
     }
     ::close(fd);
     int status = 0;
-    if (pid < 0 || waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        if (why) *why = "ffmpeg failed";
+    bool stopped = false;
+    while (pid > 0) {
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid || r < 0) break;
+        if (control.cancelled() && !stopped) {
+            kill(pid, SIGKILL);
+            stopped = true;
+        }
+        usleep(100 * 1000);
+    }
+    if (pid < 0 || stopped || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        if (why) *why = stopped ? "stopped for the file being opened" : "ffmpeg failed";
         std::error_code ec;
         fs::remove(out, ec);
         return false;

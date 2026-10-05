@@ -28,13 +28,18 @@ Service::Service(std::filesystem::path settings_file, std::filesystem::path cach
     : settings_file_(std::move(settings_file)), forced_cache_dir_(cache_dir), log_(std::move(log)) {
     settings_ = Settings::load(settings_file_);
     cache_ = std::make_unique<ConvertCache>(
-        std::move(cache_dir), [this](const auto& in, const auto& out, std::string* why) { return convert(in, out, why); });
+        std::move(cache_dir), [this](const auto& in, const auto& out, const platform::ConvertControl& control,
+                                     std::string* why) { return convert(in, out, control, why); });
     cache_->set_on_busy([this](const std::string& name) {
         {
             std::lock_guard<std::mutex> g(lock_);
             converting_ = name;
         }
         record(name.empty() ? "conversion finished" : "converting " + name);
+        notify();
+    });
+    cache_->set_on_note([this](const std::string& line) {
+        record(line);
         notify();
     });
     server_ = std::make_unique<Server>(cache_.get(), [this](const std::string& line) {
@@ -82,15 +87,19 @@ std::vector<std::string> Service::recent() const {
     return {recent_.begin(), recent_.end()};
 }
 
-bool Service::convert(const std::filesystem::path& in, const std::filesystem::path& out, std::string* why) {
+bool Service::convert(const std::filesystem::path& in, const std::filesystem::path& out,
+                      const platform::ConvertControl& control, std::string* why) {
     // The system's codecs first; then the user's own ffmpeg, if they chose one.
     Settings s = settings();
     std::string system_why;
-    if (s.system_codecs && platform::can_convert() && platform::convert_to_mp3(in, out, &system_why)) return true;
+    if (s.system_codecs && platform::can_convert() && platform::convert_to_mp3(in, out, control, &system_why))
+        return true;
+    if (control.cancelled()) return false;  // put back in the queue: not a failure
     const std::string& ffmpeg = s.ffmpeg;
     if (!ffmpeg.empty()) {
         std::string ffmpeg_why;
-        if (platform::ffmpeg_to_mp3(path_from_utf8(ffmpeg), in, out, &ffmpeg_why)) return true;
+        if (platform::ffmpeg_to_mp3(path_from_utf8(ffmpeg), in, out, control, &ffmpeg_why)) return true;
+        if (control.cancelled()) return false;
         system_why += system_why.empty() ? ffmpeg_why : "; ffmpeg: " + ffmpeg_why;
     }
     record("could not convert " + path_to_utf8(in.filename()) + (system_why.empty() ? "" : " (" + system_why + ")"));
