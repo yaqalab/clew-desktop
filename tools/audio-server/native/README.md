@@ -76,8 +76,10 @@ Windows "N" editions lack the codecs until the free *Media Feature Pack* is inst
   or your documents.
 - **Little to steal.** The activity list keeps method, path and status in memory only; never a link's
   signature, never the secret.
-- The program is not signed yet, so Windows SmartScreen may warn on first run ("More info" → "Run
-  anyway"). Signing needs a paid certificate.
+- The program, the installer and the uninstaller are **signed by YaqaLab** with a self-signed
+  certificate: Properties → Digital Signatures shows it, and any change to a file after signing breaks
+  the signature. Windows does not trust a self-signed signer, so SmartScreen still warns on first run
+  ("More info" → "Run anyway"). Only a certificate from a public authority removes that warning.
 
 ## For developers
 
@@ -104,6 +106,21 @@ options; they apply to that run only). `CLEW_AUDIO_LANG=ja` or `en` forces the w
 
 No third-party code and no libraries beyond what Windows ships. The version is in `CMakeLists.txt`,
 `src/core/server.cpp` (`kVersion`), `res/app.rc` and the installer's `AppVersion`.
+
+### Signing
+
+```
+powershell -ExecutionPolicy Bypass -File tools\audio-server\native\installer\make-cert.ps1
+```
+
+makes, once, a self-signed code-signing certificate `CN=YaqaLab` (RSA 3072, 10 years) in this Windows
+user's store, with a **non-exportable** private key: it never leaves the store and is never in the
+repository. `build-installer.cmd` then signs the program, the installer and the uninstaller with it;
+without it, it builds unsigned. The public part is written to `dist\yaqalab-codesign.cer`: importing it
+into *Trusted People* / *Trusted Root* on a machine makes that machine trust the signature (a choice for
+each machine's owner, not done by the installer). `CLEW_SIGN_TIMESTAMP=<RFC 3161 URL>` adds a timestamp,
+which sends the files' hashes to that server; it is off unless set. Another build machine needs its own
+certificate (the key cannot be copied), so its signatures carry a different thumbprint.
 
 ### Other systems
 
