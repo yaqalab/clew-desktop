@@ -4,6 +4,8 @@
 #include <windows.h>
 #include "resource.h"
 
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
+
 IDI_APP       ICON "icons/app.ico"
 IDI_TRAY_ON   ICON "icons/tray-on.ico"
 IDI_TRAY_OFF  ICON "icons/tray-off.ico"

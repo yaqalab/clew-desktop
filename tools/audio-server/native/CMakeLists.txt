@@ -50,9 +50,14 @@ if(WIN32)
     src/win/tray_win.cpp
     src/win/strings.cpp
     res/app.rc
-    res/app.manifest
   )
   target_link_libraries(clew-audio-server PRIVATE clew_core clew_platform comctl32 user32 gdi32 shlwapi)
+  # The manifest is a resource (app.rc), not a step after linking: that step rewrote the fresh exe
+  # while an antivirus scan held it open, and failed.
+  target_link_options(clew-audio-server PRIVATE /MANIFEST:NO)
+  # The resource compiler's includes are not tracked: a changed icon alone must rebuild the resources.
+  file(GLOB CLEW_ICONS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/icons/*.ico)
+  set_source_files_properties(res/app.rc PROPERTIES OBJECT_DEPENDS "${CLEW_ICONS};${CMAKE_CURRENT_SOURCE_DIR}/res/resource.h;${CMAKE_CURRENT_SOURCE_DIR}/res/app.manifest")
 else()
   add_executable(clew-audio-server src/posix/main_posix.cpp)
   target_link_libraries(clew-audio-server PRIVATE clew_core clew_platform)
