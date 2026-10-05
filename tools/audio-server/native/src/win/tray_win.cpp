@@ -1,5 +1,6 @@
-// The tray icon and the settings window. The icon says whether Clew can reach the files (teal: yes;
-// grey: stopped or a problem; amber: converting). One click opens the settings; the right-click
+// The tray icon and the settings window. The icon is Clew's "c" mark, ink on a light taskbar and cream
+// on a dark one: as it is when Clew can reach the files, faded when stopped or something needs the
+// user, with a badge while converting. One click opens the settings; the right-click
 // menu has the everyday actions. Closing the window keeps the server running; "Quit" stops it.
 #include <windows.h>
 #include <commctrl.h>
@@ -165,11 +166,21 @@ void open_folder() {
 // Tray icon
 // ---------------------------------------------------------------------------------------------
 
+// Whether the taskbar is light (Windows' "default app mode" and "Windows mode" are separate; the
+// tray follows the latter).
+bool light_taskbar() {
+    DWORD v = 0, size = sizeof v;
+    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                        L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS &&
+           v == 1;
+}
+
 void tray(DWORD message) {
     auto st = g.svc->status();
-    int icon = !st.converting.empty()                   ? IDI_TRAY_BUSY
-               : st.running && st.problem.empty()        ? IDI_TRAY_ON
-                                                         : IDI_TRAY_OFF;
+    bool light = light_taskbar();
+    int icon = !st.converting.empty()            ? (light ? IDI_TRAY_BUSY : IDI_TRAY_BUSY_DARK)
+               : st.running && st.problem.empty() ? (light ? IDI_TRAY_ON : IDI_TRAY_ON_DARK)
+                                                  : (light ? IDI_TRAY_OFF : IDI_TRAY_OFF_DARK);
     std::wstring tip = !st.converting.empty()            ? trf(S::TipConverting, widen(st.converting).c_str())
                        : !st.running && g.stopped_by_user ? std::wstring(tr(S::TipStopped))
                        : !st.problem.empty()             ? trf(S::TipProblem, problem_text(st.problem, st.port).c_str())
@@ -477,6 +488,10 @@ LRESULT CALLBACK tray_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (g.dlg) SendMessageW(g.dlg, WM_APP_STATUS, 0, 0);
             return 0;
         case WM_APP_SHOW: show_settings(); return 0;
+        case WM_SETTINGCHANGE:
+            // The light/dark switch arrives as "ImmersiveColorSet".
+            if (lp && wcscmp(reinterpret_cast<const wchar_t*>(lp), L"ImmersiveColorSet") == 0) tray(NIM_MODIFY);
+            return 0;
         case WM_ENDSESSION:
             if (wp) DestroyWindow(hwnd);
             return 0;

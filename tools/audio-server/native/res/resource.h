@@ -4,6 +4,9 @@
 #define IDI_TRAY_ON 2
 #define IDI_TRAY_OFF 3
 #define IDI_TRAY_BUSY 4
+#define IDI_TRAY_ON_DARK 5
+#define IDI_TRAY_OFF_DARK 6
+#define IDI_TRAY_BUSY_DARK 7
 
 #define IDD_SETTINGS 100
 
