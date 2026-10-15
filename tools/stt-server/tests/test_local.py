@@ -238,6 +238,20 @@ def test_hints_are_ended_like_a_sentence():
     assert whisper_prompt("  ", "en") is None and whisper_prompt(None, "ja") is None
 
 
+def test_websocket_addresses_are_not_logged():
+    import logging
+
+    from alefa_stt.__main__ import NoWebSocketLines
+
+    def record(msg, *args):
+        return logging.LogRecord("uvicorn.error", logging.INFO, __file__, 1, msg, args, None)
+
+    f = NoWebSocketLines()
+    assert not f.filter(record('%s - "WebSocket %s" [accepted]', "127.0.0.1:5", "/v1/listen?prompt=secret"))
+    assert not f.filter(record("connection open"))
+    assert f.filter(record("Uvicorn running on %s", "http://127.0.0.1:47822"))
+
+
 # --- the command line the tray uses ---
 
 def test_serve_local_options():

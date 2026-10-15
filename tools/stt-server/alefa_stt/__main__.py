@@ -116,12 +116,22 @@ def _apply_serve_options(settings: Settings, args) -> None:
         settings.allowed_origins = split_list(args.origins)
 
 
+class NoWebSocketLines(logging.Filter):
+    """uvicorn logs each WebSocket's whole address, query included ('?prompt=' carries the
+    spelling hints), and every connection opened and closed. Ours logs the path and status."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not ('"WebSocket ' in message or message in ("connection open", "connection closed"))
+
+
 def _serve(settings: Settings) -> int:
     import uvicorn
 
     from .app import create_app
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("uvicorn.error").addFilter(NoWebSocketLines())
     uvicorn.run(
         create_app(settings),
         host=settings.host,
