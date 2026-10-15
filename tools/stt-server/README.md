@@ -23,13 +23,22 @@
 - **`download <model>` / `models`:** models live in `<models-dir>/<name>/`; the default folder
   is `%LOCALAPPDATA%\clew-stt\models`. A download writes `<name>.part` and renames it when
   complete, resumes file by file, and prints `total <bytes>`, then `progress N` once per percent,
-  then `done <folder>` or `error <reason>`.
+  then `done <folder>` or `error <reason>`. `ALEFA_STT_HUB` points it at another address that
+  answers like Hugging Face (the tray's tests).
+- **`--device auto|cpu|cuda`:** `auto` uses an NVIDIA GPU when CUDA sees one (int8 with
+  float16), else the processor (int8). A GPU whose libraries (cuBLAS, cuDNN) do not load falls
+  back to the processor with a log line. `/api/me` says which (`device`). `system` prints
+  `cuda N`, which the tray reads to grey out models that need a GPU.
 
-| Model | Size | Use | Source |
+| Model | Download | Use | Source |
 |---|---|---|---|
-| `small` | 486 MB | live dictation, English and Japanese | `Systran/faster-whisper-small` |
-| `large-v3-turbo` | 1.62 GB | files, Japanese; ~10 s per sentence | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` |
-| `small.en` | 486 MB | English only; no better than `small` here (`28` §2) | `Systran/faster-whisper-small.en` |
+| `tiny`, `base` | 78, 148 MB | live, least accurate | `Systran/faster-whisper-tiny`, `-base` |
+| `small` | 486 MB | live dictation; measured word-perfect in English and French, Japanese with hints | `Systran/faster-whisper-small` |
+| `medium` | 1.53 GB | an NVIDIA GPU | `Systran/faster-whisper-medium` |
+| `large-v3-turbo` | 1.62 GB | files; about 8–10 s a sentence on a laptop processor | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` |
+| `distil-large-v3` | 1.52 GB | files, English only | `Systran/faster-distil-whisper-large-v3` |
+| `large-v3` | 3.09 GB | an NVIDIA GPU | `Systran/faster-whisper-large-v3` |
+| `small.en` | 486 MB | English only; no better than `small` here (`28` §2); not in the tray's list | `Systran/faster-whisper-small.en` |
 
 ## Run it by hand
 
@@ -64,4 +73,5 @@ imports.
 ```
 
 `tests/test_local.py` covers the local additions with the fake engine; the Pi's tests run
-unchanged. A real model was checked by hand (`28` §7).
+unchanged. Real models were checked by hand (`28` §8). Spelling hints are ended like a
+sentence before Whisper sees them, because a bare list made it drop its full stops.
