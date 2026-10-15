@@ -77,6 +77,8 @@ def continued(text: str) -> str:
     return text
 
 
+AUTO = "auto"  # Whisper tells the language of each piece itself
+
 _LANGUAGE_NAMES = {"english": "en", "japanese": "ja", "french": "fr", "malagasy": "mg"}
 
 
@@ -259,19 +261,24 @@ class FasterWhisperEngine:
         self.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32), language=self.languages[0])
 
     def transcribe(self, audio: np.ndarray, language: str | None = None, prompt: str | None = None) -> str:
+        """`language="auto"`: Whisper tells each piece's language itself (an interview that moves
+        between languages). Otherwise one language; none means the model's first."""
         peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
         if peak > 1e-6:
             audio = audio * (0.9 / peak)
-        segments, _info = self._model.transcribe(
+        detect = language == AUTO
+        segments, info = self._model.transcribe(
             audio,
-            language=language or self.languages[0],
-            initial_prompt=whisper_prompt(prompt, language),
+            language=None if detect else (language or self.languages[0]),
+            initial_prompt=whisper_prompt(prompt, None if detect else language),
             beam_size=1,
             condition_on_previous_text=False,
             without_timestamps=True,
             vad_filter=False,  # the segmenter has already found the speech
         )
-        joiner = "" if language in ("ja", "zh") else " "
+        segments = list(segments)
+        heard = info.language if detect else language
+        joiner = "" if heard in ("ja", "zh") else " "
         return tidy(joiner.join(segment.text.strip() for segment in segments))
 
     def close(self) -> None:

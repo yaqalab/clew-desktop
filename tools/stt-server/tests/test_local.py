@@ -258,6 +258,7 @@ def test_serve_local_options():
     settings = Settings()
     args = SimpleNamespace(local=True, host=None, port=47822, engine="whisper", model="small",
                            models_dir="D:/models", cpu_threads=None, device="cpu", language="", decoder=None,
+                           audio_root=None, speakers=None,
                            origins="https://clew.alefa.net https://clew.example.org/")
     _apply_serve_options(settings, args)
     assert settings.host == "127.0.0.1" and settings.loopback_only and settings.loopback_origins

@@ -35,12 +35,34 @@ REQUIRED = ("config.json", "model.bin", "tokenizer.json")
 HUB = os.environ.get("ALEFA_STT_HUB", "https://huggingface.co").rstrip("/")
 
 
+# The speaker-embedding model live transcription uses to tell voices apart (clew docs/29 §3):
+# 3D-Speaker's CAM++ (Apache-2.0), as sherpa-onnx publishes it. One file, kept in
+# <models_dir>/speakers/. ALEFA_STT_SPEAKER_URL points elsewhere (the tests).
+SPEAKERS = "speakers"
+SPEAKER_FILE = "campplus.onnx"
+SPEAKER_URL = os.environ.get(
+    "ALEFA_STT_SPEAKER_URL",
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
+    "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+)
+SPEAKER_BYTES = 28281164
+
+
 class DownloadError(RuntimeError):
     pass
 
 
+def speaker_model_path(models_dir: str) -> Path | None:
+    """The speaker model's file when it is here, else None."""
+    path = Path(models_dir) / SPEAKERS / SPEAKER_FILE
+    return path if path.is_file() else None
+
+
 def model_path(models_dir: str, name: str) -> Path | None:
     """The model's folder when it is complete, else None."""
+    if name == SPEAKERS:
+        found = speaker_model_path(models_dir)
+        return found.parent if found else None
     if name not in MODELS:
         return None
     folder = Path(models_dir) / name
@@ -70,6 +92,8 @@ def remote_files(repo: str) -> dict[str, int]:
 def download(name: str, models_dir: str, say: Callable[[str], None] | None = None) -> Path:
     """Fetches the model into ``models_dir``; returns its folder."""
     say = say or _print
+    if name == SPEAKERS:
+        return _download_speakers(models_dir, say)
     repo = MODELS.get(name)
     if repo is None:
         raise DownloadError(f"unknown model {name!r}; one of {', '.join(MODELS)}")
@@ -111,6 +135,32 @@ def download(name: str, models_dir: str, say: Callable[[str], None] | None = Non
     if folder.exists():
         shutil.rmtree(folder)
     os.replace(part, folder)
+    say("progress 100")
+    return folder
+
+
+def _download_speakers(models_dir: str, say: Callable[[str], None]) -> Path:
+    folder = Path(models_dir) / SPEAKERS
+    if speaker_model_path(models_dir):
+        say("progress 100")
+        return folder
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / f"{SPEAKER_FILE}.tmp"
+    have, last = 0, -1
+    with _open(SPEAKER_URL) as response, open(tmp, "wb") as out:
+        total = int(response.headers.get("Content-Length") or SPEAKER_BYTES) or 1
+        say(f"total {total}")
+        while chunk := response.read(1 << 20):
+            out.write(chunk)
+            have += len(chunk)
+            percent = min(99, have * 100 // total)
+            if percent != last:
+                last = percent
+                say(f"progress {percent}")
+    if have < 1_000_000:
+        tmp.unlink(missing_ok=True)
+        raise DownloadError(f"the speaker model is too small ({have} bytes)")
+    os.replace(tmp, folder / SPEAKER_FILE)
     say("progress 100")
     return folder
 

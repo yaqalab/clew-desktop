@@ -934,6 +934,37 @@ class Dictation(unittest.TestCase):
         self.servers.remove(server)
         self.assertTrue(wait_for(lambda: not listening(port), 10), "the speech server outlived its parent")
 
+    @unittest.skipUnless(os.name == "nt", "Windows' process list")
+    def test_killed_while_starting_it_leaves_nothing_behind(self):
+        # A child created outside its job and put in a moment later stayed suspended forever when
+        # the server died in that moment. Now it is born in the job: kill the server at once,
+        # many times, at different moments, and look for any child left.
+        port = free_port()
+        for i in range(16):
+            proc = subprocess.Popen(
+                [str(EXE), "--headless", "--folder", str(self.folder), "--port", "0",
+                 "--config", str(Path(self.home, "settings.json")), "--dictation", "--stt-fake-engine",
+                 "--stt-port", str(port), "--stt-program", str(STT_EXE)],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+            # The banner's dictation line comes as the child is being started: kill around then.
+            for raw in proc.stdout:
+                if b"Dictation  ->" in raw:
+                    break
+            time.sleep(0.002 * (i % 8))
+            proc.kill()
+            proc.wait()
+            proc.stdout.close()
+        time.sleep(2)
+        left = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='clew-stt-server.exe'\" | "
+             "ForEach-Object { $_.ProcessId.ToString() + ' ' + $_.CommandLine }"],
+            capture_output=True, text=True, timeout=60).stdout
+        mine = [line for line in left.splitlines() if f"--port {port}" in line]
+        for line in mine:  # do not leave them for the next run either
+            subprocess.run(["taskkill", "/F", "/PID", line.split()[0]], capture_output=True)
+        self.assertEqual(mine, [])
+
     def test_a_taken_port_is_said(self):
         holder = socket.socket()
         holder.bind(("127.0.0.1", 0))

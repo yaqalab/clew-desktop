@@ -44,6 +44,11 @@ class Settings:
     cpu_threads: int = 0
     # "auto": an NVIDIA GPU when CUDA finds one and its libraries load, else the CPU.
     device: str = "auto"
+    # Live transcription (clew docs/29): the audio server's folder, read-only, for the deferred
+    # mode; empty: uploads only. "fake" speakers: the tests' stand-in for the speaker model.
+    audio_root: str = ""
+    speakers: str = "auto"
+    max_transcribe_mb: int = 1024
     # Empty: each request names its language (English when it does not). Otherwise the only one.
     language: str = ""
     keys_file: str = "/etc/alefa-stt/keys"
@@ -81,6 +86,8 @@ class Settings:
             models_dir=env("ALEFA_STT_MODELS_DIR") or default_models_dir(),
             cpu_threads=_int("ALEFA_STT_CPU_THREADS", 0),
             device=env("ALEFA_STT_DEVICE", "auto"),
+            audio_root=env("ALEFA_STT_AUDIO_ROOT", ""),
+            max_transcribe_mb=_int("ALEFA_STT_MAX_TRANSCRIBE_MB", 1024),
             language=env("ALEFA_STT_LANGUAGE", ""),
             keys_file=env("ALEFA_STT_KEYS_FILE", "/etc/alefa-stt/keys"),
             allowed_origins=_list("ALEFA_STT_ALLOWED_ORIGINS", "https://clew.alefa.net"),
