@@ -75,6 +75,9 @@ constexpr SttModel kSttModels[] = {
     {"distil-large-v3", 1516479628ull, SttModel::Files, 8, true},
     {"large-v3", 3090835702ull, SttModel::Gpu, 8, false},
 };
+// Live transcription's speaker model (docs/29), fetched with the Whisper model.
+constexpr std::uint64_t kSpeakerModelBytes = 28281164ull;
+
 bool stt_model_known(const std::string& name);
 const SttModel* find_stt_model(const std::string& name);
 

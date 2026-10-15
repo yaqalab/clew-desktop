@@ -458,7 +458,9 @@ void refresh_dictation(HWND dlg) {
     InvalidateRect(GetDlgItem(dlg, IDC_STT_MODELS), nullptr, TRUE);
     const SttModel& chosen = kSttModels[std::size_t(g.stt_row)];
     bool here = Dictation::model_present(dir, chosen.name);
-    EnableWindow(GetDlgItem(dlg, IDC_STT_DOWNLOAD), !here && installed && st.downloading.empty() &&
+    bool speakers_here = Dictation::speaker_model_present(dir);
+    EnableWindow(GetDlgItem(dlg, IDC_STT_DOWNLOAD), (!here || !speakers_here) && installed &&
+                                                         st.downloading.empty() &&
                                                          model_blocker_text(std::size_t(g.stt_row)).empty());
     // A download says how far it is on the button and in the note.
     SetDlgItemTextW(dlg, IDC_STT_DOWNLOAD,
@@ -466,6 +468,7 @@ void refresh_dictation(HWND dlg) {
     std::wstring note = !st.downloading.empty()
                             ? trf(S::SttDownloading, widen(st.downloading).c_str(), st.percent)
                         : !g.stt_note.empty() ? g.stt_note
+                        : !speakers_here      ? trf(S::SttSpeakersMissing, human_size(kSpeakerModelBytes).c_str())
                         : st.gpus > 0         ? std::wstring(tr(S::SttGpuFound))
                                               : std::wstring();
     SetDlgItemTextW(dlg, IDC_STT_MODEL_NOTE, note.c_str());
@@ -473,19 +476,28 @@ void refresh_dictation(HWND dlg) {
     SetDlgItemTextW(dlg, IDC_STT_FREE, free ? trf(S::SttFree, human_size(free).c_str()).c_str() : L"");
 }
 
+// Fetches what the chosen model needs and is not here: the Whisper model, then the speaker model.
 void download_model(HWND dlg, const SttModel& m) {
     auto dir = g.svc->stt_models_dir();
+    bool whisper = !Dictation::model_present(dir, m.name);
+    bool speakers = !Dictation::speaker_model_present(dir);
+    std::uint64_t bytes = (whisper ? m.bytes : 0) + (speakers ? kSpeakerModelBytes : 0);
+    if (!bytes) return;
+    std::wstring what = whisper && speakers ? widen(m.name) + L" + " + tr(S::SttSpeakerModel)
+                        : whisper           ? widen(m.name)
+                                            : std::wstring(tr(S::SttSpeakerModel));
     std::uint64_t free = free_space(dir);
-    std::uint64_t need = m.bytes + m.bytes / 20;
+    std::uint64_t need = bytes + bytes / 20;
     if (free && free < need) {
         MessageBoxW(dlg, trf(S::SttNoSpace, human_size(need).c_str(), human_size(free).c_str()).c_str(),
                     tr(S::AppName), MB_OK | MB_ICONWARNING);
         return;
     }
-    std::wstring ask = trf(S::SttDownloadConfirm, widen(m.name).c_str(), human_size(m.bytes).c_str(),
-                           dir.wstring().c_str(), free ? human_size(free).c_str() : L"?");
+    std::wstring ask = trf(S::SttDownloadConfirm, what.c_str(), human_size(bytes).c_str(), dir.wstring().c_str(),
+                           free ? human_size(free).c_str() : L"?");
     if (MessageBoxW(dlg, ask.c_str(), tr(S::AppName), MB_OKCANCEL | MB_ICONQUESTION) != IDOK) return;
-    g.svc->dictation().download(m.name);
+    if (whisper) g.svc->dictation().download(m.name);
+    if (speakers) g.svc->dictation().download("speakers");
     refresh_dictation(dlg);
 }
 

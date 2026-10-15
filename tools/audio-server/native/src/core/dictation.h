@@ -9,6 +9,7 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -34,10 +35,12 @@ struct DictationConfig {
     int port = 0;
     std::vector<std::string> origins;  // pages besides this computer's that may call it
     std::string key;                   // handed over on stdin
+    std::filesystem::path audio_root;  // the audio server's folder, for deferred transcription (docs/29)
     bool fake_engine = false;          // the tests: no model needed
     bool operator==(const DictationConfig& o) const {
         return program == o.program && model == o.model && models_dir == o.models_dir && language == o.language &&
-               port == o.port && origins == o.origins && key == o.key && fake_engine == o.fake_engine;
+               port == o.port && origins == o.origins && key == o.key && audio_root == o.audio_root &&
+               fake_engine == o.fake_engine;
     }
     bool operator!=(const DictationConfig& o) const { return !(*this == o); }
 };
@@ -77,13 +80,15 @@ public:
     void start();
     void stop();
     bool wanted() const;
-    // Fetches a model into the models folder (one at a time). Done: a waiting server starts.
+    // Fetches a model into the models folder: queued, one at a time. Done: a waiting server
+    // starts. "speakers" is live transcription's speaker model (docs/29).
     void download(const std::string& model);
 
     Status status() const;
 
     // Whether `dir/name` holds a whole model (the files tools/stt-server's models.py requires).
     static bool model_present(const std::filesystem::path& dir, const std::string& name);
+    static bool speaker_model_present(const std::filesystem::path& dir);
     // A line the server printed, read for its state: "ready", a problem, or nothing.
     struct LineMeaning {
         bool ready = false;
@@ -117,7 +122,7 @@ private:
     int exit_code_ = 0;
     Status status_;
 
-    std::string download_wanted_;
+    std::deque<std::string> download_wanted_;
     std::unique_ptr<platform::Child> fetcher_;
     std::uint64_t fetch_generation_ = 0;
     bool fetcher_exited_ = false;

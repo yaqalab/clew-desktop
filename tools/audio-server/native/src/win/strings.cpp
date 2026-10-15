@@ -105,6 +105,8 @@ const Pair kStrings[] = {
     {S::SttEnglishOnly, L" · English only", L" · 英語のみ"},
     {S::SttNeedsMemory, L"%s needs a computer with %u GB of memory; this one has %s.", L"%s には %u GB のメモリーが必要です。このコンピューターは %s です。"},
     {S::SttNeedsGpu, L"%s needs an NVIDIA graphics card with CUDA; this computer has none.", L"%s には CUDA 対応の NVIDIA グラフィックカードが必要です。このコンピューターにはありません。"},
+    {S::SttSpeakersMissing, L"The speaker model for live transcription (%s) is not downloaded yet; Download fetches it.", L"ライブ文字起こし用の話者モデル（%s）はまだダウンロードされていません。「ダウンロード」で取得します。"},
+    {S::SttSpeakerModel, L"the speaker model", L"話者モデル"},
     {S::SttGpuFound, L"An NVIDIA graphics card was found: models run on it when CUDA’s libraries (cuBLAS, cuDNN) are installed, else on the processor.", L"NVIDIA グラフィックカードが見つかりました。CUDA のライブラリー（cuBLAS、cuDNN）があればそこで、なければプロセッサーで動きます。"},
     {S::SttHere, L"downloaded", L"ダウンロード済み"},
     {S::SttNotHere, L"not downloaded", L"未ダウンロード"},

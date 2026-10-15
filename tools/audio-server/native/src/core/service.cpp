@@ -201,6 +201,11 @@ DictationConfig Service::dictation_config(const Settings& s) {
     c.language = s.stt_language;
     c.port = s.stt_port;
     c.origins = s.origins;
+    if (!s.folder.empty()) {
+        std::error_code ec;
+        auto root = std::filesystem::canonical(path_from_utf8(s.folder), ec);
+        if (!ec) c.audio_root = root;
+    }
     return c;
 }
 

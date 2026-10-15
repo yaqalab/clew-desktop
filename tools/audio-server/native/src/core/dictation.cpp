@@ -11,6 +11,8 @@ namespace {
 
 // What models.py requires before it calls a folder a model.
 const char* const kModelFiles[] = {"config.json", "model.bin", "tokenizer.json"};
+// And where it keeps the speaker model.
+const char* const kSpeakerModel = "speakers/campplus.onnx";
 
 bool ends_with(const std::string& s, const std::string& suffix) {
     return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
@@ -29,6 +31,11 @@ bool Dictation::model_present(const std::filesystem::path& dir, const std::strin
     for (const char* f : kModelFiles)
         if (!std::filesystem::is_regular_file(dir / path_from_utf8(name) / f, ec)) return false;
     return true;
+}
+
+bool Dictation::speaker_model_present(const std::filesystem::path& dir) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(dir / kSpeakerModel, ec);
 }
 
 Dictation::LineMeaning Dictation::read_server_line(const std::string& line, int port) {
@@ -121,8 +128,10 @@ bool Dictation::wanted() const {
 void Dictation::download(const std::string& model) {
     {
         std::lock_guard<std::mutex> g(m_);
-        if (!status_.downloading.empty()) return;
-        download_wanted_ = model;
+        if (status_.downloading == model) return;
+        for (const auto& queued : download_wanted_)
+            if (queued == model) return;
+        download_wanted_.push_back(model);
         wake_ = true;
     }
     cv_.notify_all();
@@ -161,6 +170,7 @@ void Dictation::launch(std::unique_lock<std::mutex>& lk) {
     }
     std::string origins;
     for (const auto& o : config_.origins) origins += (origins.empty() ? "" : " ") + o;
+    // Deferred transcription reads recordings from here (docs/29); the server only reads.
     std::vector<std::string> args = {"serve",
                                      "--local",
                                      "--engine",
@@ -176,6 +186,10 @@ void Dictation::launch(std::unique_lock<std::mutex>& lk) {
                                      "--origins",
                                      origins,
                                      "--key-stdin"};
+    if (!config_.audio_root.empty()) {
+        args.push_back("--audio-root");
+        args.push_back(path_to_utf8(config_.audio_root));
+    }
     std::uint64_t gen = ++generation_;
     int port = config_.port;
     server_exited_ = false;
@@ -220,7 +234,8 @@ void Dictation::launch(std::unique_lock<std::mutex>& lk) {
 }
 
 void Dictation::launch_download(std::unique_lock<std::mutex>& lk) {
-    std::string model = std::exchange(download_wanted_, std::string());
+    std::string model = download_wanted_.front();
+    download_wanted_.pop_front();
     status_.download_problem.clear();
     std::error_code ec;
     if (config_.program.empty() || !std::filesystem::is_regular_file(config_.program, ec)) {
@@ -370,7 +385,9 @@ void Dictation::run() {
             } else {
                 status_.download_problem = fetch_result_;
                 lines.push_back("download of " + model + " failed: " + fetch_result_);
+                download_wanted_.clear();
             }
+            if (!download_wanted_.empty()) wake_ = true;
         }
 
         lk.unlock();

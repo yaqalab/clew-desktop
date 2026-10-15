@@ -97,6 +97,8 @@ enum class S {
     SttNeedsMemory,  // %s model, %u GB, %s this computer's
     SttNeedsGpu,     // %s model
     SttGpuFound,
+    SttSpeakersMissing,  // %s size
+    SttSpeakerModel,
     SttHere,
     SttNotHere,
     SttDownload,
