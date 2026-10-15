@@ -10,6 +10,10 @@ rem (that sends the files' hashes to that server; off unless set).
 setlocal
 cd /d "%~dp0"
 call ..\build.cmd Release || exit /b 1
+rem Dictation's speech server (docs/28), built once with Python into tools\stt-server\dist.
+if not exist ..\..\..\stt-server\dist\clew-stt-server\clew-stt-server.exe (
+  powershell -NoProfile -ExecutionPolicy Bypass -File ..\..\..\stt-server\build_exe.ps1 || exit /b 1
+)
 set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (echo Inno Setup 6 was not found: winget install JRSoftware.InnoSetup& exit /b 1)
@@ -29,6 +33,7 @@ if defined CLEW_SIGN_TIMESTAMP set "STAMP=/tr %CLEW_SIGN_TIMESTAMP% /td SHA256"
 set SIGN=sign /fd SHA256 /n YaqaLab /s My %STAMP%
 
 "%SIGNTOOL%" %SIGN% /d "Clew audio server" ..\build\clew-audio-server.exe || exit /b 1
+"%SIGNTOOL%" %SIGN% /d "Clew dictation server" ..\..\..\stt-server\dist\clew-stt-server\clew-stt-server.exe || exit /b 1
 "%ISCC%" /Q /DSign "/Syaqalab=$q%SIGNTOOL%$q %SIGN% /d $qClew Audio Server$q $f" clew-audio-server.iss || exit /b 1
 
 :done

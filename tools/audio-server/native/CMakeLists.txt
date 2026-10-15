@@ -5,6 +5,25 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Ninja learns each file's headers from MSVC's "Note: including file:" lines, written in the
+# language Visual Studio is installed in. CMake reads that line without /utf-8; this project
+# compiles with it. In French the line holds a narrow no-break space, which comes out as "?"
+# without /utf-8 and as itself with it, so the prefix never matched: no header was tracked, and
+# a changed struct left stale objects behind that corrupted the heap at run time (2026-10-16).
+# Read the line again the way this project compiles.
+if(MSVC AND CMAKE_GENERATOR MATCHES "Ninja")
+  set(probe_dir ${CMAKE_BINARY_DIR}/CMakeFiles/showincludes)
+  file(MAKE_DIRECTORY ${probe_dir})
+  file(WRITE ${probe_dir}/probe.cpp "#include <cstddef>\n")
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} /nologo /utf-8 /showIncludes /c probe.cpp
+    WORKING_DIRECTORY ${probe_dir}
+    OUTPUT_VARIABLE probe_out ERROR_VARIABLE probe_out)
+  if(probe_out MATCHES "\n([^\r\n]*:) +[A-Za-z]:[^\r\n]*cstddef")
+    set(CMAKE_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_1} ")
+  endif()
+endif()
+
 if(MSVC)
   # Static C++ runtime: the .exe needs no Visual C++ redistributable.
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -18,6 +37,7 @@ endif()
 # The portable core: the HTTP server, links, files, mp3 tags, settings, conversion cache.
 add_library(clew_core STATIC
   src/core/convert_cache.cpp
+  src/core/dictation.cpp
   src/core/files.cpp
   src/core/headless.cpp
   src/core/json.cpp

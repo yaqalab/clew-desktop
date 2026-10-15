@@ -46,9 +46,11 @@ Service::Service(std::filesystem::path settings_file, std::filesystem::path cach
         record(line);
         notify();
     });
+    dictation_ = std::make_unique<Dictation>([this] { notify(); }, [this](const std::string& line) { record(line); });
 }
 
 Service::~Service() {
+    dictation_.reset();
     server_->stop();
     server_.reset();
     cache_.reset();
@@ -128,6 +130,80 @@ std::string Service::secret(bool* made) {
     return secret_;
 }
 
+std::string Service::stt_key(bool* made) {
+    if (made) *made = false;
+    std::lock_guard<std::mutex> g(lock_);
+    if (!stt_key_.empty()) return stt_key_;
+    if (settings_.stt_secret) {
+        if (auto opened = platform::open_secret(*settings_.stt_secret)) {
+            stt_key_ = *opened;
+            return stt_key_;
+        }
+    }
+    std::string fresh = new_stt_key();
+    auto sealed = platform::seal_secret(fresh);
+    if (!sealed) return "";
+    settings_.stt_secret = *sealed;
+    settings_.save(settings_file_);
+    stt_key_ = fresh;
+    if (made) *made = true;
+    return stt_key_;
+}
+
+std::string Service::reset_stt_key() {
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        stt_key_.clear();
+        settings_.stt_secret.reset();
+    }
+    std::string key = stt_key();
+    dictation_->configure(dictation_config(settings()));
+    record("a new dictation key was made; the old one no longer works");
+    notify();
+    return key;
+}
+
+std::filesystem::path Service::stt_models_dir() const {
+    Settings s = settings();
+    return s.stt_models_dir.empty() ? platform::default_stt_models_dir() : path_from_utf8(s.stt_models_dir);
+}
+
+void Service::set_stt_program(std::filesystem::path program) {
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        stt_program_ = std::move(program);
+    }
+    dictation_->configure(dictation_config(settings()));
+}
+
+void Service::set_stt_fake_engine(bool fake) {
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        stt_fake_engine_ = fake;
+    }
+    dictation_->configure(dictation_config(settings()));
+}
+
+void Service::start_dictation_if_enabled() {
+    if (settings().stt_enabled) dictation_->start();
+}
+
+DictationConfig Service::dictation_config(const Settings& s) {
+    DictationConfig c;
+    c.key = stt_key();
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        c.program = stt_program_.empty() ? platform::find_stt_server() : stt_program_;
+        c.fake_engine = stt_fake_engine_;
+    }
+    c.model = s.stt_model;
+    c.models_dir = s.stt_models_dir.empty() ? platform::default_stt_models_dir() : path_from_utf8(s.stt_models_dir);
+    c.language = s.stt_language;
+    c.port = s.stt_port;
+    c.origins = s.origins;
+    return c;
+}
+
 std::string Service::reset_secret() {
     {
         std::lock_guard<std::mutex> g(lock_);
@@ -166,14 +242,20 @@ ServerConfig Service::server_config(const Settings& s, std::string* problem) {
 
 std::string Service::apply(Settings s, bool persist) {
     int old_port;
+    bool stt_was_enabled;
     {
         std::lock_guard<std::mutex> g(lock_);
         old_port = settings_.port;
+        stt_was_enabled = settings_.stt_enabled;
         s.secret = settings_.secret;  // the secret is changed only by reset_secret()
+        s.stt_secret = settings_.stt_secret;  // and the dictation key only by reset_stt_key()
         settings_ = s;
     }
     if (persist) settings_.save(settings_file_);
     secret();
+    dictation_->configure(dictation_config(s));
+    // Ticking "start with the server" means wanting it now as well.
+    if (s.stt_enabled && !stt_was_enabled) dictation_->start();
     cache_->set_enabled(s.convert);
     cache_->set_prepare(s.prepare);
     cache_->set_limit_bytes(std::uint64_t(s.cache_mb) * 1024 * 1024);

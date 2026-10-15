@@ -70,6 +70,54 @@ enum class S {
     AlreadyRunning,
     Start,
     Stop,
+    // The tabs, and the Dictation tab (docs/28)
+    TabAudio,
+    TabDictation,
+    SttOff,
+    SttMissing,
+    SttNoModel,   // %s model
+    SttLoading,   // %s model
+    SttReady,     // %s model, %s languages
+    SttFailed,    // %s why
+    SttDownloading,     // %s model, %d percent
+    SttDownloadFailed,  // %s why
+    SttNoMemory,
+    LangChosen,
+    LangEnglish,
+    LangJapanese,
+    LangFrench,
+    LangMalagasy,
+    LangPerSession,
+    GroupSttModel,
+    SttModelLine,  // %s name, %s size, %s use, %s here or not
+    SttUseLive,
+    SttUseFiles,
+    SttUseGpu,
+    SttEnglishOnly,
+    SttNeedsMemory,  // %s model, %u GB, %s this computer's
+    SttNeedsGpu,     // %s model
+    SttGpuFound,
+    SttHere,
+    SttNotHere,
+    SttDownload,
+    SttDownloadConfirm,  // %s model, %s size, %s folder, %s free
+    SttNoSpace,          // %s needed, %s free
+    GroupSttFolder,
+    Change,
+    SttFree,  // %s
+    GroupSttConn,
+    Language,
+    GroupSttKey,
+    SttKeyHint,
+    NewSttKeyConfirm,
+    SttAutostart,
+    SttLocal,
+    ChooseModelsFolder,
+    BadSttPort,
+    NewKey,
+    MenuDictationStart,
+    MenuDictationStop,
+    MenuCopySttKey,
 };
 
 const wchar_t* tr(S id);

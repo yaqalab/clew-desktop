@@ -1,5 +1,9 @@
 #include "headless.h"
 
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+
 #include "files.h"
 #include "platform.h"
 #include "service.h"
@@ -25,9 +29,50 @@ const char* const kHeadlessHelp =
     "  --reset-secret         make a new secret (saved); the old one stops working\n"
     "  --config <file>        the settings file (default: the settings window's)\n"
     "  --cache-dir <dir>      where converted copies go (default: .clew-converted in the folder)\n"
+    "\n"
+    "Dictation (the speech server on this computer, docs/28):\n"
+    "  --dictation            start it too\n"
+    "  --stt-port <n>         default 47822\n"
+    "  --stt-model <name>     small or large-v3-turbo\n"
+    "  --stt-models-dir <dir> where the models are\n"
+    "  --stt-language <code>  en, ja, fr or mg; default: Clew names one per session\n"
+    "  --stt-download <name>  fetch a model, then quit\n"
+    "  --stt-program <exe>    the server program (default: clew-stt-server beside this one)\n"
+    "  --show-stt-key         print its key\n"
     "  --version\n";
 
 namespace {
+
+// --stt-download: fetches one model with the server program, saying how far it got.
+int download_model(Service& svc, Settings s, const std::string& model, const Console& console) {
+    svc.apply(s, /*persist=*/false);
+    auto dir = svc.stt_models_dir();
+    if (Dictation::model_present(dir, model)) {
+        console.out("Already here: " + path_to_utf8(dir / path_from_utf8(model)));
+        return 0;
+    }
+    std::mutex m;
+    std::condition_variable cv;
+    svc.dictation().download(model);
+    int last = -1;
+    for (;;) {
+        auto st = svc.dictation().status();
+        if (st.downloading.empty() && (Dictation::model_present(dir, model) || !st.download_problem.empty())) {
+            if (!st.download_problem.empty()) {
+                console.out("Download failed: " + st.download_problem);
+                return 1;
+            }
+            console.out("Downloaded: " + path_to_utf8(dir / path_from_utf8(model)));
+            return 0;
+        }
+        if (st.percent != last && !st.downloading.empty()) {
+            last = st.percent;
+            console.out(model + ": " + std::to_string(st.percent) + " %");
+        }
+        std::unique_lock<std::mutex> lk(m);
+        cv.wait_for(lk, std::chrono::milliseconds(200));
+    }
+}
 
 bool take(const std::vector<std::string>& args, std::size_t& i, std::string* value) {
     if (i + 1 >= args.size()) return false;
@@ -39,9 +84,12 @@ bool take(const std::vector<std::string>& args, std::size_t& i, std::string* val
 
 int run_headless(const std::vector<std::string>& args, const Console& console) {
     std::string folder, config, cache_dir, ffmpeg, value;
+    std::string stt_model, stt_models_dir, stt_language, stt_download, stt_program;
     std::vector<std::string> origins;
     int port = -1, link_seconds = 0;  // -1: the settings' port; 0: any free port
+    int stt_port = -1;
     bool reset = false, show = false, no_convert = false, no_system = false;
+    bool dictation = false, show_stt_key = false, stt_fake = false;
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string& a = args[i];
         if (a == "--headless") continue;
@@ -58,6 +106,19 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
         else if (a == "--config") ok = take(args, i, &config);
         else if (a == "--cache-dir") ok = take(args, i, &cache_dir);
         else if (a == "--ffmpeg") ok = take(args, i, &ffmpeg);
+        else if (a == "--dictation") dictation = true;
+        else if (a == "--show-stt-key") show_stt_key = true;
+        else if (a == "--stt-fake-engine") stt_fake = true;  // the tests: no model needed
+        else if (a == "--stt-model") ok = take(args, i, &stt_model) && stt_model_known(stt_model);
+        else if (a == "--stt-models-dir") ok = take(args, i, &stt_models_dir);
+        else if (a == "--stt-language") ok = take(args, i, &stt_language) && stt_language_known(stt_language);
+        else if (a == "--stt-download") ok = take(args, i, &stt_download) && stt_model_known(stt_download);
+        else if (a == "--stt-program") ok = take(args, i, &stt_program);
+        else if (a == "--stt-port") {
+            ok = take(args, i, &value) && all_digits(value) && value.size() <= 5 && std::stoi(value) >= 1024 &&
+                 std::stoi(value) <= 65535;
+            if (ok) stt_port = std::stoi(value);
+        }
         else if (a == "--allow-origin") {
             ok = take(args, i, &value);
             auto o = ok ? normalize_origin(value) : std::nullopt;
@@ -93,6 +154,17 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
     Service svc(config.empty() ? default_settings_file() : path_from_utf8(config),
                 cache_dir.empty() ? std::filesystem::path() : path_from_utf8(cache_dir), console.err);
     Settings s = svc.settings();
+    const bool had_stt_key = s.stt_secret.has_value();
+    if (!stt_model.empty()) s.stt_model = stt_model;
+    if (!stt_models_dir.empty())
+        s.stt_models_dir = path_to_utf8(std::filesystem::absolute(path_from_utf8(stt_models_dir)));
+    if (!stt_language.empty()) s.stt_language = stt_language;
+    if (stt_port >= 0) s.stt_port = stt_port;
+    if (!stt_program.empty()) svc.set_stt_program(std::filesystem::absolute(path_from_utf8(stt_program)));
+    if (stt_fake) svc.set_stt_fake_engine(true);
+
+    if (!stt_download.empty()) return download_model(svc, s, stt_download, console);
+
     if (!folder.empty()) s.folder = path_to_utf8(std::filesystem::absolute(path_from_utf8(folder)));
     if (port >= 0) s.port = port;
     for (const auto& o : origins) s.origins.push_back(o);
@@ -153,8 +225,18 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
     } else {
         console.out("Secret: in the settings window, or start with --show-secret.");
     }
+    if (dictation) {
+        bool made_key = false;
+        std::string key = svc.stt_key(&made_key);
+        made_key = made_key || !had_stt_key;
+        svc.dictation().start();
+        console.out("Dictation  ->  http://127.0.0.1:" + std::to_string(s.stt_port) + "  (model " + s.stt_model +
+                    ", starting)");
+        if (made_key || show_stt_key) console.out("Dictation key - paste it into Clew's Dictation settings:\n    " + key);
+    }
     console.out("Press Ctrl+C to stop.");
     console.wait_for_stop();
+    svc.dictation().stop();
     svc.stop();
     return 0;
 }

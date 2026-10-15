@@ -1,6 +1,11 @@
 @echo off
 rem Builds the Windows program and runs the unit tests. Usage: build.cmd [Release|Debug]
 setlocal
+rem One code page for configuring and building: MSVC writes its "including file" lines in it,
+rem and ninja matches them against the prefix CMake recorded (CMakeLists.txt). Another code
+rem page at build time changes the line, ninja then records no header for that build, and a
+rem changed header later leaves stale objects.
+chcp 65001 >nul
 set CONFIG=%1
 if "%CONFIG%"=="" set CONFIG=Release
 set "PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;%PATH%"

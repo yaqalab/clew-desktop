@@ -3,9 +3,13 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace clew::platform {
 
@@ -51,5 +55,33 @@ fs::path find_ffmpeg();
 
 // This program's own file.
 fs::path self_path();
+
+// A helper program that runs as long as it is wanted (the dictation server, docs/28 §3.4).
+// Windows: in a job object, so it ends with this process, with a memory cap and no windows. Not
+// at low integrity like the converter: it writes its models folder.
+class Child {
+public:
+    virtual ~Child() = default;  // ends it, and waits for its output to be read
+    virtual void stop() = 0;     // ends it; `on_exit` still follows
+};
+
+// Starts `exe args`. `input` is written to its standard input, which is then closed: how a key
+// reaches it without being on a command line or in a file. Each line it prints (its standard
+// output and error together) goes to `on_line`, then `on_exit` gets its exit code; both are called
+// from a thread of the child's own, never after the Child is destroyed. Nothing on failure.
+std::unique_ptr<Child> start_child(const fs::path& exe, const std::vector<std::string>& args,
+                                   const std::string& input, std::uint64_t memory_limit,
+                                   std::function<void(const std::string&)> on_line,
+                                   std::function<void(int)> on_exit, std::string* why);
+
+// The dictation server: CLEW_STT_SERVER_EXE, else clew-stt-server/clew-stt-server(.exe) beside
+// this program (where the installer puts it). Empty when there is none.
+fs::path find_stt_server();
+
+// Where models go unless the user chose a folder: %LOCALAPPDATA%\clew-stt\models on Windows.
+fs::path default_stt_models_dir();
+
+// The computer's memory, in bytes (0 when unknown).
+std::uint64_t total_memory();
 
 }  // namespace clew::platform
