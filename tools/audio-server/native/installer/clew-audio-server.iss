@@ -6,6 +6,10 @@
 ; settings (folder, port, sealed secret) stay in %APPDATA%\clew-audio-server unless the user says to
 ; remove them. Converted copies live in the audio folder itself (.clew-converted) and are left there:
 ; they belong with the recordings.
+;
+; Dictation (docs/28) is an optional component: the speech server, tools/stt-server's build
+; (about 200 MB), in {app}\clew-stt-server, which the tray finds there. No model is shipped; the
+; Dictation tab downloads one to %LOCALAPPDATA%\clew-stt\models (or a folder the user chose).
 
 #ifndef AppVersion
   #define AppVersion "1.0.0"
@@ -55,8 +59,29 @@ en.AutostartTask=Start the audio server with Windows
 ja.AutostartTask=Windows の起動時にオーディオサーバーを開始する
 en.StartNow=Start the Clew audio server now
 ja.StartNow=Clew オーディオサーバーを今すぐ開始する
+en.DictationComponent=Dictation on this computer (speech recognition, about 200 MB; models are downloaded later)
+ja.DictationComponent=このコンピューターでの音声入力（音声認識、約 200 MB。モデルは後でダウンロード）
+en.TypeFull=Audio server and dictation
+ja.TypeFull=オーディオサーバーと音声入力
+en.TypeCompact=Audio server only
+ja.TypeCompact=オーディオサーバーのみ
+en.TypeCustom=Choose
+ja.TypeCustom=選択する
+en.MainComponent=Audio server
+ja.MainComponent=オーディオサーバー
+en.RemoveModels=Also remove the dictation models downloaded to %1?%n%nThey can be large; keep them if you will install dictation again.
+ja.RemoveModels=%1 にダウンロードした音声入力モデルも削除しますか？%n%nサイズが大きい場合があります。音声入力を再インストールする予定がある場合は残してください。
 en.RemoveSettings=Also remove the settings (the chosen folder, the port and the secret)?%n%nKeep them if you will install the audio server again: Clew can then go on using the same secret.
 ja.RemoveSettings=設定（選択したフォルダー、ポート、シークレット）も削除しますか？%n%n再インストールする予定がある場合は残してください。Clew は同じシークレットを使い続けられます。
+
+[Types]
+Name: "full"; Description: "{cm:TypeFull}"
+Name: "compact"; Description: "{cm:TypeCompact}"
+Name: "custom"; Description: "{cm:TypeCustom}"; Flags: iscustom
+
+[Components]
+Name: "main"; Description: "{cm:MainComponent}"; Types: full compact custom; Flags: fixed
+Name: "dictation"; Description: "{cm:DictationComponent}"; Types: full
 
 [Tasks]
 Name: "autostart"; Description: "{cm:AutostartTask}"
@@ -65,6 +90,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\build\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
+Source: "..\..\..\stt-server\dist\clew-stt-server\*"; DestDir: "{app}\clew-stt-server"; Components: dictation; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; Dictation unticked on an update: the old copy goes, so the tray does not offer it.
+Type: filesandordirs; Name: "{app}\clew-stt-server"; Components: not dictation
 
 [Icons]
 Name: "{group}\Clew Audio Server"; Filename: "{app}\{#AppExe}"
@@ -86,7 +116,12 @@ begin
   // The "Start with Windows" value may have been set from the window, not by this installer.
   if CurUninstallStep = usUninstall then
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'ClewAudioServer');
-  if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
+  if (CurUninstallStep = usPostUninstall) and not UninstallSilent then begin
+    if DirExists(ExpandConstant('{localappdata}\clew-stt\models')) then
+      if MsgBox(FmtMessage(CustomMessage('RemoveModels'), [ExpandConstant('{localappdata}\clew-stt\models')]),
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DelTree(ExpandConstant('{localappdata}\clew-stt'), True, True, True);
     if MsgBox(CustomMessage('RemoveSettings'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       DelTree(ExpandConstant('{userappdata}\clew-audio-server\settings.json'), False, True, False);
+  end;
 end;
