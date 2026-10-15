@@ -17,8 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 # webrtcvad is optional: ALEFA_STT_VAD=webrtc uses it, the default energy detector needs nothing.
 webrtc = ["webrtcvad-wheels>=2.0.11"]
-# The Windows build (clew docs/28): faster-whisper on the CPU, PyAV to decode without ffmpeg.
-local = ["faster-whisper>=1.2.1", "av>=11"]
+# The Windows build (clew docs/28): faster-whisper on the CPU, PyAV to decode without ffmpeg,
+# sherpa-onnx to tell voices apart in live transcription (docs/29).
+local = ["faster-whisper>=1.2.1", "av>=11", "sherpa-onnx>=1.12"]
 test = ["pytest>=8", "httpx>=0.27", "websockets>=12"]
 
 [project.scripts]

@@ -21,6 +21,8 @@ from .engine import Serial, continued, load_engine
 from .segmenter import Segment, Segmenter, make_vad
 from .session import (CLOSE_POLICY, CLOSE_TRY_LATER, ListenParams, ListenSession, clean_prompt,
                       offered_languages, pick_language)
+from .speakers import FakeSpeakerModel, SpeakerError, SpeakerModel
+from .transcribe import TranscribeParams, TranscribeSession
 
 log = logging.getLogger("alefa_stt")
 
@@ -40,7 +42,32 @@ LOOPBACK_ORIGIN = r"^http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 
 def create_app(settings: Settings, engine=None) -> FastAPI:
     keys = SingleKey(settings.single_key) if settings.single_key else KeyStore(settings.keys_file)
-    state = {"engine": Serial(engine) if engine else None, "sessions": 0}
+    state = {"engine": Serial(engine) if engine else None, "sessions": 0, "speakers": None}
+
+    def speaker_model():
+        """Loaded on first use; None when the model is not downloaded."""
+        if state["speakers"] is None:
+            if settings.speakers == "fake":
+                state["speakers"] = FakeSpeakerModel()
+            else:
+                from .models import speaker_model_path
+
+                path = speaker_model_path(settings.models_dir)
+                if path is None:
+                    return None
+                try:
+                    state["speakers"] = SpeakerModel(str(path))
+                except SpeakerError as exc:
+                    log.warning("speaker model: %s", exc)
+                    return None
+        return state["speakers"]
+
+    def speakers_available() -> bool:
+        if settings.speakers == "fake":
+            return True
+        from .models import speaker_model_path
+
+        return speaker_model_path(settings.models_dir) is not None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -92,7 +119,8 @@ def create_app(settings: Settings, engine=None) -> FastAPI:
         engine: Serial = state["engine"]
         return {"key": name, "model": f"whisper-{engine.model}", "window_seconds": engine.window_seconds,
                 "languages": offered_languages(settings, engine.languages),
-                "device": getattr(engine.engine, "device", "cpu")}
+                "device": getattr(engine.engine, "device", "cpu"),
+                "transcribe": True, "speakers": speakers_available(), "folder": bool(settings.audio_root)}
 
     @app.websocket("/v1/listen")
     async def listen(ws: WebSocket):
@@ -121,6 +149,41 @@ def create_app(settings: Settings, engine=None) -> FastAPI:
         state["sessions"] += 1
         try:
             await ListenSession(ws, state["engine"], settings, params, name).run()
+        finally:
+            state["sessions"] -= 1
+
+    @app.websocket("/v1/transcribe")
+    async def transcribe(ws: WebSocket):
+        origin = ws.headers.get("origin")
+        if origin and not origin_allowed(origin, settings):
+            await ws.close(code=CLOSE_POLICY)
+            return
+        offered = ws.scope.get("subprotocols") or []
+        key = _bearer(ws.headers.get("authorization")) or next(
+            (p for p in offered if p.startswith("stt.")), None)
+        name = await check_key(key)
+        if name is None:
+            await ws.close(code=CLOSE_POLICY)
+            return
+        await ws.accept(subprotocol=SUBPROTOCOL if SUBPROTOCOL in offered else None)
+        engine: Serial = state["engine"]
+        try:
+            params = TranscribeParams.parse(ws.query_params, settings, engine.languages)
+        except FormatError as exc:
+            await ws.send_json({"type": "Error", "description": str(exc)})
+            await ws.close(code=CLOSE_POLICY, reason=str(exc)[:120])
+            return
+        if state["sessions"] >= settings.max_sessions:
+            await ws.send_json({"type": "Error", "description": "too many sessions; try again shortly"})
+            await ws.close(code=CLOSE_TRY_LATER)
+            return
+        model = await asyncio.to_thread(speaker_model) if params.speakers else None
+        if params.speakers and model is None:
+            await ws.send_json({"type": "Warning",
+                                "description": "the speaker model is not downloaded: turns come without voices"})
+        state["sessions"] += 1
+        try:
+            await TranscribeSession(ws, engine, model, settings, params, name).run()
         finally:
             state["sessions"] -= 1
 

@@ -26,6 +26,8 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--models-dir")
     serve.add_argument("--cpu-threads", type=int)
     serve.add_argument("--device", choices=["auto", "cpu", "cuda"])
+    serve.add_argument("--audio-root", help="the audio server's folder, read for deferred transcription")
+    serve.add_argument("--speakers", choices=["auto", "fake"], help=argparse.SUPPRESS)
     serve.add_argument("--language", help="the only language offered; empty: each request names one")
     serve.add_argument("--origins", help="page addresses allowed to call, separated by spaces")
     serve.add_argument("--decoder", choices=["ffmpeg", "av"])
@@ -115,7 +117,8 @@ def _apply_serve_options(settings: Settings, args) -> None:
         settings.loopback_only = True
         settings.loopback_origins = True
         settings.decoder = "av"
-    for option in ("host", "port", "engine", "model", "models_dir", "cpu_threads", "device", "language", "decoder"):
+    for option in ("host", "port", "engine", "model", "models_dir", "cpu_threads", "device", "language", "decoder",
+                   "audio_root", "speakers"):
         value = getattr(args, option)
         if value is not None:
             setattr(settings, option, value)

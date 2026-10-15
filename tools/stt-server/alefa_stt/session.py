@@ -16,7 +16,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from . import SAMPLE_RATE
 from .audio import FormatError, open_stream
 from .config import Settings
-from .engine import Serial, continued, normalize_language
+from .engine import AUTO, Serial, continued, normalize_language
 from .segmenter import Segment, Segmenter, SpeechStarted, make_vad
 
 log = logging.getLogger("alefa_stt.session")
@@ -78,8 +78,10 @@ def offered_languages(settings: Settings, languages: list[str]) -> list[str]:
     return list(languages)
 
 
-def pick_language(asked: str | None, settings: Settings, languages: list[str]) -> str:
+def pick_language(asked: str | None, settings: Settings, languages: list[str], allow_auto: bool = False) -> str:
     offered = offered_languages(settings, languages)
+    if allow_auto and (asked or "").strip().lower() == AUTO and len(offered) > 1:
+        return AUTO
     language = normalize_language(asked) or (offered[0] if len(offered) == 1 else "en")
     if language not in offered:
         if offered == ["en"]:

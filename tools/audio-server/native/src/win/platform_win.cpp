@@ -101,6 +101,39 @@ HANDLE sandbox_job() {
     return job;
 }
 
+// The start attributes both kinds of child use: only `a` and `b` are inherited, and the child is
+// born inside `job`. Created outside it and assigned a moment later, a child whose parent died in
+// that moment stayed suspended forever, in no job (found by the tests, 2026-10-16); born inside,
+// it ends with the job's last handle like the rest.
+class StartAttributes {
+public:
+    bool init(HANDLE a, HANDLE b, HANDLE job) {
+        handles_[0] = a;
+        handles_[1] = b;
+        job_ = job;
+        SIZE_T size = 0;
+        InitializeProcThreadAttributeList(nullptr, 2, 0, &size);
+        buf_.resize(size);
+        auto list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(buf_.data());
+        if (!InitializeProcThreadAttributeList(list, 2, 0, &size)) return false;
+        list_ = list;
+        return UpdateProcThreadAttribute(list_, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles_, sizeof handles_,
+                                         nullptr, nullptr) &&
+               UpdateProcThreadAttribute(list_, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, &job_, sizeof job_, nullptr,
+                                         nullptr);
+    }
+    LPPROC_THREAD_ATTRIBUTE_LIST get() const { return list_; }
+    ~StartAttributes() {
+        if (list_) DeleteProcThreadAttributeList(list_);
+    }
+
+private:
+    std::vector<char> buf_;
+    LPPROC_THREAD_ATTRIBUTE_LIST list_ = nullptr;
+    HANDLE handles_[2] = {};
+    HANDLE job_ = nullptr;
+};
+
 // Runs `app` sandboxed; what it writes to its standard output becomes `out`. Its standard error is
 // kept (a little) to say why it failed.
 bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path& out, const ConvertControl& control,
@@ -115,15 +148,14 @@ bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path
     SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(err_r, HANDLE_FLAG_INHERIT, 0);
 
-    // Only these two handles reach the child, nothing else this process holds.
-    SIZE_T size = 0;
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
-    std::vector<char> attr_buf(size);
-    auto attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
-    HANDLE inherit[2] = {out_w, err_w};
-    if (!InitializeProcThreadAttributeList(attrs, 1, 0, &size) ||
-        !UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, nullptr,
-                                   nullptr)) {
+    Handle job(sandbox_job());
+    if (!job.h) {
+        if (why) *why = "no job object";
+        return false;
+    }
+    // Only these two handles reach the child, nothing else this process holds; it is born in the job.
+    StartAttributes attrs;
+    if (!attrs.init(out_w, err_w, job.h)) {
         if (why) *why = "no attribute list";
         return false;
     }
@@ -133,14 +165,7 @@ bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path
     si.StartupInfo.hStdInput = nullptr;
     si.StartupInfo.hStdOutput = out_w;
     si.StartupInfo.hStdError = err_w;
-    si.lpAttributeList = attrs;
-
-    Handle job(sandbox_job());
-    if (!job.h) {
-        DeleteProcThreadAttributeList(attrs);
-        if (why) *why = "no job object";
-        return false;
-    }
+    si.lpAttributeList = attrs.get();
     // The file being opened at normal priority; preparing ahead only with what is left over.
     DWORD flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW |
                   (control.background ? IDLE_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS);
@@ -153,7 +178,6 @@ bool run_sandboxed(const std::wstring& app, std::wstring cmdline, const fs::path
         started = CreateProcessW(app.c_str(), cmdline.data(), nullptr, nullptr, TRUE, flags, nullptr, nullptr,
                                  &si.StartupInfo, &pi);
     }
-    DeleteProcThreadAttributeList(attrs);
     if (!started) {
         if (why) *why = "could not start the converter";
         return false;
@@ -381,14 +405,13 @@ std::unique_ptr<Child> start_child(const fs::path& exe, const std::vector<std::s
     SetHandleInformation(in_w, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
 
-    SIZE_T size = 0;
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
-    std::vector<char> attr_buf(size);
-    auto attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
-    HANDLE inherit[2] = {in_r, out_w};
-    if (!InitializeProcThreadAttributeList(attrs, 1, 0, &size) ||
-        !UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, nullptr,
-                                   nullptr)) {
+    Handle job(helper_job(memory_limit));
+    if (!job.h) {
+        if (why) *why = "no job object";
+        return nullptr;
+    }
+    StartAttributes attrs;
+    if (!attrs.init(in_r, out_w, job.h)) {
         if (why) *why = "no attribute list";
         return nullptr;
     }
@@ -398,14 +421,7 @@ std::unique_ptr<Child> start_child(const fs::path& exe, const std::vector<std::s
     si.StartupInfo.hStdInput = in_r;
     si.StartupInfo.hStdOutput = out_w;
     si.StartupInfo.hStdError = out_w;
-    si.lpAttributeList = attrs;
-
-    Handle job(helper_job(memory_limit));
-    if (!job.h) {
-        DeleteProcThreadAttributeList(attrs);
-        if (why) *why = "no job object";
-        return nullptr;
-    }
+    si.lpAttributeList = attrs.get();
     std::wstring app = exe.wstring();
     std::wstring cmd = win::quote_arg(app);
     for (const auto& a : args) cmd += L" " + win::quote_arg(win::widen(a));
@@ -416,7 +432,6 @@ std::unique_ptr<Child> start_child(const fs::path& exe, const std::vector<std::s
     BOOL started = CreateProcessW(app.c_str(), cmd.data(), nullptr, nullptr, TRUE,
                                   EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr,
                                   exe.parent_path().c_str(), &si.StartupInfo, &pi);
-    DeleteProcThreadAttributeList(attrs);
     if (!started) {
         if (why) *why = "could not start " + path_to_utf8_win(exe) + " (" + std::to_string(GetLastError()) + ")";
         return nullptr;

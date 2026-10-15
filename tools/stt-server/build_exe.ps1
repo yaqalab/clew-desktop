@@ -27,7 +27,7 @@ $excludeArgs = $exclude | ForEach-Object { "--exclude-module", $_ }
 & $py -m PyInstaller --noconfirm --clean --onedir --console --name clew-stt-server `
   --distpath dist --workpath (Join-Path $venv "work") --specpath (Join-Path $venv "spec") `
   --collect-submodules uvicorn --collect-submodules websockets `
-  --collect-binaries ctranslate2 --collect-data faster_whisper `
+  --collect-binaries ctranslate2 --collect-data faster_whisper --collect-binaries sherpa_onnx `
   @excludeArgs `
   clew_stt_server.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
