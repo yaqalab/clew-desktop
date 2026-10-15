@@ -1,5 +1,5 @@
-// The Windows side of platform.h: system randomness, DPAPI for the secret, the user's folders, and
-// conversion in a sandboxed child process.
+// The Windows side of platform.h: system randomness, DPAPI for the secret, the user's folders,
+// conversion in a sandboxed child process, and the dictation server as a child in a job.
 #include <windows.h>
 #include <bcrypt.h>
 #include <dpapi.h>
@@ -7,6 +7,7 @@
 #include <shlobj.h>
 
 #include <atomic>
+#include <iterator>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -23,6 +24,8 @@ namespace {
 const char kEntropy[] = "clew-audio-server/secret/v1";
 constexpr DWORD kConvertTimeoutMs = 30 * 60 * 1000;
 constexpr SIZE_T kChildMemory = SIZE_T(1536) * 1024 * 1024;
+
+std::string path_to_utf8_win(const fs::path& p) { return win::narrow(p.wstring()); }
 
 fs::path known_folder(REFKNOWNFOLDERID id) {
     PWSTR p = nullptr;
@@ -294,6 +297,159 @@ bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& o
                        L" -f mp3 pipe:1";
     return run_sandboxed(app, cmd, out, control, why);
 }
+
+namespace {
+
+// The dictation server's job: ends with this process (the job's handle closes with it), a memory
+// cap, no windows or clipboard. Several processes are allowed: a Python program may start helpers.
+HANDLE helper_job(std::uint64_t memory_limit) {
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (!job) return nullptr;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION lim{};
+    lim.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+                                           JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION |
+                                           (memory_limit ? JOB_OBJECT_LIMIT_PROCESS_MEMORY : 0);
+    lim.ProcessMemoryLimit = SIZE_T(memory_limit);
+    JOBOBJECT_BASIC_UI_RESTRICTIONS ui{};
+    ui.UIRestrictionsClass = JOB_OBJECT_UILIMIT_DESKTOP | JOB_OBJECT_UILIMIT_DISPLAYSETTINGS |
+                             JOB_OBJECT_UILIMIT_EXITWINDOWS | JOB_OBJECT_UILIMIT_GLOBALATOMS |
+                             JOB_OBJECT_UILIMIT_HANDLES | JOB_OBJECT_UILIMIT_READCLIPBOARD |
+                             JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS | JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &lim, sizeof lim) ||
+        !SetInformationJobObject(job, JobObjectBasicUIRestrictions, &ui, sizeof ui)) {
+        CloseHandle(job);
+        return nullptr;
+    }
+    return job;
+}
+
+class WinChild final : public Child {
+public:
+    WinChild(HANDLE job, HANDLE process, HANDLE output, std::function<void(const std::string&)> on_line,
+             std::function<void(int)> on_exit)
+        : job_(job), process_(process), output_(output) {
+        reader_ = std::thread([this, on_line = std::move(on_line), on_exit = std::move(on_exit)] {
+            std::string pending;
+            char buf[4096];
+            DWORD n = 0;
+            while (ReadFile(output_.h, buf, sizeof buf, &n, nullptr) && n > 0) {
+                pending.append(buf, n);
+                std::size_t end;
+                while ((end = pending.find('\n')) != std::string::npos) {
+                    std::string line = pending.substr(0, end);
+                    if (!line.empty() && line.back() == '\r') line.pop_back();
+                    pending.erase(0, end + 1);
+                    if (on_line) on_line(line);
+                }
+                if (pending.size() > 65536) pending.clear();  // a line that never ends is not one
+            }
+            if (!pending.empty() && on_line) on_line(pending);
+            WaitForSingleObject(process_.h, INFINITE);
+            DWORD code = 1;
+            GetExitCodeProcess(process_.h, &code);
+            if (on_exit) on_exit(int(code));
+        });
+    }
+
+    ~WinChild() override {
+        stop();
+        if (reader_.joinable()) reader_.join();
+    }
+
+    void stop() override { TerminateJobObject(job_.h, 1); }
+
+private:
+    Handle job_, process_, output_;
+    std::thread reader_;
+};
+
+}  // namespace
+
+std::unique_ptr<Child> start_child(const fs::path& exe, const std::vector<std::string>& args,
+                                   const std::string& input, std::uint64_t memory_limit,
+                                   std::function<void(const std::string&)> on_line, std::function<void(int)> on_exit,
+                                   std::string* why) {
+    SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
+    HANDLE in_r = nullptr, in_w = nullptr, out_r = nullptr, out_w = nullptr;
+    if (!CreatePipe(&in_r, &in_w, &sa, 0) || !CreatePipe(&out_r, &out_w, &sa, 1 << 16)) {
+        if (in_r) CloseHandle(in_r);
+        if (in_w) CloseHandle(in_w);
+        if (why) *why = "no pipe";
+        return nullptr;
+    }
+    Handle ir(in_r), iw(in_w), orr(out_r), ow(out_w);
+    SetHandleInformation(in_w, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
+
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+    std::vector<char> attr_buf(size);
+    auto attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
+    HANDLE inherit[2] = {in_r, out_w};
+    if (!InitializeProcThreadAttributeList(attrs, 1, 0, &size) ||
+        !UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, nullptr,
+                                   nullptr)) {
+        if (why) *why = "no attribute list";
+        return nullptr;
+    }
+    STARTUPINFOEXW si{};
+    si.StartupInfo.cb = sizeof si;
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = in_r;
+    si.StartupInfo.hStdOutput = out_w;
+    si.StartupInfo.hStdError = out_w;
+    si.lpAttributeList = attrs;
+
+    Handle job(helper_job(memory_limit));
+    if (!job.h) {
+        DeleteProcThreadAttributeList(attrs);
+        if (why) *why = "no job object";
+        return nullptr;
+    }
+    std::wstring app = exe.wstring();
+    std::wstring cmd = win::quote_arg(app);
+    for (const auto& a : args) cmd += L" " + win::quote_arg(win::widen(a));
+    // Python writes its lines at once rather than when a buffer fills.
+    SetEnvironmentVariableW(L"PYTHONUNBUFFERED", L"1");
+    SetEnvironmentVariableW(L"PYTHONIOENCODING", L"utf-8");
+    PROCESS_INFORMATION pi{};
+    BOOL started = CreateProcessW(app.c_str(), cmd.data(), nullptr, nullptr, TRUE,
+                                  EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr,
+                                  exe.parent_path().c_str(), &si.StartupInfo, &pi);
+    DeleteProcThreadAttributeList(attrs);
+    if (!started) {
+        if (why) *why = "could not start " + path_to_utf8_win(exe) + " (" + std::to_string(GetLastError()) + ")";
+        return nullptr;
+    }
+    Handle thread(pi.hThread);
+    if (!AssignProcessToJobObject(job.h, pi.hProcess)) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hProcess);
+        if (why) *why = "could not put it in a job";
+        return nullptr;
+    }
+    ResumeThread(pi.hThread);
+    ir.reset();
+    ow.reset();
+    DWORD written = 0;
+    if (!input.empty()) WriteFile(iw.h, input.data(), DWORD(input.size()), &written, nullptr);
+    iw.reset();
+    HANDLE job_h = job.h, out_h = orr.h;
+    job.h = nullptr;
+    orr.h = nullptr;
+    return std::make_unique<WinChild>(job_h, pi.hProcess, out_h, std::move(on_line), std::move(on_exit));
+}
+
+fs::path find_stt_server() {
+    wchar_t forced[MAX_PATH * 2];
+    DWORD n = GetEnvironmentVariableW(L"CLEW_STT_SERVER_EXE", forced, DWORD(std::size(forced)));
+    if (n > 0 && n < std::size(forced)) return fs::path(forced);
+    std::error_code ec;
+    auto beside = self_path().parent_path() / "clew-stt-server" / "clew-stt-server.exe";
+    return fs::is_regular_file(beside, ec) ? beside : fs::path();
+}
+
+fs::path default_stt_models_dir() { return known_folder(FOLDERID_LocalAppData) / "clew-stt" / "models"; }
 
 fs::path find_ffmpeg() {
     auto beside = self_path().parent_path() / "ffmpeg.exe";

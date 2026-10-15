@@ -26,7 +26,8 @@ MODELS: dict[str, str] = {
 FILES = ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt", "vocabulary.json",
          "preprocessor_config.json")
 REQUIRED = ("config.json", "model.bin", "tokenizer.json")
-HUB = "https://huggingface.co"
+# ALEFA_STT_HUB: another address that answers like Hugging Face (the tray's tests).
+HUB = os.environ.get("ALEFA_STT_HUB", "https://huggingface.co").rstrip("/")
 
 
 class DownloadError(RuntimeError):

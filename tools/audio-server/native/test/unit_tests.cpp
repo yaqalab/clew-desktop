@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "dictation.h"
 #include "files.h"
 #include "json.h"
 #include "mp3.h"
@@ -251,6 +252,63 @@ static void settings_file(const fs::path& tmp) {
     CHECK(new_secret().size() == 32 && new_secret() != new_secret());
 }
 
+static void dictation_settings(const fs::path& tmp) {
+    fs::path file = tmp / "stt" / "settings.json";
+    Settings s;
+    CHECK(!s.stt_enabled && s.stt_model == "small" && s.stt_port == kDefaultSttPort && s.stt_language.empty());
+    s.stt_enabled = true;
+    s.stt_model = "large-v3-turbo";
+    s.stt_models_dir = "E:\\models \xe6\x97\xa5";
+    s.stt_language = "mg";
+    s.stt_port = 50001;
+    std::string key = new_stt_key();
+    CHECK(starts_with(key, "stt.local.") && key.size() == 10 + 32);
+    s.stt_secret = platform::seal_secret(key);
+    CHECK(s.save(file));
+    std::ifstream in(file, std::ios::binary);
+    std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(raw.find(key) == std::string::npos);
+    Settings back = Settings::load(file);
+    CHECK(back.stt_enabled && back.stt_model == "large-v3-turbo" && back.stt_models_dir == s.stt_models_dir);
+    CHECK(back.stt_language == "mg" && back.stt_port == 50001);
+    CHECK(back.stt_secret && *platform::open_secret(*back.stt_secret) == key);
+    // What the window cannot offer falls back to the defaults.
+    write(file, R"({"v":1,"sttModel":"medium","sttLanguage":"de","sttPort":80})");
+    Settings odd = Settings::load(file);
+    CHECK(odd.stt_model == "small" && odd.stt_language.empty() && odd.stt_port == kDefaultSttPort);
+    for (const char* code : {"", "en", "ja", "fr", "mg"}) CHECK(stt_language_known(code));
+    CHECK(!stt_language_known("de") && stt_model_known("small") && !stt_model_known("../small"));
+}
+
+static void dictation_helpers(const fs::path& tmp) {
+    fs::path models = tmp / "models";
+    fs::create_directories(models / "small");
+    CHECK(!Dictation::model_present(models, "small"));
+    write(models / "small" / "config.json", "{}");
+    write(models / "small" / "model.bin", "m");
+    CHECK(!Dictation::model_present(models, "small"));  // tokenizer.json missing: a download that stopped
+    write(models / "small" / "tokenizer.json", "{}");
+    CHECK(Dictation::model_present(models, "small"));
+    CHECK(!Dictation::model_present(models, "..") && !Dictation::model_present(models, "a/b"));
+    CHECK(!Dictation::model_present(models, ""));
+
+    auto line = [](const std::string& l) { return Dictation::read_server_line(l, 47822); };
+    CHECK(line("INFO:     Uvicorn running on http://127.0.0.1:47822 (Press CTRL+C to quit)").ready);
+    CHECK(line("INFO alefa_stt: loading engine whisper (model small)").problem.empty());
+    CHECK(line("INFO alefa_stt: engine ready: small, 30 s window").problem.empty());
+    CHECK(line("ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 47822): only one "
+               "usage of each socket address is normally permitted").problem == "port 47822 is in use");
+    CHECK(line("alefa_stt.engine.EngineError: the model 'small' is not downloaded into C:\\m").problem ==
+          "the model 'small' is not downloaded into C:\\m");
+    CHECK(line("MemoryError").problem == "not enough memory for this model");
+    CHECK(line("RuntimeError: Unable to open file 'model.bin'").problem == "Unable to open file 'model.bin'");
+    CHECK(line("ERROR:    Application startup failed. Exiting.").problem == "Application startup failed. Exiting.");
+    CHECK(line("ERROR:    Application startup failed. Exiting.").vague);
+    CHECK(!line("RuntimeError: Unable to open file 'model.bin'").vague);
+    CHECK(line("INFO alefa_stt: GET /api/ping 200 1ms").problem.empty());
+    CHECK(line("INFO alefa_stt.session: session 1 key=local audio=3.0s (client closed)").problem.empty());
+}
+
 int main() {
     fs::path tmp = fs::temp_directory_path() / ("clew-unit-" + std::to_string(std::rand()) +
                                                  std::to_string(reinterpret_cast<std::uintptr_t>(&failures) & 0xFFFF));
@@ -264,6 +322,8 @@ int main() {
     folders(tmp);
     mp3_heads(tmp);
     settings_file(tmp);
+    dictation_settings(tmp);
+    dictation_helpers(tmp);
     std::error_code ec;
     fs::remove_all(tmp, ec);
     std::printf("%d checks, %d failed\n", checks, failures);

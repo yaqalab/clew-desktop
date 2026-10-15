@@ -50,6 +50,15 @@ Settings Settings::load(const std::filesystem::path& file) {
     const auto& secret = d["secret"];
     if (secret["kind"].is_string() && secret["data"].is_string())
         s.secret = platform::Sealed{secret["kind"].str(), secret["data"].str()};
+    if (d["sttEnabled"].is_bool()) s.stt_enabled = d["sttEnabled"].boolean();
+    if (d["sttModel"].is_string() && stt_model_known(d["sttModel"].str())) s.stt_model = d["sttModel"].str();
+    if (d["sttModelsDir"].is_string()) s.stt_models_dir = d["sttModelsDir"].str();
+    if (d["sttLanguage"].is_string() && stt_language_known(d["sttLanguage"].str()))
+        s.stt_language = d["sttLanguage"].str();
+    s.stt_port = clamp_int(d["sttPort"], 1024, 65535, kDefaultSttPort);
+    const auto& stt_secret = d["sttSecret"];
+    if (stt_secret["kind"].is_string() && stt_secret["data"].is_string())
+        s.stt_secret = platform::Sealed{stt_secret["kind"].str(), stt_secret["data"].str()};
     return s;
 }
 
@@ -72,6 +81,17 @@ bool Settings::save(const std::filesystem::path& file) const {
         sv.set("kind", secret->kind);
         sv.set("data", secret->data);
         d.set("secret", sv);
+    }
+    d.set("sttEnabled", stt_enabled);
+    d.set("sttModel", stt_model);
+    d.set("sttModelsDir", stt_models_dir);
+    d.set("sttLanguage", stt_language);
+    d.set("sttPort", stt_port);
+    if (stt_secret) {
+        json::Value sv = json::Value::object();
+        sv.set("kind", stt_secret->kind);
+        sv.set("data", stt_secret->data);
+        d.set("sttSecret", sv);
     }
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
@@ -115,5 +135,17 @@ std::optional<std::string> normalize_origin(const std::string& text) {
 }
 
 std::string new_secret() { return base64url_encode(platform::random_bytes(24)); }
+
+std::string new_stt_key() { return "stt.local." + new_secret(); }
+
+bool stt_model_known(const std::string& name) {
+    for (const auto& m : kSttModels)
+        if (name == m.name) return true;
+    return false;
+}
+
+bool stt_language_known(const std::string& code) {
+    return code.empty() || code == "en" || code == "ja" || code == "fr" || code == "mg";
+}
 
 }  // namespace clew

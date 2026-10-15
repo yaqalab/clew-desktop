@@ -176,7 +176,7 @@ def create_app(settings: Settings, engine=None) -> FastAPI:
     return app
 
 
-LANGUAGE_NAMES = {"en": "english", "ja": "japanese", "fr": "french"}
+LANGUAGE_NAMES = {"en": "english", "ja": "japanese", "fr": "french", "mg": "malagasy"}
 
 
 def origin_allowed(origin: str, settings: Settings) -> bool:

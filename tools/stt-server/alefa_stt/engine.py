@@ -74,7 +74,7 @@ def continued(text: str) -> str:
     return text
 
 
-_LANGUAGE_NAMES = {"english": "en", "japanese": "ja", "french": "fr"}
+_LANGUAGE_NAMES = {"english": "en", "japanese": "ja", "french": "fr", "malagasy": "mg"}
 
 
 def normalize_language(value: str | None) -> str:

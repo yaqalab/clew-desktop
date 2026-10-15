@@ -827,5 +827,180 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(r.returncode, 2)
 
 
+# --- Dictation (docs/28): the speech server as a child of this one -------------------------------
+
+STT_EXE = Path(
+    os.environ.get("CLEW_STT_SERVER_EXE")
+    or HERE.parents[2] / "stt-server" / "dist" / "clew-stt-server" / "clew-stt-server.exe"
+)
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def wait_for(predicate, seconds=60):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def stt_call(port, path, key=None, host=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        if host:
+            headers["Host"] = host
+        c.request("GET", path, headers=headers)
+        r = c.getresponse()
+        return r.status, r.read()
+    finally:
+        c.close()
+
+
+def listening(port):
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+@unittest.skipUnless(EXE.is_file() and STT_EXE.is_file(), f"build both programs first: {STT_EXE}")
+class Dictation(unittest.TestCase):
+    """The real speech server with its fake engine (no model), started by the real tray program."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name, "home")
+        self.folder = Path(self.tmp.name, "audio")
+        self.folder.mkdir()
+        self.servers = []
+
+    def tearDown(self):
+        for s in self.servers:
+            s.stop()
+        for _ in range(20):
+            try:
+                self.tmp.cleanup()
+                return
+            except OSError:
+                time.sleep(0.25)
+
+    def start(self, *extra):
+        port = free_port()
+        s = Server(self.folder, self.home, "--dictation", "--stt-fake-engine", "--stt-port", str(port),
+                   "--stt-program", str(STT_EXE), *extra)
+        self.servers.append(s)
+        k = re.search(r"Dictation key[^\n]*\n\s+(\S+)", s.banner)
+        return s, port, (k.group(1) if k else None)
+
+    def test_it_starts_with_its_key_and_answers_only_to_it(self):
+        server, port, key = self.start()
+        self.assertIn(f"Dictation  ->  http://127.0.0.1:{port}", server.banner)
+        self.assertRegex(key or "", r"^stt\.local\.[A-Za-z0-9_-]{32}$")
+        self.assertTrue(wait_for(lambda: any("dictation ready" in l for l in server.log)), server.log)
+        status, raw = stt_call(port, "/api/me", key)
+        self.assertEqual(status, 200, raw)
+        self.assertEqual(json.loads(raw)["key"], "local")
+        self.assertEqual(stt_call(port, "/api/me", "stt.local.wrong")[0], 401)
+        self.assertEqual(stt_call(port, "/api/me")[0], 401)
+        # A page reaching it through a name that resolves to 127.0.0.1 is refused.
+        self.assertEqual(stt_call(port, "/api/ping", host="rebound.example")[0], 403)
+        # The key is kept sealed, not in clear, and never on the child's command line.
+        settings = Path(self.home, "settings.json").read_text(encoding="utf-8")
+        self.assertIn("sttSecret", settings)
+        self.assertNotIn(key, settings)
+        self.assertFalse(any(key in line for line in server.log))
+
+    def test_the_key_is_kept_across_runs(self):
+        first, _, key = self.start()
+        first.stop()
+        self.servers.remove(first)
+        again, port, shown = self.start()
+        self.assertIsNone(shown)  # not made now, so not shown unasked
+        self.assertTrue(wait_for(lambda: any("dictation ready" in l for l in again.log)), again.log)
+        self.assertEqual(stt_call(port, "/api/me", key)[0], 200)
+
+    def test_it_ends_with_the_server(self):
+        server, port, _ = self.start()
+        self.assertTrue(wait_for(lambda: listening(port)))
+        server.stop()
+        self.servers.remove(server)
+        self.assertTrue(wait_for(lambda: not listening(port), 10), "the speech server outlived its parent")
+
+    def test_a_taken_port_is_said(self):
+        holder = socket.socket()
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        try:
+            taken = holder.getsockname()[1]
+            server = Server(self.folder, self.home, "--dictation", "--stt-fake-engine", "--stt-port", str(taken),
+                            "--stt-program", str(STT_EXE))
+            self.servers.append(server)
+            self.assertTrue(
+                wait_for(lambda: any(f"port {taken} is in use" in l for l in server.log)), server.log)
+        finally:
+            holder.close()
+
+    def test_a_missing_model_is_said_before_anything_starts(self):
+        port = free_port()
+        server = Server(self.folder, self.home, "--dictation", "--stt-port", str(port), "--stt-program",
+                        str(STT_EXE), "--stt-models-dir", str(Path(self.tmp.name, "no-models")))
+        self.servers.append(server)
+        time.sleep(2)
+        self.assertFalse(listening(port))
+        self.assertFalse(any("dictation starting" in l for l in server.log), server.log)
+
+    def test_a_model_is_downloaded_whole(self):
+        import http.server
+
+        files = {"config.json": b"{}", "model.bin": os.urandom(300_000), "tokenizer.json": b"{}",
+                 "vocabulary.txt": b"a"}
+        repo = "Systran/faster-whisper-small"
+
+        class Hub(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.startswith(f"/api/models/{repo}"):
+                    body = json.dumps({"siblings": [{"rfilename": n, "size": len(d)} for n, d in files.items()]})
+                    body = body.encode()
+                elif self.path.startswith(f"/{repo}/resolve/main/"):
+                    body = files.get(self.path.rsplit("/", 1)[1])
+                    if body is None:
+                        self.send_error(404)
+                        return
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        hub = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hub)
+        threading.Thread(target=hub.serve_forever, daemon=True).start()
+        models = Path(self.tmp.name, "models")
+        env = dict(os.environ, ALEFA_STT_HUB=f"http://127.0.0.1:{hub.server_address[1]}")
+        try:
+            r = subprocess.run([str(EXE), "--headless", "--config", str(Path(self.home, "s.json")),
+                                "--stt-program", str(STT_EXE), "--stt-models-dir", str(models),
+                                "--stt-download", "small"], capture_output=True, text=True, timeout=60, env=env)
+        finally:
+            hub.shutdown()
+            hub.server_close()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Downloaded:", r.stdout)
+        self.assertEqual(Path(models, "small", "model.bin").read_bytes(), files["model.bin"])
+        self.assertFalse(Path(models, "small.part").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

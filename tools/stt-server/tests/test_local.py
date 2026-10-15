@@ -225,8 +225,8 @@ def test_the_tray_can_fix_one_language(local_settings, engine):
 
 
 def test_language_names():
-    assert [normalize_language(v) for v in ("en-US", "English", "ja", "ja_JP", "", None)] == [
-        "en", "en", "ja", "ja", "", ""]
+    assert [normalize_language(v) for v in ("en-US", "English", "ja", "ja_JP", "fr-FR", "Malagasy", "", None)] == [
+        "en", "en", "ja", "ja", "fr", "mg", "", ""]
     assert continued("\u305d\u3057\u3066\u3002") == "\u305d\u3057\u3066"
 
 

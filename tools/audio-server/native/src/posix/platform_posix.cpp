@@ -7,6 +7,8 @@
 //   - conversion with the system's own codecs: macOS AudioToolbox (decodes, but has no mp3 encoder;
 //     would produce m4a); Linux has none (GStreamer is optional). Until then: ffmpeg only.
 //   - the sandbox for the converter (macOS sandbox-exec profile; Linux seccomp or bubblewrap).
+//   - the dictation server as a child (fork, a pipe each way, kill on exit); start_child says
+//     "not on this system yet" until then.
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -142,6 +144,30 @@ fs::path find_ffmpeg() {
         at = end + 1;
     }
     return {};
+}
+
+std::unique_ptr<Child> start_child(const fs::path&, const std::vector<std::string>&, const std::string&,
+                                   std::uint64_t, std::function<void(const std::string&)>, std::function<void(int)>,
+                                   std::string* why) {
+    if (why) *why = "not on this system yet";
+    return nullptr;
+}
+
+fs::path find_stt_server() {
+    if (const char* forced = std::getenv("CLEW_STT_SERVER_EXE")) return fs::path(forced);
+    std::error_code ec;
+    auto beside = self_path().parent_path() / "clew-stt-server" / "clew-stt-server";
+    return fs::is_regular_file(beside, ec) ? beside : fs::path();
+}
+
+fs::path default_stt_models_dir() {
+    const char* home = std::getenv("HOME");
+#if defined(__APPLE__)
+    return fs::path(home ? home : ".") / "Library" / "Application Support" / "clew-stt" / "models";
+#else
+    const char* xdg = std::getenv("XDG_DATA_HOME");
+    return (xdg && *xdg ? fs::path(xdg) : fs::path(home ? home : ".") / ".local" / "share") / "clew-stt" / "models";
+#endif
 }
 
 }  // namespace clew::platform

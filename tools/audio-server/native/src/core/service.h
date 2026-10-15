@@ -1,5 +1,6 @@
-// The running service: settings, secret, conversion cache and HTTP server together. The tray app
-// and the headless mode both drive one of these; neither talks to the server directly.
+// The running service: settings, secret, conversion cache and HTTP server together, and the
+// dictation server beside them (dictation.h). The tray app and the headless mode both drive one of
+// these; neither talks to the server directly.
 #pragma once
 
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "convert_cache.h"
+#include "dictation.h"
 #include "server.h"
 #include "settings.h"
 
@@ -56,6 +58,17 @@ public:
     ConvertCache& cache() { return *cache_; }
     Server& server() { return *server_; }
 
+    // Dictation. Its key is kept like the secret: sealed in the settings, made on first use.
+    Dictation& dictation() { return *dictation_; }
+    std::string stt_key(bool* made = nullptr);
+    std::string reset_stt_key();  // the old key stops working at once (a running server restarts)
+    std::filesystem::path stt_models_dir() const;
+    // Starts dictation when the settings say it starts with the server.
+    void start_dictation_if_enabled();
+    // Headless and the tests: another server program, or the fake engine (no model needed).
+    void set_stt_program(std::filesystem::path program);
+    void set_stt_fake_engine(bool fake);
+
     // Called from any thread when the status changed; keep it short (post a message).
     void on_change(std::function<void()> fn);
 
@@ -65,6 +78,7 @@ private:
     bool convert(const std::filesystem::path& in, const std::filesystem::path& out,
                  const platform::ConvertControl& control, std::string* why);
     ServerConfig server_config(const Settings& s, std::string* problem);
+    DictationConfig dictation_config(const Settings& s);
 
     std::filesystem::path settings_file_;
     std::filesystem::path forced_cache_dir_;
@@ -78,6 +92,10 @@ private:
     std::function<void()> on_change_;
     std::unique_ptr<ConvertCache> cache_;
     std::unique_ptr<Server> server_;
+    std::string stt_key_;
+    std::filesystem::path stt_program_;
+    bool stt_fake_engine_ = false;
+    std::unique_ptr<Dictation> dictation_;
 };
 
 }  // namespace clew
