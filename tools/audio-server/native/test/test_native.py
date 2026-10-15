@@ -907,7 +907,10 @@ class Dictation(unittest.TestCase):
         self.assertTrue(wait_for(lambda: any("dictation ready" in l for l in server.log)), server.log)
         status, raw = stt_call(port, "/api/me", key)
         self.assertEqual(status, 200, raw)
-        self.assertEqual(json.loads(raw)["key"], "local")
+        me = json.loads(raw)
+        self.assertEqual(me["key"], "local")
+        # The audio server's folder is handed over, for deferred transcription (docs/29).
+        self.assertTrue(me["transcribe"] and me["folder"])
         self.assertEqual(stt_call(port, "/api/me", "stt.local.wrong")[0], 401)
         self.assertEqual(stt_call(port, "/api/me")[0], 401)
         # A page reaching it through a name that resolves to 127.0.0.1 is refused.

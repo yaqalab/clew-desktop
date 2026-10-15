@@ -307,6 +307,10 @@ static void dictation_helpers(const fs::path& tmp) {
     CHECK(Dictation::model_present(models, "small"));
     CHECK(!Dictation::model_present(models, "..") && !Dictation::model_present(models, "a/b"));
     CHECK(!Dictation::model_present(models, ""));
+    CHECK(!Dictation::speaker_model_present(models));
+    fs::create_directories(models / "speakers");
+    write(models / "speakers" / "campplus.onnx", "onnx");
+    CHECK(Dictation::speaker_model_present(models));
 
     auto line = [](const std::string& l) { return Dictation::read_server_line(l, 47822); };
     CHECK(line("INFO:     Uvicorn running on http://127.0.0.1:47822 (Press CTRL+C to quit)").ready);

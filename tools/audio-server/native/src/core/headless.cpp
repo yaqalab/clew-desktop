@@ -36,7 +36,7 @@ const char* const kHeadlessHelp =
     "  --stt-model <name>     small or large-v3-turbo\n"
     "  --stt-models-dir <dir> where the models are\n"
     "  --stt-language <code>  en, ja, fr or mg; default: Clew names one per session\n"
-    "  --stt-download <name>  fetch a model, then quit\n"
+    "  --stt-download <name>  fetch a model (or \"speakers\", the speaker model), then quit\n"
     "  --stt-program <exe>    the server program (default: clew-stt-server beside this one)\n"
     "  --show-stt-key         print its key\n"
     "  --version\n";
@@ -47,7 +47,10 @@ namespace {
 int download_model(Service& svc, Settings s, const std::string& model, const Console& console) {
     svc.apply(s, /*persist=*/false);
     auto dir = svc.stt_models_dir();
-    if (Dictation::model_present(dir, model)) {
+    auto here = [&] {
+        return model == "speakers" ? Dictation::speaker_model_present(dir) : Dictation::model_present(dir, model);
+    };
+    if (here()) {
         console.out("Already here: " + path_to_utf8(dir / path_from_utf8(model)));
         return 0;
     }
@@ -57,7 +60,7 @@ int download_model(Service& svc, Settings s, const std::string& model, const Con
     int last = -1;
     for (;;) {
         auto st = svc.dictation().status();
-        if (st.downloading.empty() && (Dictation::model_present(dir, model) || !st.download_problem.empty())) {
+        if (st.downloading.empty() && (here() || !st.download_problem.empty())) {
             if (!st.download_problem.empty()) {
                 console.out("Download failed: " + st.download_problem);
                 return 1;
@@ -112,7 +115,8 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
         else if (a == "--stt-model") ok = take(args, i, &stt_model) && stt_model_known(stt_model);
         else if (a == "--stt-models-dir") ok = take(args, i, &stt_models_dir);
         else if (a == "--stt-language") ok = take(args, i, &stt_language) && stt_language_known(stt_language);
-        else if (a == "--stt-download") ok = take(args, i, &stt_download) && stt_model_known(stt_download);
+        else if (a == "--stt-download")
+            ok = take(args, i, &stt_download) && (stt_model_known(stt_download) || stt_download == "speakers");
         else if (a == "--stt-program") ok = take(args, i, &stt_program);
         else if (a == "--stt-port") {
             ok = take(args, i, &value) && all_digits(value) && value.size() <= 5 && std::stoi(value) >= 1024 &&

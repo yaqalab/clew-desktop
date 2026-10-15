@@ -40,6 +40,15 @@
 | `large-v3` | 3.09 GB | an NVIDIA GPU | `Systran/faster-whisper-large-v3` |
 | `small.en` | 486 MB | English only; no better than `small` here (`28` §2); not in the tray's list | `Systran/faster-whisper-small.en` |
 
+## Live transcription (clew docs/29)
+
+`/v1/transcribe` (WebSocket): a recording's turns with their voices, worked through as fast as
+the machine allows. `source=upload` (the client sends the file, held in memory) or
+`source=folder&path=...` (read from `--audio-root`, the audio server's folder). `language=auto`
+lets Whisper tell each piece's language. Speakers: 3D-Speaker CAM++ (Apache-2.0) through
+`sherpa-onnx` (added for this; it replaces nothing and brings its own ONNX runtime), fetched
+with `download speakers` into `<models-dir>/speakers/`. Messages: `transcribe.py`'s header.
+
 ## Run it by hand
 
 ```powershell
