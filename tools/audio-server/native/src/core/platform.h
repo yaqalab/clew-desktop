@@ -81,4 +81,7 @@ fs::path find_stt_server();
 // Where models go unless the user chose a folder: %LOCALAPPDATA%\clew-stt\models on Windows.
 fs::path default_stt_models_dir();
 
+// The computer's memory, in bytes (0 when unknown).
+std::uint64_t total_memory();
+
 }  // namespace clew::platform

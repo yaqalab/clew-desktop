@@ -160,6 +160,11 @@ fs::path find_stt_server() {
     return fs::is_regular_file(beside, ec) ? beside : fs::path();
 }
 
+std::uint64_t total_memory() {
+    long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGE_SIZE);
+    return pages > 0 && size > 0 ? std::uint64_t(pages) * std::uint64_t(size) : 0;
+}
+
 fs::path default_stt_models_dir() {
     const char* home = std::getenv("HOME");
 #if defined(__APPLE__)

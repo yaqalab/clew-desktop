@@ -138,10 +138,20 @@ std::string new_secret() { return base64url_encode(platform::random_bytes(24)); 
 
 std::string new_stt_key() { return "stt.local." + new_secret(); }
 
-bool stt_model_known(const std::string& name) {
+const SttModel* find_stt_model(const std::string& name) {
     for (const auto& m : kSttModels)
-        if (name == m.name) return true;
-    return false;
+        if (name == m.name) return &m;
+    return nullptr;
+}
+
+bool stt_model_known(const std::string& name) { return find_stt_model(name) != nullptr; }
+
+std::string stt_model_blocker(const SttModel& model, std::uint64_t memory_bytes, int gpus) {
+    // Windows reports a little less than the memory installed ("16 GB" reads as 15.7).
+    std::uint64_t needed = std::uint64_t(model.memory_gb) * 1024 * 1024 * 1024 / 100 * 95;
+    if (memory_bytes && memory_bytes < needed) return "memory";
+    if (model.use == SttModel::Gpu && gpus == 0) return "gpu";
+    return "";
 }
 
 bool stt_language_known(const std::string& code) {

@@ -451,6 +451,12 @@ fs::path find_stt_server() {
 
 fs::path default_stt_models_dir() { return known_folder(FOLDERID_LocalAppData) / "clew-stt" / "models"; }
 
+std::uint64_t total_memory() {
+    MEMORYSTATUSEX m{};
+    m.dwLength = sizeof m;
+    return GlobalMemoryStatusEx(&m) ? m.ullTotalPhys : 0;
+}
+
 fs::path find_ffmpeg() {
     auto beside = self_path().parent_path() / "ffmpeg.exe";
     std::error_code ec;

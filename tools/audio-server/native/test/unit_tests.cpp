@@ -273,10 +273,26 @@ static void dictation_settings(const fs::path& tmp) {
     CHECK(back.stt_language == "mg" && back.stt_port == 50001);
     CHECK(back.stt_secret && *platform::open_secret(*back.stt_secret) == key);
     // What the window cannot offer falls back to the defaults.
-    write(file, R"({"v":1,"sttModel":"medium","sttLanguage":"de","sttPort":80})");
+    write(file, R"({"v":1,"sttModel":"huge","sttLanguage":"de","sttPort":80})");
     Settings odd = Settings::load(file);
     CHECK(odd.stt_model == "small" && odd.stt_language.empty() && odd.stt_port == kDefaultSttPort);
     for (const char* code : {"", "en", "ja", "fr", "mg"}) CHECK(stt_language_known(code));
+
+    // What this computer can run (docs/28 §3.6).
+    const std::uint64_t gb = 1024ull * 1024 * 1024;
+    const SttModel& small = *find_stt_model("small");
+    const SttModel& large = *find_stt_model("large-v3");
+    const SttModel& turbo = *find_stt_model("large-v3-turbo");
+    CHECK(stt_model_blocker(small, 15700ull * 1024 * 1024, 0).empty());  // 16 GB, as Windows reports it
+    CHECK(stt_model_blocker(turbo, 15700ull * 1024 * 1024, 0).empty());
+    CHECK(stt_model_blocker(large, 15700ull * 1024 * 1024, 0) == "gpu");
+    CHECK(stt_model_blocker(large, 15700ull * 1024 * 1024, 1).empty());
+    CHECK(stt_model_blocker(large, 15700ull * 1024 * 1024, -1).empty());  // not known yet: not refused
+    CHECK(stt_model_blocker(turbo, 4 * gb, 1) == "memory");
+    CHECK(stt_model_blocker(small, 4 * gb - 1, 0).empty());  // "4 GB" as Windows reports it
+    CHECK(stt_model_blocker(small, 2 * gb, 0) == "memory");
+    CHECK(stt_model_blocker(small, 0, 0).empty());  // memory unknown
+    CHECK(find_stt_model("medium") && !find_stt_model("huge"));
     CHECK(!stt_language_known("de") && stt_model_known("small") && !stt_model_known("../small"));
 }
 

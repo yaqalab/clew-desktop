@@ -92,6 +92,11 @@ enum class S {
     SttModelLine,  // %s name, %s size, %s use, %s here or not
     SttUseLive,
     SttUseFiles,
+    SttUseGpu,
+    SttEnglishOnly,
+    SttNeedsMemory,  // %s model, %u GB, %s this computer's
+    SttNeedsGpu,     // %s model
+    SttGpuFound,
     SttHere,
     SttNotHere,
     SttDownload,

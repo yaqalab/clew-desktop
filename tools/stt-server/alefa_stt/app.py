@@ -91,7 +91,8 @@ def create_app(settings: Settings, engine=None) -> FastAPI:
         name = await require_key(request)
         engine: Serial = state["engine"]
         return {"key": name, "model": f"whisper-{engine.model}", "window_seconds": engine.window_seconds,
-                "languages": offered_languages(settings, engine.languages)}
+                "languages": offered_languages(settings, engine.languages),
+                "device": getattr(engine.engine, "device", "cpu")}
 
     @app.websocket("/v1/listen")
     async def listen(ws: WebSocket):

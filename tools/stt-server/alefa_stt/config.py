@@ -42,6 +42,8 @@ class Settings:
     # faster-whisper: models live in <models_dir>/<model>/ (`download` puts them there).
     models_dir: str = field(default_factory=default_models_dir)
     cpu_threads: int = 0
+    # "auto": an NVIDIA GPU when CUDA finds one and its libraries load, else the CPU.
+    device: str = "auto"
     # Empty: each request names its language (English when it does not). Otherwise the only one.
     language: str = ""
     keys_file: str = "/etc/alefa-stt/keys"
@@ -78,6 +80,7 @@ class Settings:
             npy_dir=env("ALEFA_STT_NPY_DIR") or None,
             models_dir=env("ALEFA_STT_MODELS_DIR") or default_models_dir(),
             cpu_threads=_int("ALEFA_STT_CPU_THREADS", 0),
+            device=env("ALEFA_STT_DEVICE", "auto"),
             language=env("ALEFA_STT_LANGUAGE", ""),
             keys_file=env("ALEFA_STT_KEYS_FILE", "/etc/alefa-stt/keys"),
             allowed_origins=_list("ALEFA_STT_ALLOWED_ORIGINS", "https://clew.alefa.net"),

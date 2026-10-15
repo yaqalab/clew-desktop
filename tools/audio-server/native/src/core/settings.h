@@ -55,18 +55,32 @@ std::string new_secret();
 // A new dictation key, in the speech server's shape: "stt.local.<secret>".
 std::string new_stt_key();
 
-// The models the Dictation tab offers (tools/stt-server/alefa_stt/models.py has their sources).
-// Sizes as listed on Hugging Face, 2026-10-16.
+// The models the Dictation tab lists (tools/stt-server/alefa_stt/models.py has their sources),
+// smallest first. Sizes as listed on Hugging Face, 2026-10-16. What each needs (docs/28 §3.6):
+// small and large-v3-turbo were measured on an i7-1360P with 16 GB; the rest are estimates.
 struct SttModel {
+    enum Use { Live, Files, Gpu };
     const char* name;
     std::uint64_t bytes;
-    bool live;  // fast enough to dictate with (docs/28 §2); otherwise "for files"
+    Use use;               // Live: dictate on the CPU; Files: seconds a sentence; Gpu: an NVIDIA GPU only
+    unsigned memory_gb;    // the computer's memory it needs
+    bool english_only;
 };
 constexpr SttModel kSttModels[] = {
-    {"small", 486212372ull, true},
-    {"large-v3-turbo", 1622000000ull, false},
+    {"tiny", 78203619ull, SttModel::Live, 2, false},
+    {"base", 147882941ull, SttModel::Live, 2, false},
+    {"small", 486212372ull, SttModel::Live, 4, false},
+    {"medium", 1530571735ull, SttModel::Gpu, 8, false},
+    {"large-v3-turbo", 1621665983ull, SttModel::Files, 8, false},
+    {"distil-large-v3", 1516479628ull, SttModel::Files, 8, true},
+    {"large-v3", 3090835702ull, SttModel::Gpu, 8, false},
 };
 bool stt_model_known(const std::string& name);
+const SttModel* find_stt_model(const std::string& name);
+
+// Why this computer cannot run a model: "" when it can, "memory" or "gpu". `gpus` is how many
+// NVIDIA GPUs CUDA sees (the server's `system` command), or -1 while that is not known yet.
+std::string stt_model_blocker(const SttModel& model, std::uint64_t memory_bytes, int gpus);
 bool stt_language_known(const std::string& code);
 
 }  // namespace clew

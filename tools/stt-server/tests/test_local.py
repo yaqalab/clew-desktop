@@ -257,12 +257,26 @@ def test_websocket_addresses_are_not_logged():
 def test_serve_local_options():
     settings = Settings()
     args = SimpleNamespace(local=True, host=None, port=47822, engine="whisper", model="small",
-                           models_dir="D:/models", cpu_threads=None, language="", decoder=None,
+                           models_dir="D:/models", cpu_threads=None, device="cpu", language="", decoder=None,
                            origins="https://clew.alefa.net https://clew.example.org/")
     _apply_serve_options(settings, args)
     assert settings.host == "127.0.0.1" and settings.loopback_only and settings.loopback_origins
     assert settings.decoder == "av" and settings.port == 47822 and settings.models_dir == "D:/models"
     assert settings.allowed_origins == ["https://clew.alefa.net", "https://clew.example.org"]
+    assert settings.device == "cpu"
+
+
+def test_system_says_how_many_gpus(capsys):
+    from alefa_stt.__main__ import main
+
+    assert main(["system"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("cuda ") and out.split()[1].isdigit()
+
+
+def test_me_says_where_it_runs(client):
+    me = client.get("/api/me", headers={"Authorization": f"Bearer {KEY}"}).json()
+    assert me["device"] == "cpu"
 
 
 # --- models on disk ---
@@ -322,4 +336,4 @@ def test_download_resumes_and_refuses_unknown_models(tmp_path, monkeypatch):
     assert not any(u.endswith("/model.bin") for u in hub.fetched)
     assert "mobiuslabsgmbh/faster-whisper-large-v3-turbo" in hub.fetched[0]
     with pytest.raises(models.DownloadError):
-        models.download("medium", str(tmp_path), lambda _l: None)
+        models.download("enormous", str(tmp_path), lambda _l: None)

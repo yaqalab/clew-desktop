@@ -59,6 +59,7 @@ public:
         std::string downloading;  // the model being fetched, or ""
         int percent = 0;          // of that download
         std::string download_problem;
+        int gpus = -1;  // NVIDIA GPUs CUDA sees; -1 until the server program has said
     };
 
     using Notify = std::function<void()>;
@@ -95,6 +96,7 @@ private:
     void run();
     void launch(std::unique_lock<std::mutex>& lk);
     void launch_download(std::unique_lock<std::mutex>& lk);
+    void launch_probe(std::unique_lock<std::mutex>& lk);
     void kill(std::unique_ptr<platform::Child>& child, std::unique_lock<std::mutex>& lk);
     void changed();
 
@@ -120,6 +122,11 @@ private:
     std::uint64_t fetch_generation_ = 0;
     bool fetcher_exited_ = false;
     std::string fetch_result_;  // "done" or the error
+
+    std::filesystem::path probed_;  // the program `gpus` was read from
+    std::unique_ptr<platform::Child> prober_;
+    std::uint64_t probe_generation_ = 0;
+    bool prober_exited_ = false;
 
     std::thread worker_;
 };

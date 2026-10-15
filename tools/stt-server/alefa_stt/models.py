@@ -16,12 +16,17 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-# The two the tray offers (small: live; large-v3-turbo: files and Japanese), and small.en.
+# Every model the tray lists; it greys out what this computer cannot run (docs/28 §3.6).
 # The repositories are the ones faster-whisper 1.2.1 itself downloads by these names.
 MODELS: dict[str, str] = {
+    "tiny": "Systran/faster-whisper-tiny",
+    "base": "Systran/faster-whisper-base",
     "small": "Systran/faster-whisper-small",
     "small.en": "Systran/faster-whisper-small.en",
+    "medium": "Systran/faster-whisper-medium",
+    "large-v3": "Systran/faster-whisper-large-v3",
     "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
 }
 FILES = ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt", "vocabulary.json",
          "preprocessor_config.json")

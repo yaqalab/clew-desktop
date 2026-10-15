@@ -272,6 +272,38 @@ void Dictation::launch_download(std::unique_lock<std::mutex>& lk) {
     }
 }
 
+// `clew-stt-server system` prints "cuda N". Asked once per program, in the background.
+void Dictation::launch_probe(std::unique_lock<std::mutex>& lk) {
+    probed_ = config_.program;
+    std::uint64_t gen = ++probe_generation_;
+    prober_exited_ = false;
+    std::string why;
+    prober_ = platform::start_child(
+        config_.program, {"system"}, "", 0,
+        [this, gen](const std::string& line) {
+            if (!starts_with(line, "cuda ")) return;
+            std::string n = trim(line.substr(5));
+            if (!all_digits(n) || n.empty() || n.size() > 3) return;
+            {
+                std::lock_guard<std::mutex> g(m_);
+                if (gen != probe_generation_) return;
+                status_.gpus = std::stoi(n);
+            }
+            changed();
+        },
+        [this, gen](int) {
+            {
+                std::lock_guard<std::mutex> g(m_);
+                if (gen != probe_generation_) return;
+                prober_exited_ = true;
+                wake_ = true;
+            }
+            cv_.notify_all();
+        },
+        &why);
+    (void)lk;
+}
+
 void Dictation::run() {
     std::unique_lock<std::mutex> lk(m_);
     for (;;) {
@@ -316,6 +348,15 @@ void Dictation::run() {
             if (status_.state == State::Loading) lines.push_back("dictation starting: " + config_.model);
         }
 
+        std::error_code ec;
+        if (!prober_ && !config_.program.empty() && config_.program != probed_ &&
+            std::filesystem::is_regular_file(config_.program, ec))
+            launch_probe(lk);
+        if (prober_ && prober_exited_) {
+            kill(prober_, lk);
+            prober_exited_ = false;
+        }
+
         if (!download_wanted_.empty() && !fetcher_) launch_download(lk);
         if (fetcher_ && fetcher_exited_) {
             kill(fetcher_, lk);
@@ -340,6 +381,7 @@ void Dictation::run() {
     }
     kill(server_, lk);
     kill(fetcher_, lk);
+    kill(prober_, lk);
 }
 
 }  // namespace clew

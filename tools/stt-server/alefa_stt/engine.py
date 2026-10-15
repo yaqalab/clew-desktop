@@ -17,6 +17,7 @@ an engine that cannot use a prompt ignores it.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import threading
@@ -28,6 +29,8 @@ import numpy as np
 
 from . import SAMPLE_RATE
 from .config import Settings
+
+log = logging.getLogger("alefa_stt.engine")
 
 
 class EngineError(RuntimeError):
@@ -201,15 +204,26 @@ def whisper_prompt(hints: str | None, language: str | None) -> str | None:
     return text
 
 
+def cuda_devices() -> int:
+    """NVIDIA GPUs CUDA can see (0 without a driver). Its libraries may still be missing."""
+    try:
+        import ctranslate2
+
+        return int(ctranslate2.get_cuda_device_count())
+    except Exception:  # pragma: no cover - a build without CTranslate2
+        return 0
+
+
 class FasterWhisperEngine:
-    """faster-whisper on the CPU, int8. The model is a folder made by `download`."""
+    """faster-whisper, int8 on the CPU, int8 with float16 on an NVIDIA GPU. The model is a
+    folder made by `download`."""
 
     name = "whisper"
     window_seconds = 30.0
 
     def __init__(self, settings: Settings):
         try:
-            from faster_whisper import WhisperModel
+            import faster_whisper  # noqa: F401
         except ImportError as exc:  # pragma: no cover - a broken build
             raise EngineError(f"faster-whisper is not importable ({exc})") from exc
         from .models import model_path
@@ -217,9 +231,26 @@ class FasterWhisperEngine:
         path = model_path(settings.models_dir, settings.model)
         if path is None:
             raise EngineError(f"the model {settings.model!r} is not downloaded into {settings.models_dir}")
-        threads = settings.cpu_threads or min(8, os.cpu_count() or 4)
         self.model = settings.model
-        self._model = WhisperModel(str(path), device="cpu", compute_type="int8", cpu_threads=threads)
+        device = settings.device
+        if device == "auto":
+            device = "cuda" if cuda_devices() > 0 else "cpu"
+        try:
+            self._load(str(path), device, settings)
+        except Exception as exc:
+            # A GPU without CUDA's libraries (cuBLAS, cuDNN) fails here or on the first call.
+            if device != "cuda" or settings.device != "auto":
+                raise
+            log.warning("the GPU could not be used (%s); using the CPU", exc)
+            self._load(str(path), "cpu", settings)
+
+    def _load(self, path: str, device: str, settings: Settings) -> None:
+        from faster_whisper import WhisperModel
+
+        threads = settings.cpu_threads or min(8, os.cpu_count() or 4)
+        compute = "int8_float16" if device == "cuda" else "int8"
+        self._model = WhisperModel(path, device=device, compute_type=compute, cpu_threads=threads)
+        self.device = device
         if self._model.model.is_multilingual:
             self.languages = list(self._model.supported_languages)
         else:

@@ -25,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--model")
     serve.add_argument("--models-dir")
     serve.add_argument("--cpu-threads", type=int)
+    serve.add_argument("--device", choices=["auto", "cpu", "cuda"])
     serve.add_argument("--language", help="the only language offered; empty: each request names one")
     serve.add_argument("--origins", help="page addresses allowed to call, separated by spaces")
     serve.add_argument("--decoder", choices=["ffmpeg", "av"])
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     fetch.add_argument("model")
     fetch.add_argument("--models-dir")
     sub.add_parser("models", help="the models this program can fetch, and which are here")
+    sub.add_parser("system", help="what this computer offers: 'cuda N' (NVIDIA GPUs CUDA sees)")
     add = sub.add_parser("add-key", help="create a key; it is printed once")
     add.add_argument("name")
     revoke = sub.add_parser("revoke-key", help="remove a key")
@@ -63,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             settings.single_key = line
         return _serve(settings)
+    if args.command == "system":
+        from .engine import cuda_devices
+
+        print(f"cuda {cuda_devices()}", flush=True)
+        return 0
     if args.command in ("download", "models"):
         from .models import MODELS, DownloadError, download, model_path
 
@@ -108,7 +115,7 @@ def _apply_serve_options(settings: Settings, args) -> None:
         settings.loopback_only = True
         settings.loopback_origins = True
         settings.decoder = "av"
-    for option in ("host", "port", "engine", "model", "models_dir", "cpu_threads", "language", "decoder"):
+    for option in ("host", "port", "engine", "model", "models_dir", "cpu_threads", "device", "language", "decoder"):
         value = getattr(args, option)
         if value is not None:
             setattr(settings, option, value)

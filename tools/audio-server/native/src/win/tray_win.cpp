@@ -57,15 +57,11 @@ const int kAudioPage[] = {IDC_STATUS,    IDC_STARTSTOP,   IDC_G_FOLDER,  IDC_FOL
                           IDC_L_SECRET,  IDC_G_CONVERT,   IDC_CONVERT,   IDC_PREPARE,   IDC_L_FFMPEG, IDC_FFMPEG,
                           IDC_FFBROWSE,  IDC_FFFIND,      IDC_L_FFHINT,  IDC_L_CACHE,   IDC_CACHEMB,  IDC_CACHEUSED,
                           IDC_CLEARCACHE};
-const int kDictationPage[] = {IDC_STT_STATUS,   IDC_STT_STARTSTOP, IDC_G_STT_MODEL,   IDC_STT_SMALL,   IDC_STT_DL_SMALL,
-                              IDC_STT_TURBO,    IDC_STT_DL_TURBO,  IDC_G_STT_FOLDER,  IDC_STT_FOLDER,  IDC_STT_CHANGE,
+const int kDictationPage[] = {IDC_STT_STATUS,   IDC_STT_STARTSTOP, IDC_G_STT_MODEL,   IDC_STT_MODELS,  IDC_STT_DOWNLOAD,
+                              IDC_STT_MODEL_NOTE, IDC_G_STT_FOLDER, IDC_STT_FOLDER,   IDC_STT_CHANGE,
                               IDC_STT_OPENFOLDER, IDC_STT_FREE,    IDC_G_STT_CONN,    IDC_L_STT_LANG,  IDC_STT_LANG,
                               IDC_L_STT_PORT,   IDC_STT_PORT,      IDC_G_STT_KEY,     IDC_STT_KEY,     IDC_STT_SHOWKEY,
                               IDC_STT_COPYKEY,  IDC_STT_NEWKEY,    IDC_L_STT_KEY,     IDC_STT_AUTOSTART, IDC_L_STT_LOCAL};
-// The models' radio buttons and download buttons, in kSttModels' order.
-const int kModelRadio[] = {IDC_STT_SMALL, IDC_STT_TURBO};
-const int kModelDownload[] = {IDC_STT_DL_SMALL, IDC_STT_DL_TURBO};
-static_assert(std::size(kModelRadio) == std::size(kSttModels), "one radio button per model");
 // The language list, in the combo box's order. Whisper knows many more; these are the ones Clew
 // offers (docs/28 §3.5).
 const char* const kLanguages[] = {"", "en", "ja", "fr", "mg"};
@@ -80,6 +76,8 @@ struct App {
     bool secret_visible = false;
     bool stt_key_visible = false;
     int tab = 0;
+    int stt_row = 0;          // the model row chosen in the list (kSttModels' order)
+    std::wstring stt_note;    // why a grey row cannot be chosen, after a press on it
     bool stopped_by_user = false;
     // A fixed identity for the tray icon: Windows then keeps the user's "show in the taskbar" choice
     // across updates. Windows ties it to the signed program; when it refuses, the icon goes by id.
@@ -370,6 +368,68 @@ const wchar_t* languages_text(const std::string& code) {
                           : tr(S::LangPerSession);
 }
 
+// Why this computer cannot run row `i`, in words, or "".
+std::wstring model_blocker_text(std::size_t i) {
+    const SttModel& m = kSttModels[i];
+    std::uint64_t memory = platform::total_memory();
+    std::string why = stt_model_blocker(m, memory, g.svc->dictation().status().gpus);
+    if (why == "memory") return trf(S::SttNeedsMemory, widen(m.name).c_str(), m.memory_gb, human_size(memory).c_str());
+    if (why == "gpu") return trf(S::SttNeedsGpu, widen(m.name).c_str());
+    return {};
+}
+
+std::wstring model_row_text(std::size_t i) {
+    const SttModel& m = kSttModels[i];
+    bool here = Dictation::model_present(g.svc->stt_models_dir(), m.name);
+    S use = m.use == SttModel::Live ? S::SttUseLive : m.use == SttModel::Files ? S::SttUseFiles : S::SttUseGpu;
+    return trf(S::SttModelLine, widen(m.name).c_str(), human_size(m.bytes).c_str(), tr(use),
+               tr(here ? S::SttHere : S::SttNotHere)) +
+           (m.english_only ? tr(S::SttEnglishOnly) : L"");
+}
+
+// The list draws itself: a row this computer cannot run in grey, never highlighted.
+void draw_model_row(const DRAWITEMSTRUCT& d) {
+    if (d.itemID == UINT(-1)) return;
+    bool blocked = !model_blocker_text(d.itemID).empty();
+    bool selected = (d.itemState & ODS_SELECTED) && !blocked;
+    FillRect(d.hDC, &d.rcItem, GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW));
+    SetBkMode(d.hDC, TRANSPARENT);
+    SetTextColor(d.hDC, GetSysColor(blocked ? COLOR_GRAYTEXT : selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+    RECT r = d.rcItem;
+    r.left += 4;
+    std::wstring text = model_row_text(d.itemID);
+    DrawTextW(d.hDC, text.c_str(), int(text.size()), &r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    if (d.itemState & ODS_FOCUS) DrawFocusRect(d.hDC, &d.rcItem);
+}
+
+// A grey row cannot be chosen. Moving with the arrow keys steps over it to the next one this
+// computer can run; a click on it keeps the choice where it was, and the note says why.
+void choose_model_row(HWND dlg) {
+    HWND list = GetDlgItem(dlg, IDC_STT_MODELS);
+    const int count = int(std::size(kSttModels));
+    int row = int(SendMessageW(list, LB_GETCURSEL, 0, 0));
+    if (row < 0 || row >= count) return;
+    std::wstring why = model_blocker_text(std::size_t(row));
+    if (why.empty()) {
+        g.stt_row = row;
+        g.stt_note.clear();
+    } else {
+        bool clicked = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
+        int step = row > g.stt_row ? 1 : -1;
+        int next = row;
+        while (!clicked && next >= 0 && next < count && !model_blocker_text(std::size_t(next)).empty()) next += step;
+        if (!clicked && next >= 0 && next < count) {
+            g.stt_row = next;
+            g.stt_note.clear();
+        } else {
+            g.stt_note = why;
+            MessageBeep(MB_ICONWARNING);
+        }
+        SendMessageW(list, LB_SETCURSEL, WPARAM(g.stt_row), 0);
+    }
+    refresh_dictation(dlg);
+}
+
 void refresh_dictation(HWND dlg) {
     auto st = g.svc->dictation().status();
     Settings s = g.svc->settings();
@@ -395,20 +455,20 @@ void refresh_dictation(HWND dlg) {
 
     auto dir = g.svc->stt_models_dir();
     bool installed = st.state != Dictation::State::Missing && !platform::find_stt_server().empty();
-    for (std::size_t i = 0; i < std::size(kSttModels); ++i) {
-        const auto& m = kSttModels[i];
-        bool here = Dictation::model_present(dir, m.name);
-        std::wstring line = trf(S::SttModelLine, widen(m.name).c_str(), human_size(m.bytes).c_str(),
-                                tr(m.live ? S::SttUseLive : S::SttUseFiles), tr(here ? S::SttHere : S::SttNotHere));
-        SetDlgItemTextW(dlg, kModelRadio[i], line.c_str());
-        // A model that is not here cannot be chosen, unless it already is.
-        bool chosen = IsDlgButtonChecked(dlg, kModelRadio[i]) == BST_CHECKED;
-        EnableWindow(GetDlgItem(dlg, kModelRadio[i]), here || chosen);
-        EnableWindow(GetDlgItem(dlg, kModelDownload[i]), !here && installed && st.downloading.empty());
-        bool fetching = st.downloading == m.name;
-        SetDlgItemTextW(dlg, kModelDownload[i],
-                        fetching ? (std::to_wstring(st.percent) + L" %").c_str() : tr(S::SttDownload));
-    }
+    InvalidateRect(GetDlgItem(dlg, IDC_STT_MODELS), nullptr, TRUE);
+    const SttModel& chosen = kSttModels[std::size_t(g.stt_row)];
+    bool here = Dictation::model_present(dir, chosen.name);
+    EnableWindow(GetDlgItem(dlg, IDC_STT_DOWNLOAD), !here && installed && st.downloading.empty() &&
+                                                         model_blocker_text(std::size_t(g.stt_row)).empty());
+    // A download says how far it is on the button and in the note.
+    SetDlgItemTextW(dlg, IDC_STT_DOWNLOAD,
+                    st.downloading.empty() ? tr(S::SttDownload) : (std::to_wstring(st.percent) + L" %").c_str());
+    std::wstring note = !st.downloading.empty()
+                            ? trf(S::SttDownloading, widen(st.downloading).c_str(), st.percent)
+                        : !g.stt_note.empty() ? g.stt_note
+                        : st.gpus > 0         ? std::wstring(tr(S::SttGpuFound))
+                                              : std::wstring();
+    SetDlgItemTextW(dlg, IDC_STT_MODEL_NOTE, note.c_str());
     std::uint64_t free = free_space(dir);
     SetDlgItemTextW(dlg, IDC_STT_FREE, free ? trf(S::SttFree, human_size(free).c_str()).c_str() : L"");
 }
@@ -468,7 +528,9 @@ void fill(HWND dlg) {
     CheckDlgButton(dlg, IDC_AUTOSTART, autostart_on() ? BST_CHECKED : BST_UNCHECKED);
 
     for (std::size_t i = 0; i < std::size(kSttModels); ++i)
-        CheckDlgButton(dlg, kModelRadio[i], s.stt_model == kSttModels[i].name ? BST_CHECKED : BST_UNCHECKED);
+        if (s.stt_model == kSttModels[i].name) g.stt_row = int(i);
+    SendDlgItemMessageW(dlg, IDC_STT_MODELS, LB_SETCURSEL, WPARAM(g.stt_row), 0);
+    g.stt_note.clear();
     SetDlgItemTextW(dlg, IDC_STT_FOLDER, g.svc->stt_models_dir().wstring().c_str());
     int lang = 0;
     for (int i = 0; i < int(std::size(kLanguages)); ++i)
@@ -494,7 +556,7 @@ void label(HWND dlg) {
         {IDC_L_FFHINT, S::FfmpegHint},    {IDC_L_CACHE, S::CacheLimit},  {IDC_CLEARCACHE, S::ClearCache},
         {IDC_AUTOSTART, S::Autostart},    {IDC_L_ACTIVITY, S::Activity}, {IDOK, S::Save},
         {IDCANCEL, S::Close},
-        {IDC_G_STT_MODEL, S::GroupSttModel}, {IDC_STT_DL_SMALL, S::SttDownload}, {IDC_STT_DL_TURBO, S::SttDownload},
+        {IDC_G_STT_MODEL, S::GroupSttModel}, {IDC_STT_DOWNLOAD, S::SttDownload},
         {IDC_G_STT_FOLDER, S::GroupSttFolder}, {IDC_STT_CHANGE, S::Change}, {IDC_STT_OPENFOLDER, S::Open},
         {IDC_G_STT_CONN, S::GroupSttConn}, {IDC_L_STT_LANG, S::Language}, {IDC_L_STT_PORT, S::Port},
         {IDC_G_STT_KEY, S::GroupSttKey},  {IDC_STT_SHOWKEY, S::Show},   {IDC_STT_COPYKEY, S::Copy},
@@ -506,6 +568,9 @@ void label(HWND dlg) {
     for (S s : {S::LangChosen, S::LangEnglish, S::LangJapanese, S::LangFrench, S::LangMalagasy})
         SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_ADDSTRING, 0, LPARAM(tr(s)));
     SendDlgItemMessageW(dlg, IDC_STT_PORT, EM_LIMITTEXT, 5, 0);
+    // The names are the rows' text for screen readers; what is drawn is model_row_text().
+    SendDlgItemMessageW(dlg, IDC_STT_MODELS, LB_RESETCONTENT, 0, 0);
+    for (const auto& m : kSttModels) SendDlgItemMessageW(dlg, IDC_STT_MODELS, LB_ADDSTRING, 0, LPARAM(widen(m.name).c_str()));
     HWND tabs = GetDlgItem(dlg, IDC_TABS);
     TabCtrl_DeleteAllItems(tabs);
     S tab_names[] = {S::TabAudio, S::TabDictation};
@@ -564,8 +629,7 @@ void save(HWND dlg) {
         show_page(dlg, 1);
         return bad(dlg, IDC_STT_PORT, tr(S::BadSttPort));
     }
-    for (std::size_t i = 0; i < std::size(kSttModels); ++i)
-        if (IsDlgButtonChecked(dlg, kModelRadio[i]) == BST_CHECKED) s.stt_model = kSttModels[i].name;
+    s.stt_model = kSttModels[std::size_t(g.stt_row)].name;
     LRESULT lang = SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_GETCURSEL, 0, 0);
     if (lang >= 0 && lang < LRESULT(std::size(kLanguages))) s.stt_language = kLanguages[lang];
     s.stt_enabled = IsDlgButtonChecked(dlg, IDC_STT_AUTOSTART) == BST_CHECKED;
@@ -609,6 +673,21 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_STATUS:
             refresh_status(dlg);
             return TRUE;
+        case WM_MEASUREITEM: {
+            auto* m = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
+            if (m->CtlID != IDC_STT_MODELS) break;
+            RECT r{0, 0, 0, 11};  // 11 dialog units: a row with room around its text
+            MapDialogRect(dlg, &r);
+            m->itemHeight = UINT(r.bottom);
+            SetWindowLongPtrW(dlg, DWLP_MSGRESULT, TRUE);
+            return TRUE;
+        }
+        case WM_DRAWITEM: {
+            auto* d = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+            if (d->CtlID != IDC_STT_MODELS) break;
+            draw_model_row(*d);
+            return TRUE;
+        }
         case WM_NOTIFY: {
             auto* hdr = reinterpret_cast<NMHDR*>(lp);
             if (hdr->idFrom == IDC_TABS && hdr->code == TCN_SELCHANGE) {
@@ -670,10 +749,9 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                     toggle_dictation();
                     refresh_dictation(dlg);
                     return TRUE;
-                case IDC_STT_DL_SMALL:
-                case IDC_STT_DL_TURBO:
-                    for (std::size_t i = 0; i < std::size(kSttModels); ++i)
-                        if (kModelDownload[i] == LOWORD(wp)) download_model(dlg, kSttModels[i]);
+                case IDC_STT_DOWNLOAD: download_model(dlg, kSttModels[std::size_t(g.stt_row)]); return TRUE;
+                case IDC_STT_MODELS:
+                    if (HIWORD(wp) == LBN_SELCHANGE) choose_model_row(dlg);
                     return TRUE;
                 case IDC_STT_CHANGE: {
                     // Takes effect at once: a download goes where the window says.
@@ -704,9 +782,6 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                         SetDlgItemTextW(dlg, IDC_STT_KEY, widen(g.svc->reset_stt_key()).c_str());
                         show_stt_key(dlg, true);
                     }
-                    return TRUE;
-                case IDC_STT_SMALL:
-                case IDC_STT_TURBO:
                     return TRUE;
             }
             break;
