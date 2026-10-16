@@ -102,6 +102,52 @@ def test_the_folder_source_reads_from_a_point_in_the_recording(client):
     assert len(turns) == 2 and turns[0]["start"] >= 3.0
 
 
+def test_a_link_to_the_audio_server_is_read_by_ranges(client, folder):
+    import http.server
+    import threading
+
+    data = (folder / "2026" / "interview.wav").read_bytes()
+
+    class Audio(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            first, last = 0, len(data) - 1
+            r = self.headers.get("Range")
+            if r:
+                a, b = r.split("=")[1].split("-")
+                first, last = int(a), int(b) if b else len(data) - 1
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {first}-{last}/{len(data)}")
+            else:
+                self.send_response(200)
+            self.send_header("Content-Length", str(last - first + 1))
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+            self.wfile.write(data[first : last + 1])
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Audio)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    link = f"http://127.0.0.1:{server.server_address[1]}/api/stream?p=x&sig=y"
+    try:
+        from urllib.parse import quote
+
+        with client.websocket_connect(WS + f"/v1/transcribe?source=url&url={quote(link, safe='')}",
+                                      subprotocols=["alefa-stt", KEY]) as ws:
+            ws.send_text(json.dumps({"type": "Start"}))
+            messages = read_all(ws)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert [t["voice"] for t in of(messages, "Turn")] == ["v1", "v2", "v1"]
+    # Only links to this computer.
+    with client.websocket_connect(WS + "/v1/transcribe?source=url&url=http%3A%2F%2Fexample.org%2Fa.mp3",
+                                  subprotocols=["alefa-stt", KEY]) as ws:
+        ws.send_text(json.dumps({"type": "Start"}))
+        assert read_all(ws)[0]["type"] == "Error"
+
+
 def test_only_audio_inside_the_folder(client, folder):
     for path in ("../outside.wav", "notes.txt", "/etc/passwd", "C:/Windows/win.ini", "2026/../../outside.wav",
                  ".hidden.wav", "2026/missing.wav"):
@@ -140,6 +186,22 @@ def test_a_key_is_needed_and_a_bad_upload_is_said(client):
         ws.send_text(json.dumps({"type": "EndOfFile"}))
         messages = read_all(ws)
     assert of(messages, "Error") and not of(messages, "Turn")
+
+
+def test_auto_decides_the_recordings_language_once(tmp_path, folder):
+    settings = Settings(engine="fake", single_key=KEY, tmp_dir=str(tmp_path), decoder="av", idle_seconds=5,
+                        audio_root=str(folder), speakers="fake")
+    engine = FakeEngine(languages=("en", "ja"))
+    with TestClient(create_app(settings, engine), base_url="http://127.0.0.1") as c:
+        with c.websocket_connect(WS + "/v1/transcribe?source=folder&path=2026/interview.wav&language=auto",
+                                 subprotocols=["alefa-stt", KEY]) as ws:
+            ws.send_text(json.dumps({"type": "Start"}))
+            messages = read_all(ws)
+    assert of(messages, "Language") == [{"type": "Language", "language": "ja", "probability": 0.9}]
+    # Decided from all the speech there was (under 20 s here), then every piece in that language.
+    assert engine.detected_seconds == pytest.approx(7.6, abs=0.5)
+    assert {call["language"] for call in engine.calls} == {"ja"}
+    assert len(of(messages, "Turn")) == 3
 
 
 def test_the_language_can_be_told_per_piece(client, folder):

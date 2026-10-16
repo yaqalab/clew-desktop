@@ -108,6 +108,11 @@ class FakeEngine:
             time.sleep(self.delay)
         return f"speech of {len(audio) / SAMPLE_RATE:.1f} seconds"
 
+    def detect_language(self, audio: np.ndarray) -> tuple[str, float]:
+        """The tests: the last language the engine knows, so it differs from the default."""
+        self.detected_seconds = len(audio) / SAMPLE_RATE
+        return self.languages[-1], 0.9
+
     def close(self) -> None:
         pass
 
@@ -281,6 +286,14 @@ class FasterWhisperEngine:
         joiner = "" if heard in ("ja", "zh") else " "
         return tidy(joiner.join(segment.text.strip() for segment in segments))
 
+    def detect_language(self, audio: np.ndarray) -> tuple[str, float]:
+        """The recording's language, from a stretch of its speech (`Serial.detect`)."""
+        peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+        if peak > 1e-6:
+            audio = audio * (0.9 / peak)
+        language, probability, _ = self._model.detect_language(audio[: SAMPLE_RATE * 30])
+        return language, float(probability)
+
     def close(self) -> None:
         self._model = None
 
@@ -320,6 +333,14 @@ class Serial:
     async def transcribe(self, audio: np.ndarray, language: str | None = None, prompt: str | None = None) -> str:
         async with self._lock:
             return await asyncio.to_thread(self._run, audio, language, prompt)
+
+    async def detect(self, audio: np.ndarray) -> tuple[str, float] | None:
+        """The language of `audio`, or None for an engine that cannot tell (the Hailo one)."""
+        detect = getattr(self.engine, "detect_language", None)
+        if detect is None:
+            return None
+        async with self._lock:
+            return await asyncio.to_thread(detect, audio)
 
     def _run(self, audio: np.ndarray, language: str | None, prompt: str | None) -> str:
         with self._thread_lock:
