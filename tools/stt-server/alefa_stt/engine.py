@@ -211,6 +211,50 @@ def whisper_prompt(hints: str | None, language: str | None) -> str | None:
     return text
 
 
+_ITEM_SPLIT = re.compile(r"[,.?!;:\u3001\u3002\uff0c\uff1f\uff01]+")
+
+
+def _items(text: str) -> list[str]:
+    return [" ".join(i.split()).lower() for i in _ITEM_SPLIT.split(text) if i.strip()]
+
+
+_LEAD_END = re.compile(r"[.?!\u3002\uff1f\uff01](?=\s)")
+
+
+def split_prompt(prompt: str | None) -> tuple[str, list[str]]:
+    """Clew's prompt is a sentence in the language, then the spelling hints, comma-separated
+    (clew `sttPrompt`): "Manao ahoana tompoko. \u2026 Riana, Rojo". Returns the sentence part (up to
+    its last full stop followed by more) and the hints."""
+    text = (prompt or "").strip()
+    if text.endswith(_FULL_STOPS):  # the sentence alone: the hints never end with a stop
+        return text, []
+    ends = list(_LEAD_END.finditer(text))
+    cut = ends[-1].end() if ends else 0
+    return text[:cut].strip(), _items(text[cut:])
+
+
+def echoes_prompt(text: str, prompt: str | None) -> bool:
+    """Whether Whisper wrote its spelling hints instead of the speech. Given audio it cannot
+    follow (a language it knows little, a hesitation), it writes the hints back: on a Malagasy
+    interview with three names as hints, 28 of 53 pieces came back with the names, none without
+    them (measured 2026-10-16, clew docs/29 \u00a713). Echo: the text is hints with at most two other
+    words, or it has two hints one after the other ("Riana, Rojo"). The sentence ahead of the
+    hints is not counted: a one-word answer can rightly be one of its words."""
+    if not text:
+        return False
+    terms = set(split_prompt(prompt)[1])
+    if not terms:
+        return False
+    chunks = _items(text)
+    hits = [c in terms for c in chunks]
+    if not any(hits):
+        return False
+    if any(a and b for a, b in zip(hits, hits[1:])):
+        return True
+    rest = [w for c, hit in zip(chunks, hits) if not hit for w in c.split()]
+    return len(rest) <= 2
+
+
 def cuda_devices() -> int:
     """NVIDIA GPUs CUDA can see (0 without a driver). Its libraries may still be missing."""
     try:
@@ -317,6 +361,8 @@ class Serial:
     _thread_lock: threading.Lock = field(default_factory=threading.Lock)
     calls: int = 0
     busy_seconds: float = 0.0
+    # Pieces transcribed again without the prompt because the first try echoed it.
+    echoes: int = 0
 
     @property
     def model(self) -> str:
@@ -346,7 +392,14 @@ class Serial:
         with self._thread_lock:
             started = time.monotonic()
             try:
-                return self.engine.transcribe(audio, language=language, prompt=prompt)
+                text = self.engine.transcribe(audio, language=language, prompt=prompt)
+                if echoes_prompt(text, prompt):
+                    # The hints, not the speech: once more with only the sentence ahead of
+                    # them, which keeps the language (`echoes_prompt`).
+                    self.echoes += 1
+                    lead = split_prompt(prompt)[0] or None
+                    text = self.engine.transcribe(audio, language=language, prompt=lead)
+                return text
             finally:
                 self.calls += 1
                 self.busy_seconds += time.monotonic() - started

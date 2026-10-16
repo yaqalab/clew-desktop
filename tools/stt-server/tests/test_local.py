@@ -13,7 +13,8 @@ from alefa_stt import SAMPLE_RATE, models
 from alefa_stt.__main__ import _apply_serve_options
 from alefa_stt.app import create_app
 from alefa_stt.config import Settings
-from alefa_stt.engine import FakeEngine, continued, normalize_language, whisper_prompt
+from alefa_stt.engine import (FakeEngine, Serial, continued, echoes_prompt, normalize_language, split_prompt,
+                              whisper_prompt)
 from alefa_stt.session import PROMPT_LIMIT
 
 from conftest import speechlike, to_pcm16, to_wav
@@ -236,6 +237,63 @@ def test_hints_are_ended_like_a_sentence():
     assert whisper_prompt("\u5354\u50cd\u5b66\u7fd2, \u7b2c\u4e8c\u8a00\u8a9e", "ja") == (
         "\u5354\u50cd\u5b66\u7fd2\u3001\u7b2c\u4e8c\u8a00\u8a9e\u3002")
     assert whisper_prompt("  ", "en") is None and whisper_prompt(None, "ja") is None
+
+
+SENTENCE = "Manao ahoana tompoko. Azonao lazaina amiko ve? Eny, misaotra betsaka."
+
+
+def test_the_prompt_is_a_sentence_then_hints():
+    assert split_prompt(f"{SENTENCE} Riana, Rojo, Anjara") == (SENTENCE, ["riana", "rojo", "anjara"])
+    assert split_prompt("Riana, Rojo, Anjara") == ("", ["riana", "rojo", "anjara"])
+    assert split_prompt(SENTENCE) == (SENTENCE, [])
+    assert split_prompt(None) == ("", [])
+
+
+def test_hints_written_back_instead_of_the_speech_are_an_echo():
+    prompt = f"{SENTENCE} Riana, Rojo, Anjara"
+    # What the user saw (clew docs/29 §13): names, alone, with a filler, or after other words.
+    assert echoes_prompt("Riana, Anjara, Anjara. Eeeeeee", prompt)
+    assert echoes_prompt("Riana, Rojo.", prompt)
+    assert echoes_prompt("Riana, Rojo. Ehm...", prompt)
+    assert echoes_prompt("Tzna nukar dem, sa vi jo eno fra innen de. Riana, Rojo.", prompt)
+    assert echoes_prompt("Anjara.", "Riana, Rojo, Anjara")
+    # A name said in a sentence is the speech; the sentence's own words are not hints.
+    assert not echoes_prompt("Niresaka tamin'i Rojo aho omaly momba ny asa.", prompt)
+    assert not echoes_prompt("Eny.", prompt)
+    assert not echoes_prompt("Misaotra betsaka.", prompt)
+    assert not echoes_prompt("Riana, Rojo.", SENTENCE)
+    assert not echoes_prompt("Riana, Rojo.", None)
+    assert not echoes_prompt("", prompt)
+
+
+class _Echoing:
+    """Writes its prompt's hints back when it has them, as Whisper did on Malagasy."""
+
+    model = "echo"
+    window_seconds = 30.0
+
+    def __init__(self):
+        self.prompts = []
+
+    def transcribe(self, audio, language=None, prompt=None):
+        self.prompts.append(prompt)
+        hints = split_prompt(prompt)[1]
+        return ", ".join(h.capitalize() for h in hints) + "." if hints else "Tsy fantatro."
+
+
+def test_an_echo_is_transcribed_again_with_only_the_sentence():
+    import asyncio
+
+    engine = _Echoing()
+    serial = Serial(engine)
+    text = asyncio.run(serial.transcribe(np.zeros(16000, dtype=np.float32), "mg", f"{SENTENCE} Riana, Rojo"))
+    assert text == "Tsy fantatro."
+    assert engine.prompts == [f"{SENTENCE} Riana, Rojo", SENTENCE]
+    assert serial.echoes == 1 and serial.calls == 1
+    # Hints alone: the second try has no prompt at all.
+    engine.prompts.clear()
+    assert asyncio.run(serial.transcribe(np.zeros(16000, dtype=np.float32), "mg", "Riana, Rojo")) == "Tsy fantatro."
+    assert engine.prompts == ["Riana, Rojo", None]
 
 
 def test_websocket_addresses_are_not_logged():
