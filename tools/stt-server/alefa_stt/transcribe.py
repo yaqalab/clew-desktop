@@ -9,8 +9,15 @@ Two sources:
 
 - ``source=upload`` (real time, D-l): the client sends the file's bytes, then ``EndOfFile``. They
   are held in memory, never written to disk: they are an interview.
-- ``source=folder&path=...`` (deferred): the server reads the file from the audio server's folder
+- ``source=folder&path=...``: the server reads the file from the audio server's folder
   (``--audio-root``), which the tray hands it. Only audio files inside that folder.
+- ``source=url&url=...`` (deferred): the server reads what the audio server serves at that link,
+  by ranges: the same bytes the player plays, a converted copy included (a variable-bit-rate mp3
+  is served converted, so its times are the player's). Links on this computer only.
+
+``language=auto`` decides the recording's language once, from its first ``DETECT_SECONDS`` of
+speech, and keeps it (a ``Language`` message says which): a second or two of speech is too little
+to tell, and deciding per piece gave six languages in a minute of Malagasy (docs/29 §10).
 
 Messages from the client, as JSON text:
 
@@ -20,9 +27,9 @@ Messages from the client, as JSON text:
 - ``{"type": "Merge", "from": "v3", "into": "v1"}`` when the person says two voices are one.
 - ``{"type": "CloseStream"}`` to stop.
 
-From the server: ``Voice`` (a new voice: id, vector, count), ``Turn`` (start, end, text, voice,
-speech_final), ``Progress`` (seconds done, duration), and at the end ``Voices`` (all of them, for
-the client to keep) and ``Done``.
+From the server: ``Language`` (the one decided, with ``auto``), ``Voice`` (a new voice: id, vector,
+count), ``Turn`` (start, end, text, voice, speech_final), ``Progress`` (seconds done, duration), and
+at the end ``Voices`` (all of them, for the client to keep) and ``Done``.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import numpy as np
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -43,7 +51,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from . import SAMPLE_RATE
 from .audio import FormatError
 from .config import Settings
-from .engine import Serial, continued
+from .engine import AUTO, Serial, continued
 from .segmenter import Segment, Segmenter, make_vad
 from .session import CLOSE_INTERNAL, CLOSE_NORMAL, CLOSE_POLICY, clean_prompt, pick_language
 from .speakers import Voices
@@ -53,6 +61,19 @@ log = logging.getLogger("alefa_stt.transcribe")
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".opus", ".flac", ".weba", ".webm",
                     ".mp4", ".3gp", ".amr", ".wma"}
 PROGRESS_EVERY = 10.0  # seconds of audio
+DETECT_SECONDS = 20.0  # of speech, to decide the recording's language with `auto`
+LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
+def check_link(url: str) -> str:
+    """A link the server may read: plain http to this computer (the audio server), no user info."""
+    try:
+        parts = urlsplit(url)
+    except ValueError as exc:
+        raise PathError("not a link") from exc
+    if parts.scheme != "http" or parts.hostname not in LOOPBACK or parts.username or parts.password:
+        raise PathError("only a link to the audio server on this computer")
+    return url
 CHUNK = SAMPLE_RATE  # one second of audio per step through the segmenter
 
 
@@ -85,6 +106,7 @@ def resolve_in_root(root: str, rel: str) -> Path:
 class TranscribeParams:
     source: str
     path: str
+    url: str
     start: float
     language: str
     prompt: str | None
@@ -94,8 +116,8 @@ class TranscribeParams:
     @classmethod
     def parse(cls, query, settings: Settings, languages: list[str]) -> "TranscribeParams":
         source = query.get("source", "upload")
-        if source not in ("upload", "folder"):
-            raise FormatError("source is upload or folder")
+        if source not in ("upload", "folder", "url"):
+            raise FormatError("source is upload, folder or url")
         try:
             start = max(0.0, float(query.get("start", "0")))
             endpointing = int(query.get("endpointing", settings.endpointing_ms))
@@ -104,6 +126,7 @@ class TranscribeParams:
         return cls(
             source=source,
             path=query.get("path", ""),
+            url=query.get("url", ""),
             start=start,
             language=pick_language(query.get("language"), settings, languages, allow_auto=True),
             prompt=clean_prompt(query.get("prompt")),
@@ -117,7 +140,8 @@ def _decode_into(source, start: float, put, stop: threading.Event) -> float:
     one second at a time, through `put(chunk, offset)`. Returns the recording's duration."""
     import av
 
-    with av.open(source, mode="r") as container:
+    options = {"rw_timeout": "20000000"} if isinstance(source, str) and source.startswith("http") else {}
+    with av.open(source, mode="r", options=options) as container:
         if not container.streams.audio:
             raise FormatError("there is no audio in the file")
         stream = container.streams.audio[0]
@@ -248,6 +272,8 @@ class TranscribeSession:
             if self.params.source == "folder":
                 source = resolve_in_root(self.settings.audio_root or "", self.params.path)
                 source = str(source)
+            elif self.params.source == "url":
+                source = check_link(self.params.url)
             else:
                 source = await self._upload()
         except PathError as exc:
@@ -307,8 +333,27 @@ class TranscribeSession:
         last_progress = 0.0
         previous_final = True
         previous_voice = None
+        language = self.params.language
+        held: list = []  # pieces gathered to decide the language, then worked through first
+
+        async def next_item():
+            return held.pop(0) if held else await queue.get()
+
         try:
-            while (item := await queue.get()) is not None:
+            if language == AUTO:
+                gathered = 0.0
+                while gathered < DETECT_SECONDS:
+                    item = await queue.get()
+                    held.append(item)
+                    if item is None or isinstance(item, Exception):
+                        break
+                    gathered += item.duration
+                speech = [s.audio for s in held if isinstance(s, Segment)]
+                found = await self.engine.detect(np.concatenate(speech)) if speech else None
+                language = found[0] if found else None
+                if found:
+                    await self.send({"type": "Language", "language": found[0], "probability": round(found[1], 2)})
+            while (item := await next_item()) is not None:
                 if isinstance(item, Exception):
                     raise FormatError(str(item) or "the audio could not be decoded") from item
                 if self._stop.is_set():
@@ -317,7 +362,7 @@ class TranscribeSession:
                 base = state["base"] or 0.0
                 start = base + segment.start
                 end = start + segment.duration
-                text = await self.engine.transcribe(segment.audio, language=self.params.language,
+                text = await self.engine.transcribe(segment.audio, language=language or AUTO,
                                                     prompt=self.params.prompt)
                 if text and not segment.speech_final:
                     text = continued(text)
