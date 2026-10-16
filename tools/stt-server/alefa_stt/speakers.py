@@ -13,6 +13,7 @@ at the next session, so the same interview's voices keep their names.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -110,10 +111,29 @@ class Voices:
         return b
 
 
+def _load_own_onnxruntime() -> None:
+    """Windows ships its own, older onnxruntime.dll in System32, and a process that prefers
+    System32's images (the audio server's tray hardens itself so, and its children inherit it)
+    loaded that one for sherpa-onnx, which then crashed (found 2026-10-16). Loading the one
+    sherpa-onnx brings by its full path first makes every later load by name find it."""
+    if os.name != "nt":
+        return
+    import ctypes
+    import importlib.util
+
+    spec = importlib.util.find_spec("sherpa_onnx")
+    if spec is None or not spec.origin:
+        return
+    dll = os.path.join(os.path.dirname(spec.origin), "lib", "onnxruntime.dll")
+    if os.path.isfile(dll):
+        ctypes.WinDLL(dll)
+
+
 class SpeakerModel:
     """The embedding model. One call at a time is enough: a piece takes about 30 ms."""
 
     def __init__(self, path: str, threads: int = 2):
+        _load_own_onnxruntime()
         try:
             import sherpa_onnx
         except ImportError as exc:  # pragma: no cover - a build without it
