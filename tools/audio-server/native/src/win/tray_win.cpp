@@ -413,6 +413,17 @@ void use_model_row(int row) {
     g.svc->apply(s);
 }
 
+// The language too takes effect at once, for the same reason as the model.
+void use_language(HWND dlg) {
+    LRESULT i = SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_GETCURSEL, 0, 0);
+    if (i < 0 || i >= LRESULT(std::size(kLanguages))) return;
+    Settings s = g.svc->settings();
+    if (s.stt_language == kLanguages[i]) return;
+    s.stt_language = kLanguages[i];
+    g.svc->apply(s);
+    refresh_dictation(dlg);
+}
+
 // A grey row cannot be chosen. Moving with the arrow keys steps over it to the next one this
 // computer can run; a click on it keeps the choice where it was, and the note says why.
 void choose_model_row(HWND dlg) {
@@ -776,6 +787,9 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 case IDC_STT_DOWNLOAD: download_model(dlg, kSttModels[std::size_t(g.stt_row)]); return TRUE;
                 case IDC_STT_MODELS:
                     if (HIWORD(wp) == LBN_SELCHANGE) choose_model_row(dlg);
+                    return TRUE;
+                case IDC_STT_LANG:
+                    if (HIWORD(wp) == CBN_SELCHANGE) use_language(dlg);
                     return TRUE;
                 case IDC_STT_CHANGE: {
                     // Takes effect at once: a download goes where the window says.
