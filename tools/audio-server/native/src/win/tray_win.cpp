@@ -402,6 +402,17 @@ void draw_model_row(const DRAWITEMSTRUCT& d) {
     if (d.itemState & ODS_FOCUS) DrawFocusRect(d.hDC, &d.rcItem);
 }
 
+// The chosen model takes effect at once, like the models folder: it is saved, and a running
+// dictation server starts again with it. Waiting for Save made Start run the old model while the
+// list showed the new one, and reopening the window put the old one back (found 2026-10-16).
+void use_model_row(int row) {
+    Settings s = g.svc->settings();
+    const char* name = kSttModels[std::size_t(row)].name;
+    if (s.stt_model == name) return;
+    s.stt_model = name;
+    g.svc->apply(s);
+}
+
 // A grey row cannot be chosen. Moving with the arrow keys steps over it to the next one this
 // computer can run; a click on it keeps the choice where it was, and the note says why.
 void choose_model_row(HWND dlg) {
@@ -427,6 +438,7 @@ void choose_model_row(HWND dlg) {
         }
         SendMessageW(list, LB_SETCURSEL, WPARAM(g.stt_row), 0);
     }
+    use_model_row(g.stt_row);
     refresh_dictation(dlg);
 }
 
