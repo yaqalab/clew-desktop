@@ -135,9 +135,10 @@ class TranscribeParams:
         )
 
 
-def _decode_into(source, start: float, put, stop: threading.Event) -> float:
+def _decode_into(source, start: float, put, stop: threading.Event, on_duration=None) -> float:
     """Decodes `source` (a path or a file-like) from `start` seconds into 16 kHz mono float32,
-    one second at a time, through `put(chunk, offset)`. Returns the recording's duration."""
+    one second at a time, through `put(chunk, offset)`. Returns the recording's duration, and
+    tells `on_duration` it as soon as the file is open, so progress has a total from the start."""
     import av
 
     options = {"rw_timeout": "20000000"} if isinstance(source, str) and source.startswith("http") else {}
@@ -146,6 +147,8 @@ def _decode_into(source, start: float, put, stop: threading.Event) -> float:
             raise FormatError("there is no audio in the file")
         stream = container.streams.audio[0]
         duration = float(container.duration / 1_000_000) if container.duration else 0.0
+        if on_duration is not None:
+            on_duration(duration)
         if start > 0:
             container.seek(int(start * 1_000_000), any_frame=False, backward=True)
         resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
@@ -319,7 +322,8 @@ class TranscribeSession:
 
         def decode() -> None:
             try:
-                state["duration"] = _decode_into(source, self.params.start, put, self._stop)
+                state["duration"] = _decode_into(source, self.params.start, put, self._stop,
+                                                 lambda d: state.__setitem__("duration", d))
                 for e in segmenter.finalize():
                     if isinstance(e, Segment):
                         asyncio.run_coroutine_threadsafe(queue.put(e), loop).result()

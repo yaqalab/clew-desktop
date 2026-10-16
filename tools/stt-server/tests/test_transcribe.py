@@ -82,6 +82,20 @@ def test_an_upload_comes_back_as_turns_with_two_voices(client):
     assert messages[-1]["type"] == "Done" and messages[-1]["duration"] == pytest.approx(9.5, abs=0.1)
 
 
+def test_progress_knows_the_whole_duration_from_the_first_message(client, monkeypatch):
+    # Whole-file transcription draws a bar from it; the duration used to arrive only once the
+    # decoder had read to the end, so every Progress said 0.
+    import alefa_stt.transcribe as transcribe
+
+    monkeypatch.setattr(transcribe, "PROGRESS_EVERY", 0.0)
+    with client.websocket_connect(WS + "/v1/transcribe?source=folder&path=2026/interview.wav",
+                                  subprotocols=["alefa-stt", KEY]) as ws:
+        ws.send_text(json.dumps({"type": "Start"}))
+        messages = read_all(ws)
+    progress = of(messages, "Progress")
+    assert progress and progress[0]["duration"] == pytest.approx(9.5, abs=0.1)
+
+
 def test_voices_kept_from_an_earlier_session_keep_their_ids(client):
     earlier = [{"id": "v7", "vector": [0.0, 1.0], "count": 3}]
     with client.websocket_connect(WS + "/v1/transcribe?source=folder&path=2026/interview.wav",
