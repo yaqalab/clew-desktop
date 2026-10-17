@@ -1,9 +1,13 @@
 """
-Clew audio server: lets Clew list and stream the audio files in one folder of this computer.
+Clew audio server: lets Clew list and stream the audio files in folders of this computer.
 
 An alternative to picking a file with the browser's file chooser (docs/22-audio-server.md).
 
     python clew_audio_server.py --folder D:\\interviews
+    python clew_audio_server.py --folder D:\\study-b --folder-off D:\\interviews
+
+The folders are remembered, each on or off (docs/22 section 11): a listed file's path starts with
+its folder's name, and a folder that is off keeps that name while nothing in it is served.
 
 Standard library only, on purpose: the same file is packed into a single .exe (build_exe.ps1)
 and nothing needs installing on the researcher's machine.
@@ -14,7 +18,7 @@ What it promises
 - Listing and minting a stream link need the secret (Authorization: Bearer <secret>).
 - A stream link is signed (HMAC) for one file and one expiry, with a key that lives in memory only,
   so a restart revokes every link. A player element cannot send headers; that is why links exist.
-- Only files under the chosen folder, only audio extensions, and symlinks that leave the folder
+- Only files under the folders that are on, only audio extensions, and symlinks that leave a folder
   are not followed.
 - Only Clew's own origins get CORS headers. Loopback origins always; a hosted Clew with --allow-origin.
 - Nothing from a request beyond method and path is logged, and never the secret or a link's query.
@@ -44,6 +48,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -193,9 +198,23 @@ class Config:
         os.replace(tmp, self.path)
 
     @property
-    def folder(self) -> str | None:
-        v = self.data.get("folder")
-        return v if isinstance(v, str) and v else None
+    def folders(self) -> list[dict[str, Any]]:
+        """The remembered folders, each {path, enabled}, in order (docs/22 §11)."""
+        v = self.data.get("folders")
+        if isinstance(v, list):
+            return [
+                {"path": f["path"], "enabled": f.get("enabled") is not False}
+                for f in v
+                if isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"]
+            ]
+        # Written before there could be several (2026-10-17).
+        old = self.data.get("folder")
+        return [{"path": old, "enabled": True}] if isinstance(old, str) and old else []
+
+    @folders.setter
+    def folders(self, value: list[dict[str, Any]]) -> None:
+        self.data["folders"] = value
+        self.data.pop("folder", None)
 
     @property
     def origins(self) -> list[str]:
@@ -295,6 +314,71 @@ def resolve_audio(root: Path, rel: str) -> Path | None:
     if not inside(root, path) or mime_of(path) is None or not path.is_file():
         return None
     return path
+
+
+# Several folders served as one (docs/22 §11; the native server's folders.h has the same rules, and
+# so does the dictation server's transcribe.py): each folder is named after its last segment, made
+# unique ignoring case with " 2", " 3"... over every folder, on or off; a listed path is
+# "<name>/<path inside>"; a path whose first segment is a folder's name is looked for there only
+# (refused while it is off); any other path was saved when there was one folder, and is used when
+# exactly one folder that is on has it.
+
+
+@dataclass
+class Folder:
+    name: str
+    root: Path | None  # resolved; None when it cannot be opened
+    enabled: bool = True
+
+
+def folder_names(paths: list[str]) -> list[str]:
+    names: list[str] = []
+    taken: set[str] = set()
+    for p in paths:
+        trimmed = p.rstrip("/\\")
+        base = re.split(r"[/\\]", trimmed)[-1] if trimmed else ""
+        if base.endswith(":"):
+            base = base[:-1]
+        base = base or "folder"
+        name, n = base, 2
+        while name.lower() in taken:
+            name, n = f"{base} {n}", n + 1
+        taken.add(name.lower())
+        names.append(name)
+    return names
+
+
+def make_folders(entries: list[dict[str, Any]]) -> list[Folder]:
+    out = []
+    for name, entry in zip(folder_names([e["path"] for e in entries]), entries):
+        root = Path(entry["path"]).expanduser()
+        out.append(Folder(name, root.resolve() if root.is_dir() else None, bool(entry["enabled"])))
+    return out
+
+
+def list_served(folders: list[Folder]) -> tuple[list[dict[str, Any]], bool]:
+    found: list[dict[str, Any]] = []
+    truncated = False
+    for f in folders:
+        if not f.enabled or f.root is None:
+            continue
+        files, cut = list_audio(f.root)
+        for item in files:
+            if len(found) >= MAX_FILES:
+                return found, True
+            found.append({**item, "path": f"{f.name}/{item['path']}"})
+        truncated = truncated or cut
+    return found, truncated
+
+
+def resolve_served(folders: list[Folder], rel: str) -> Path | None:
+    first, sep, rest = rel.partition("/")
+    if sep:
+        for f in folders:
+            if f.name == first:
+                return resolve_audio(f.root, rest) if f.enabled and f.root is not None else None
+    hits = [p for f in folders if f.enabled and f.root is not None for p in [resolve_audio(f.root, rel)] if p]
+    return hits[0] if len(hits) == 1 else None
 
 
 def parse_range(header: str | None, size: int) -> tuple[int, int] | None | str:
@@ -528,13 +612,14 @@ class Mp3Seek:
 class State:
     def __init__(
         self,
-        root: Path,
+        folders: list[Folder] | Path,
         config: Config,
         extra_origins: list[str],
         link_ttl_sec: int = LINK_TTL_SEC,
         seek: Mp3Seek | None = None,
     ) -> None:
-        self.root = root
+        # One folder may be given as its path (the tests).
+        self.folders = make_folders([{"path": str(folders), "enabled": True}]) if isinstance(folders, Path) else folders
         self.link_ttl_sec = link_ttl_sec
         self.config = config
         self.seek = seek or Mp3Seek(None, config.path.parent / "cache")
@@ -690,18 +775,19 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
         def _files(self) -> None:
             if not self._auth():
                 return
-            files, truncated = list_audio(state.root)
-            # The folder's name, not its full path: Clew has no use for the rest.
+            files, truncated = list_served(state.folders)
+            # The folders' names, not their full paths: Clew has no use for the rest.
+            names = [f.name for f in state.folders if f.enabled and f.root is not None]
             self._json(
                 HTTPStatus.OK,
-                {"folder": state.root.name or str(state.root), "files": files, "truncated": truncated},
+                {"folder": ", ".join(names), "folders": names, "files": files, "truncated": truncated},
             )
 
         def _url(self, body: dict[str, Any] | None) -> None:
             if not self._auth():
                 return
             rel = body.get("path") if body else None
-            path = resolve_audio(state.root, rel) if isinstance(rel, str) else None
+            path = resolve_served(state.folders, rel) if isinstance(rel, str) else None
             if path is None or not isinstance(rel, str):
                 self._refuse(HTTPStatus.NOT_FOUND, "no such file")
                 return
@@ -723,7 +809,7 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
             if not state.link_ok(rel, exp, sig):
                 self._refuse(HTTPStatus.UNAUTHORIZED, "link")
                 return
-            path = resolve_audio(state.root, rel)
+            path = resolve_served(state.folders, rel)
             if path is None:
                 self._refuse(HTTPStatus.NOT_FOUND, "no such file")
                 return
@@ -813,8 +899,27 @@ def ask_folder() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Serve the audio files of one folder to Clew.")
-    p.add_argument("--folder", help="the folder to serve (remembered for the next start)")
+    p = argparse.ArgumentParser(description="Serve the audio files of your folders to Clew.")
+    p.add_argument(
+        "--folder",
+        action="append",
+        default=[],
+        help="a folder to serve: added to the remembered list, or turned on (repeatable)",
+    )
+    p.add_argument(
+        "--folder-off",
+        action="append",
+        default=[],
+        metavar="FOLDER",
+        help="turn a remembered folder off: it keeps its name in Clew, nothing in it is served (repeatable)",
+    )
+    p.add_argument(
+        "--remove-folder",
+        action="append",
+        default=[],
+        metavar="FOLDER",
+        help="take a folder out of the remembered list (repeatable)",
+    )
     p.add_argument("--port", type=int, default=None, help=f"default {DEFAULT_PORT}")
     p.add_argument(
         "--allow-origin",
@@ -850,12 +955,32 @@ def main(argv: list[str] | None = None) -> int:
         shown_secret = new_secret()
         config.set_secret(shown_secret)
 
-    folder = args.folder or env.get("CLEW_AUDIO_FOLDER") or config.folder or ask_folder()
-    root = Path(folder).expanduser()
-    if not root.is_dir():
-        raise SystemExit(f"Not a folder: {root}")
-    root = root.resolve()
-    config.data["folder"] = str(root)
+    # The command line beats the .env (whose CLEW_AUDIO_FOLDER may hold several, separated by
+    # os.pathsep); both add to the remembered list, or turn a folder on.
+    entries = config.folders
+    same = lambda a, b: os.path.normcase(a) == os.path.normcase(b)  # noqa: E731
+    env_folders = [f for f in env.get("CLEW_AUDIO_FOLDER", "").split(os.pathsep) if f.strip()]
+    wanted = [(f, True) for f in (args.folder or env_folders)] + [(f, False) for f in args.folder_off]
+    for raw, on in wanted:
+        root = Path(raw.strip()).expanduser()
+        if not root.is_dir():
+            raise SystemExit(f"Not a folder: {root}")
+        path = str(root.resolve())
+        known = next((e for e in entries if same(e["path"], path)), None)
+        if known:
+            known["enabled"] = on
+        else:
+            entries.append({"path": path, "enabled": on})
+    for raw in args.remove_folder:
+        path = str(Path(raw.strip()).expanduser().resolve())
+        entries = [e for e in entries if not same(e["path"], path)]
+    if not any(e["enabled"] for e in entries):
+        root = Path(ask_folder()).expanduser()
+        if not root.is_dir():
+            raise SystemExit(f"Not a folder: {root}")
+        entries.append({"path": str(root.resolve()), "enabled": True})
+    config.folders = entries
+    folders = make_folders(entries)
     # Origins from the command line and the remembered ones are kept; the .env's are used
     # without being written to the remembered config, so removing a line from .env removes it.
     env_origins = [o.rstrip("/") for o in re.split(r"[,\s]+", env.get("CLEW_AUDIO_ALLOW_ORIGINS", "")) if o]
@@ -865,7 +990,7 @@ def main(argv: list[str] | None = None) -> int:
     config.save()
 
     state = State(
-        root,
+        folders,
         config,
         sorted({*remembered, *env_origins}),
         link_hours * 3600 if link_hours else LINK_TTL_SEC,
@@ -876,7 +1001,6 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as e:
         raise SystemExit(f"Port {port} is not available ({e}). Try --port <number>.") from e
 
-    files, truncated = list_audio(root)
     for w in warnings:
         print(f"Warning: {w}")
     if env_path.is_file():
@@ -884,7 +1008,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Clew audio server  ->  http://127.0.0.1:{port}")
     if state.origins:
         print(f"Also allowed to call it: {', '.join(sorted(state.origins))}")
-    print(f"Folder: {root}  ({len(files)} audio files{', more than shown' if truncated else ''})")
+    for entry, f in zip(entries, folders):
+        if not f.enabled:
+            print(f'Folder "{f.name}": {entry["path"]}  (off)')
+        elif f.root is None:
+            print(f'Folder "{f.name}": {entry["path"]}  (cannot be opened: a disconnected drive?)')
+        else:
+            files, truncated = list_audio(f.root)
+            more = ", more than shown" if truncated else ""
+            print(f'Folder "{f.name}": {entry["path"]}  ({len(files)} audio files{more})')
     print(
         f"ffmpeg: {ffmpeg} (variable-bit-rate mp3, .wma and .amr files are converted so that browsers play them)"
         if ffmpeg
