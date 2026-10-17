@@ -18,8 +18,16 @@ constexpr int kDefaultCacheMb = 4096;
 constexpr int kDefaultSttPort = 47822;
 constexpr const char* kDefaultSttModel = "small";
 
+// One folder of recordings (docs/22 section 11). One that is off keeps its place and its name in
+// Clew, but nothing in it is listed or served until it is on again.
+struct FolderSetting {
+    std::string path;  // UTF-8
+    bool enabled = true;
+    bool operator==(const FolderSetting& o) const { return path == o.path && enabled == o.enabled; }
+};
+
 struct Settings {
-    std::string folder;  // UTF-8, empty until chosen
+    std::vector<FolderSetting> folders;  // in the order the window lists them; empty until chosen
     int port = kDefaultPort;
     std::vector<std::string> origins;  // hosted Clew addresses; loopback is always allowed
     int link_hours = kDefaultLinkHours;

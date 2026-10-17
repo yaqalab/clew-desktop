@@ -13,13 +13,14 @@
 namespace clew {
 
 const char* const kHeadlessHelp =
-    "Clew audio server: serves the audio files of one folder to Clew, on 127.0.0.1 only.\n"
+    "Clew audio server: serves the audio files of your folders to Clew, on 127.0.0.1 only.\n"
     "\n"
     "  clew-audio-server                 the tray icon and the settings window (Windows)\n"
     "  clew-audio-server --headless      no window; output on the console\n"
     "\n"
     "With --headless (each option for this run only; the settings window's values are the defaults):\n"
-    "  --folder <path>        the folder to serve\n"
+    "  --folder <path>        a folder to serve (repeatable; replaces the window's list for this run)\n"
+    "  --folder-off <path>    a folder in the list, but off: named, not served (repeatable)\n"
     "  --port <n>             default 47821\n"
     "  --allow-origin <url>   a hosted Clew's address (repeatable); loopback is always allowed\n"
     "  --ffmpeg <path>        an ffmpeg to try when the system's codecs cannot convert a file\n"
@@ -86,7 +87,8 @@ bool take(const std::vector<std::string>& args, std::size_t& i, std::string* val
 }  // namespace
 
 int run_headless(const std::vector<std::string>& args, const Console& console) {
-    std::string folder, config, cache_dir, ffmpeg, value;
+    std::string config, cache_dir, ffmpeg, value;
+    std::vector<FolderSetting> folders;
     std::string stt_model, stt_models_dir, stt_language, stt_download, stt_program;
     std::vector<std::string> origins;
     int port = -1, link_seconds = 0;  // -1: the settings' port; 0: any free port
@@ -105,7 +107,10 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
             return 0;
         }
         bool ok = true;
-        if (a == "--folder") ok = take(args, i, &folder);
+        if (a == "--folder" || a == "--folder-off") {
+            ok = take(args, i, &value);
+            if (ok) folders.push_back({path_to_utf8(std::filesystem::absolute(path_from_utf8(value))), a == "--folder"});
+        }
         else if (a == "--config") ok = take(args, i, &config);
         else if (a == "--cache-dir") ok = take(args, i, &cache_dir);
         else if (a == "--ffmpeg") ok = take(args, i, &ffmpeg);
@@ -169,19 +174,24 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
 
     if (!stt_download.empty()) return download_model(svc, s, stt_download, console);
 
-    if (!folder.empty()) s.folder = path_to_utf8(std::filesystem::absolute(path_from_utf8(folder)));
+    if (!folders.empty()) s.folders = folders;
     if (port >= 0) s.port = port;
     for (const auto& o : origins) s.origins.push_back(o);
     if (!ffmpeg.empty()) s.ffmpeg = ffmpeg;
     if (no_convert) s.convert = false;
     if (no_system) s.system_codecs = false;
-    if (s.folder.empty()) {
-        console.out("No folder chosen. Start with --folder <path>, or choose one in the settings window.");
-        return 2;
+    bool any_on = false;
+    for (const auto& f : s.folders) {
+        if (!f.enabled) continue;
+        any_on = true;
+        std::error_code ec;
+        if (!std::filesystem::is_directory(path_from_utf8(f.path), ec)) {
+            console.out("Not a folder: " + f.path);
+            return 2;
+        }
     }
-    std::error_code ec;
-    if (!std::filesystem::is_directory(path_from_utf8(s.folder), ec)) {
-        console.out("Not a folder: " + s.folder);
+    if (!any_on) {
+        console.out("No folder chosen. Start with --folder <path>, or choose one in the settings window.");
         return 2;
     }
 
@@ -203,16 +213,24 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
         svc.server().configure(c);
     }
 
-    bool truncated = false;
-    auto files = list_audio(svc.server().config()->root, &truncated);
     console.out("Clew audio server  ->  http://127.0.0.1:" + std::to_string(svc.server().port()));
     if (!s.origins.empty()) {
         std::string list;
         for (const auto& o : s.origins) list += (list.empty() ? "" : ", ") + o;
         console.out("Also allowed to call it: " + list);
     }
-    console.out("Folder: " + s.folder + "  (" + std::to_string(files.size()) + " audio files" +
-                (truncated ? ", more than shown" : "") + ")");
+    auto served = svc.server().config()->folders;
+    for (std::size_t i = 0; i < served.size() && i < s.folders.size(); ++i) {
+        const auto& f = served[i];
+        if (!f.enabled) {
+            console.out("Folder \"" + f.name + "\": " + s.folders[i].path + "  (off)");
+            continue;
+        }
+        bool truncated = false;
+        auto files = list_audio(f.root, &truncated);
+        console.out("Folder \"" + f.name + "\": " + s.folders[i].path + "  (" + std::to_string(files.size()) +
+                    " audio files" + (truncated ? ", more than shown" : "") + ")");
+    }
     if (!s.convert)
         console.out("Conversion: off");
     else

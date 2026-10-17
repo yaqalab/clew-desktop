@@ -179,10 +179,11 @@ class Discovery(Case):
         body = json.loads(raw)
         self.assertEqual(
             [f["path"] for f in body["files"]],
-            ["2026/spring/b.m4a", "a.wav", "old-dictaphone.WMA", "日本語の面接.mp3"],
+            ["interviews/2026/spring/b.m4a", "interviews/a.wav", "interviews/old-dictaphone.WMA",
+             "interviews/日本語の面接.mp3"],
         )
-        self.assertEqual((body["folder"], body["truncated"]), ("interviews", False))
-        a = next(f for f in body["files"] if f["path"] == "a.wav")
+        self.assertEqual((body["folder"], body["folders"], body["truncated"]), ("interviews", ["interviews"], False))
+        a = next(f for f in body["files"] if f["path"] == "interviews/a.wav")
         self.assertEqual((a["size"], a["mime"], a["name"]), (len(BYTES), "audio/wav", "a.wav"))
         self.assertAlmostEqual(a["modified"] / 1000, (self.root / "a.wav").stat().st_mtime, delta=2)
 
@@ -203,7 +204,7 @@ class Discovery(Case):
         try:
             _, _, raw = self.call("GET", "/api/files", self.server.auth())
             paths = [f["path"] for f in json.loads(raw)["files"]]
-            self.assertFalse([p for p in paths if p.startswith("escape")], paths)
+            self.assertFalse([p for p in paths if p.startswith("interviews/escape")], paths)
             self.assertEqual(self.call("POST", "/api/url", self.server.auth(), {"path": "escape-dir/x.mp3"})[0], 404)
         finally:
             os.rmdir(dir_link) if os.name == "nt" else dir_link.unlink()
@@ -217,9 +218,110 @@ class Discovery(Case):
             os.symlink(inner, link, target_is_directory=True)
         try:
             _, _, raw = self.call("GET", "/api/files", self.server.auth())
-            self.assertIn("shortcut/spring/b.m4a", [f["path"] for f in json.loads(raw)["files"]])
+            self.assertIn("interviews/shortcut/spring/b.m4a", [f["path"] for f in json.loads(raw)["files"]])
         finally:
             os.rmdir(link) if os.name == "nt" else link.unlink()
+
+
+@unittest.skipUnless(EXE.is_file(), f"build the program first: {EXE}")
+class SeveralFolders(unittest.TestCase):
+    """Two projects' folders served as one, a third that is off (docs/22 section 11). The same cases as
+    tools/audio-server/test_server.py's SeveralFolders."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name).resolve()
+        for name, files in (
+            ("study-a", {"p01.mp3": b"A1", "pilot/p02.mp3": b"A2"}),
+            ("study-b", {"p01.mp3": b"B1", "only-b.wav": b"B2"}),
+            ("study-c", {"only-c.mp3": b"C1"}),
+            ("x/audio", {"x.mp3": b"X"}),
+            ("y/Audio", {"y.mp3": b"Y"}),
+        ):
+            for rel, data in files.items():
+                (base / name / rel).parent.mkdir(parents=True, exist_ok=True)
+                (base / name / rel).write_bytes(data)
+        cls.base = base
+        cls.server = Server(base / "study-a", Path(base, "home"), "--folder", str(base / "study-b"),
+                            "--folder-off", str(base / "study-c"), "--folder", str(base / "x" / "audio"),
+                            "--folder", str(base / "y" / "Audio"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+        for _ in range(20):
+            try:
+                cls.tmp.cleanup()
+                return
+            except OSError:
+                time.sleep(0.25)
+
+    def play(self, rel):
+        status, _, raw = self.server.call("POST", "/api/url", self.server.auth(), {"path": rel})
+        if status != 200:
+            return status
+        return self.server.call("GET", json.loads(raw)["url"])[2]
+
+    def test_the_banner_names_each_folder(self):
+        self.assertIn('Folder "study-a"', self.server.banner)
+        self.assertIn('Folder "study-c": ' + str(self.base / "study-c") + "  (off)", self.server.banner)
+        self.assertIn('Folder "Audio 2"', self.server.banner)
+
+    def test_the_folders_that_are_on_are_listed_under_their_names(self):
+        _, _, raw = self.server.call("GET", "/api/files", self.server.auth())
+        body = json.loads(raw)
+        self.assertEqual(
+            [f["path"] for f in body["files"]],
+            ["study-a/p01.mp3", "study-a/pilot/p02.mp3", "study-b/only-b.wav", "study-b/p01.mp3", "audio/x.mp3",
+             "Audio 2/y.mp3"],
+        )
+        self.assertEqual(body["folders"], ["study-a", "study-b", "audio", "Audio 2"])
+        self.assertEqual(body["folder"], "study-a, study-b, audio, Audio 2")
+
+    def test_a_name_picks_its_folder(self):
+        self.assertEqual(self.play("study-a/p01.mp3"), b"A1")
+        self.assertEqual(self.play("study-b/p01.mp3"), b"B1")
+        self.assertEqual(self.play("Audio 2/y.mp3"), b"Y")
+        self.assertEqual(self.play("study-a/only-b.wav"), 404)
+        self.assertEqual(self.play("study-a/../study-b/p01.mp3"), 404)
+
+    def test_a_folder_that_is_off_serves_nothing(self):
+        self.assertEqual(self.play("study-c/only-c.mp3"), 404)
+        self.assertEqual(self.play("only-c.mp3"), 404)
+
+    def test_a_path_saved_before_names_is_found_only_where_it_is_not_ambiguous(self):
+        self.assertEqual(self.play("only-b.wav"), b"B2")
+        self.assertEqual(self.play("pilot/p02.mp3"), b"A2")
+        self.assertEqual(self.play("p01.mp3"), 404)  # in both folders
+
+    def test_a_link_names_its_folder(self):
+        status, _, raw = self.server.call("POST", "/api/url", self.server.auth(), {"path": "study-b/p01.mp3"})
+        url = json.loads(raw)["url"]
+        self.assertIn("p=study-b%2Fp01.mp3", url)
+        # Signed for that folder's file: the same name in the other folder is another link.
+        self.assertEqual(self.server.call("GET", url.replace("study-b", "study-a"))[0], 401)
+
+
+@unittest.skipUnless(EXE.is_file() and FFMPEG, "build the program first, and ffmpeg makes the fixtures")
+class SeveralFoldersConversion(unittest.TestCase):
+    """A converted copy stays in its own recording's folder, not in another project's."""
+
+    def test_each_copy_goes_to_its_recordings_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d).resolve()
+            (base / "study-a").mkdir()
+            (base / "study-b").mkdir()
+            tone = ["-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-c:a", "wmav2"]
+            assert make(tone, base / "study-b" / "dictaphone.wma")
+            server = Server(base / "study-a", base / "home", "--folder", str(base / "study-b"))
+            try:
+                self.assertEqual(server.link("study-b/dictaphone.wma")["size"] > 0, True)
+                self.assertTrue(list((base / "study-b" / ".clew-converted").glob("*.mp3")))
+                self.assertFalse((base / "study-a" / ".clew-converted").exists())
+            finally:
+                server.stop()
+                time.sleep(0.5)
 
 
 class Credentials(Case):
@@ -508,8 +610,8 @@ class Conversion(Case):
         self.assertFalse([c for c in copies if "dictaphone" in c.name])
         _, _, listing = self.call("GET", "/api/files", self.server.auth())
         self.assertFalse([f for f in json.loads(listing)["files"] if ".clew-converted" in f["path"]])
-        rel = ".clew-converted/" + copies[0].name
-        self.assertEqual(self.call("POST", "/api/url", self.server.auth(), {"path": rel})[0], 404)
+        for rel in [".clew-converted/" + copies[0].name, "interviews/.clew-converted/" + copies[0].name]:
+            self.assertEqual(self.call("POST", "/api/url", self.server.auth(), {"path": rel})[0], 404)
 
     def test_a_constant_bit_rate_file_is_not_converted(self):
         info = self.server.link("real-cbr.mp3")
@@ -524,7 +626,7 @@ class Conversion(Case):
             self.assertGreaterEqual(seconds, 11.95, rel)  # nothing lost at the end
             self.assertLess(seconds, 12.4, rel)
         _, _, listing = self.call("GET", "/api/files", self.server.auth())
-        entry = next(f for f in json.loads(listing)["files"] if f["path"] == "dictaphone.wma")
+        entry = next(f for f in json.loads(listing)["files"] if f["path"] == "interviews/dictaphone.wma")
         self.assertEqual(entry["mime"], "audio/x-ms-wma")  # the listing still tells what the file is
 
     def test_a_moment_stays_where_it_was(self):

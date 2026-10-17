@@ -27,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--cpu-threads", type=int)
     serve.add_argument("--device", choices=["auto", "cpu", "cuda"])
     serve.add_argument("--audio-root", help="the audio server's folder, read for deferred transcription")
+    serve.add_argument("--audio-folder", action="append", metavar="NAME=PATH",
+                       help="one of the audio server's folders by its name (repeatable; an empty PATH: off)")
     serve.add_argument("--speakers", choices=["auto", "fake"], help=argparse.SUPPRESS)
     serve.add_argument("--language", help="the only language offered; empty: each request names one")
     serve.add_argument("--origins", help="page addresses allowed to call, separated by spaces")
@@ -124,6 +126,11 @@ def _apply_serve_options(settings: Settings, args) -> None:
             setattr(settings, option, value)
     if args.origins is not None:
         settings.allowed_origins = split_list(args.origins)
+    for entry in args.audio_folder or []:
+        name, sep, path = entry.partition("=")
+        if not sep or not name:
+            raise SystemExit(f"--audio-folder takes NAME=PATH, not {entry!r}")
+        settings.audio_folders[name] = path
 
 
 class NoWebSocketLines(logging.Filter):

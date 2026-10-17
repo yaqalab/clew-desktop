@@ -120,7 +120,7 @@ def create_app(settings: Settings, engine=None) -> FastAPI:
         return {"key": name, "model": f"whisper-{engine.model}", "window_seconds": engine.window_seconds,
                 "languages": offered_languages(settings, engine.languages),
                 "device": getattr(engine.engine, "device", "cpu"),
-                "transcribe": True, "speakers": speakers_available(), "folder": bool(settings.audio_root)}
+                "transcribe": True, "speakers": speakers_available(), "folder": bool(settings.audio_root or any(settings.audio_folders.values()))}
 
     @app.websocket("/v1/listen")
     async def listen(ws: WebSocket):

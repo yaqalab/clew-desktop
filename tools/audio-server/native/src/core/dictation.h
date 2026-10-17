@@ -35,11 +35,13 @@ struct DictationConfig {
     int port = 0;
     std::vector<std::string> origins;  // pages besides this computer's that may call it
     std::string key;                   // handed over on stdin
-    std::filesystem::path audio_root;  // the audio server's folder, for deferred transcription (docs/29)
-    bool fake_engine = false;          // the tests: no model needed
+    // The audio server's folders by name (folders.h), for deferred transcription (docs/29); a folder
+    // that is off has an empty path.
+    std::vector<std::pair<std::string, std::filesystem::path>> audio_folders;
+    bool fake_engine = false;  // the tests: no model needed
     bool operator==(const DictationConfig& o) const {
         return program == o.program && model == o.model && models_dir == o.models_dir && language == o.language &&
-               port == o.port && origins == o.origins && key == o.key && audio_root == o.audio_root &&
+               port == o.port && origins == o.origins && key == o.key && audio_folders == o.audio_folders &&
                fake_engine == o.fake_engine;
     }
     bool operator!=(const DictationConfig& o) const { return !(*this == o); }

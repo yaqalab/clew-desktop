@@ -1,6 +1,6 @@
 # Clew audio server
 
-Lets Clew list and play the audio files in one folder of your computer, without asking for the
+Lets Clew list and play the audio files in your folders, without asking for the
 file with the browser's chooser each visit. Design and security model: `docs/22-audio-server.md`.
 
 **On Windows, use the native server instead:** `native/` (a tray icon, a settings window, an
@@ -14,11 +14,13 @@ python tools/audio-server/clew_audio_server.py --folder D:\interviews
 ```
 
 Python 3.10+, standard library only. The first start prints a **secret, once** — paste it into
-Clew ("From server"). Later starts remember the folder and the secret's hash:
+Clew ("From server"). Later starts remember the folders and the secret's hash:
 
 | Option | |
 |---|---|
-| `--folder <path>` | the folder to serve; remembered |
+| `--folder <path>` | a folder to serve: added to the remembered list, or turned on; repeatable |
+| `--folder-off <path>` | turn a folder off: it keeps its name in Clew, nothing in it is served; repeatable |
+| `--remove-folder <path>` | take a folder out of the list; repeatable |
 | `--port <n>` | default 47821 |
 | `--allow-origin <url>` | a hosted Clew's origin (`https://…`); remembered. `http://localhost:*` and `127.0.0.1` are always allowed |
 | `--reset-secret` | a new secret; the old one stops working |
@@ -33,7 +35,7 @@ so nothing has to be typed at each start. `.env` is ignored by git.
 
 | Key | Same as | |
 |---|---|---|
-| `CLEW_AUDIO_FOLDER` | `--folder` | the folder to serve; a Windows path needs no quotes |
+| `CLEW_AUDIO_FOLDER` | `--folder` | a folder to serve, several separated by `;` (`:` off Windows); a Windows path needs no quotes |
 | `CLEW_AUDIO_PORT` | `--port` | default 47821 |
 | `CLEW_AUDIO_ALLOW_ORIGINS` | `--allow-origin` | a hosted Clew's address(es), comma separated |
 | `CLEW_AUDIO_LINK_HOURS` | | how long a stream link lasts; default 4 |

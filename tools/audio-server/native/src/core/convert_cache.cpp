@@ -32,18 +32,30 @@ bool unplayable(const fs::path& path) {
     return ext == ".wma" || ext == ".amr";
 }
 
-ConvertCache::ConvertCache(fs::path dir, ConvertFn convert) : dir_(std::move(dir)), convert_(std::move(convert)) {
+ConvertCache::ConvertCache(fs::path dir, ConvertFn convert)
+    : forced_dir_(std::move(dir)), convert_(std::move(convert)) {
     worker_ = std::thread([this] { worker(); });
 }
 
-void ConvertCache::set_dir(fs::path dir) {
+void ConvertCache::set_roots(std::vector<fs::path> roots) {
     std::lock_guard<std::mutex> g(lock_);
-    dir_ = std::move(dir);
+    roots_ = std::move(roots);
 }
 
-fs::path ConvertCache::dir() const {
+fs::path ConvertCache::dir_for(const fs::path& file) const {
     std::lock_guard<std::mutex> g(lock_);
-    return dir_;
+    if (!forced_dir_.empty()) return forced_dir_;
+    for (const auto& root : roots_)
+        if (inside(root, file)) return root / kCacheFolder;
+    return {};
+}
+
+std::vector<fs::path> ConvertCache::dirs() const {
+    std::lock_guard<std::mutex> g(lock_);
+    if (!forced_dir_.empty()) return {forced_dir_};
+    std::vector<fs::path> out;
+    for (const auto& root : roots_) out.push_back(root / kCacheFolder);
+    return out;
 }
 
 namespace {
@@ -140,7 +152,7 @@ fs::path ConvertCache::target_of(const fs::path& path, const fs::path& dir) cons
 }
 
 std::optional<fs::path> ConvertCache::converted(const fs::path& path) {
-    fs::path d = dir();
+    fs::path d = dir_for(path);
     if (d.empty()) return std::nullopt;
     std::error_code ec;
     auto hit = target_of(path, d);
@@ -174,7 +186,7 @@ std::optional<fs::path> ConvertCache::convert(const fs::path& path) {
 }
 
 std::optional<fs::path> ConvertCache::run(const fs::path& path, bool background) {
-    fs::path d = dir();
+    fs::path d = dir_for(path);
     if (d.empty()) return std::nullopt;
     auto target = target_of(path, d);
     std::shared_ptr<std::mutex> once;
@@ -317,25 +329,25 @@ void ConvertCache::worker() {
 
 std::uint64_t ConvertCache::bytes_on_disk() const {
     std::uint64_t total = 0;
-    fs::path d = dir();
-    if (d.empty()) return 0;
-    std::error_code ec;
-    for (const auto& e : fs::directory_iterator(d, ec)) {
-        std::error_code ec2;
-        if (e.is_regular_file(ec2) && e.path().extension() == ".mp3") total += e.file_size(ec2);
+    for (const auto& d : dirs()) {
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(d, ec)) {
+            std::error_code ec2;
+            if (e.is_regular_file(ec2) && e.path().extension() == ".mp3") total += e.file_size(ec2);
+        }
     }
     return total;
 }
 
 void ConvertCache::clear() {
-    fs::path d = dir();
-    if (d.empty()) return;
-    std::error_code ec;
-    for (const auto& e : fs::directory_iterator(d, ec)) {
-        auto ext = e.path().extension();
-        if (ext == ".mp3" || ext == ".part") {
-            std::error_code ec2;
-            fs::remove(e.path(), ec2);
+    for (const auto& d : dirs()) {
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(d, ec)) {
+            auto ext = e.path().extension();
+            if (ext == ".mp3" || ext == ".part") {
+                std::error_code ec2;
+                fs::remove(e.path(), ec2);
+            }
         }
     }
     std::lock_guard<std::mutex> g(lock_);

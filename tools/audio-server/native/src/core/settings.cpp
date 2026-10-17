@@ -33,7 +33,15 @@ Settings Settings::load(const std::filesystem::path& file) {
     auto v = json::parse(text);
     if (!v || !v->is_object() || !(*v)["v"].is_number() || (*v)["v"].num() != 1) return s;
     const auto& d = *v;
-    if (d["folder"].is_string()) s.folder = d["folder"].str();
+    if (d["folders"].is_array()) {
+        for (const auto& f : d["folders"].items()) {
+            if (!f.is_object() || !f["path"].is_string() || f["path"].str().empty()) continue;
+            s.folders.push_back({f["path"].str(), !f["enabled"].is_bool() || f["enabled"].boolean()});
+        }
+    } else if (d["folder"].is_string() && !d["folder"].str().empty()) {
+        // Written before there could be several (2026-10-17).
+        s.folders.push_back({d["folder"].str(), true});
+    }
     s.port = clamp_int(d["port"], 1024, 65535, kDefaultPort);
     if (d["origins"].is_array()) {
         for (const auto& o : d["origins"].items()) {
@@ -65,7 +73,16 @@ Settings Settings::load(const std::filesystem::path& file) {
 bool Settings::save(const std::filesystem::path& file) const {
     json::Value d = json::Value::object();
     d.set("v", 1);
-    d.set("folder", folder);
+    json::Value list = json::Value::array();
+    for (const auto& f : folders) {
+        json::Value item = json::Value::object();
+        item.set("path", f.path);
+        item.set("enabled", f.enabled);
+        list.push(item);
+    }
+    d.set("folders", list);
+    // The first one also as before, so an older copy of the program still finds a folder.
+    d.set("folder", folders.empty() ? std::string() : folders.front().path);
     d.set("port", port);
     json::Value o = json::Value::array();
     for (const auto& origin : origins) o.push(origin);

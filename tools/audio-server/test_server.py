@@ -82,9 +82,12 @@ class Discovery(ServerCase):
         status, _, raw = self.call("GET", "/api/files", self.auth())
         self.assertEqual(status, 200)
         body = json.loads(raw)
-        self.assertEqual([f["path"] for f in body["files"]], ["2026/spring/b.m4a", "a.wav", "old-dictaphone.WMA"])
-        self.assertEqual(body["folder"], "interviews")
-        a = next(f for f in body["files"] if f["path"] == "a.wav")
+        self.assertEqual(
+            [f["path"] for f in body["files"]],
+            ["interviews/2026/spring/b.m4a", "interviews/a.wav", "interviews/old-dictaphone.WMA"],
+        )
+        self.assertEqual((body["folder"], body["folders"]), ("interviews", ["interviews"]))
+        a = next(f for f in body["files"] if f["path"] == "interviews/a.wav")
         self.assertEqual((a["size"], a["mime"], a["name"]), (len(BYTES), "audio/wav", "a.wav"))
         self.assertIsInstance(a["modified"], int)
 
@@ -108,7 +111,7 @@ class Discovery(ServerCase):
                 subprocess.run(["cmd", "/c", "mklink", "/J", str(dir_link), str(outside_dir)], check=True, capture_output=True)
             _, _, raw = self.call("GET", "/api/files", self.auth())
             paths = [f["path"] for f in json.loads(raw)["files"]]
-            self.assertFalse([p for p in paths if p.startswith("escape")], paths)
+            self.assertFalse([p for p in paths if p.startswith("interviews/escape")], paths)
             status, _, _ = self.call("POST", "/api/url", self.auth(), {"path": "escape-dir/x.mp3"})
             self.assertEqual(status, 404)
         finally:
@@ -409,7 +412,7 @@ class Mp3Conversion(Mp3Case):
         self.assertTrue(body[0] == 0xFF or body.startswith(b"ID3"), body[:4])
         # What the listing says about the file is still the file's own.
         _, _, listing = self.call("GET", "/api/files", self.auth())
-        entry = next(f for f in json.loads(listing)["files"] if f["path"] == "dictaphone.wma")
+        entry = next(f for f in json.loads(listing)["files"] if f["path"].endswith("/dictaphone.wma"))
         self.assertEqual(entry["mime"], "audio/x-ms-wma")
 
     def test_without_ffmpeg_a_wma_file_is_sent_as_it_is(self):
@@ -475,6 +478,74 @@ class Browser(ServerCase):
         self.assertEqual(self.call("GET", self.link("a.wav"))[0], 200)
 
 
+class SeveralFolders(unittest.TestCase):
+    """Two projects' folders served as one, and a third that is off (docs/22 §11)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name)
+        for name, files in (
+            ("study-a", {"p01.mp3": b"A1", "pilot/p02.mp3": b"A2"}),
+            ("study-b", {"p01.mp3": b"B1", "only-b.wav": b"B2"}),
+            ("study-c", {"only-c.mp3": b"C1"}),
+        ):
+            for rel, data in files.items():
+                (base / name / rel).parent.mkdir(parents=True, exist_ok=True)
+                (base / name / rel).write_bytes(data)
+        config = srv.Config(Path(cls.tmp.name, "config.json"), {"v": 1})
+        config.set_secret(SECRET)
+        folders = srv.make_folders(
+            [
+                {"path": str(base / "study-a"), "enabled": True},
+                {"path": str(base / "study-b"), "enabled": True},
+                {"path": str(base / "study-c"), "enabled": False},
+            ]
+        )
+        cls.server = srv.create_server(srv.State(folders, config, []), 0)
+        cls.port = cls.server.server_address[1]
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.tmp.cleanup()
+
+    call = ServerCase.call
+    auth = ServerCase.auth
+
+    def play(self, rel):
+        status, _, raw = self.call("POST", "/api/url", self.auth(), {"path": rel})
+        if status != 200:
+            return status
+        return self.call("GET", json.loads(raw)["url"])[2]
+
+    def test_the_folders_that_are_on_are_listed_under_their_names(self):
+        _, _, raw = self.call("GET", "/api/files", self.auth())
+        body = json.loads(raw)
+        self.assertEqual(
+            [f["path"] for f in body["files"]],
+            ["study-a/p01.mp3", "study-a/pilot/p02.mp3", "study-b/only-b.wav", "study-b/p01.mp3"],
+        )
+        self.assertEqual((body["folder"], body["folders"]), ("study-a, study-b", ["study-a", "study-b"]))
+
+    def test_a_name_picks_its_folder(self):
+        self.assertEqual(self.play("study-a/p01.mp3"), b"A1")
+        self.assertEqual(self.play("study-b/p01.mp3"), b"B1")
+        self.assertEqual(self.play("study-a/only-b.wav"), 404)
+        self.assertEqual(self.play("study-a/../study-b/p01.mp3"), 404)
+
+    def test_a_folder_that_is_off_serves_nothing(self):
+        self.assertEqual(self.play("study-c/only-c.mp3"), 404)
+        self.assertEqual(self.play("only-c.mp3"), 404)
+
+    def test_a_path_saved_before_names_is_found_only_where_it_is_not_ambiguous(self):
+        self.assertEqual(self.play("only-b.wav"), b"B2")
+        self.assertEqual(self.play("pilot/p02.mp3"), b"A2")
+        self.assertEqual(self.play("p01.mp3"), 404)  # in both folders
+
+
 class Units(unittest.TestCase):
     def test_parse_range(self):
         self.assertIsNone(srv.parse_range(None, 100))
@@ -488,12 +559,22 @@ class Units(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             c = srv.Config(Path(d, "x", "config.json"), {"v": 1})
             c.set_secret("abc")
-            c.data["folder"] = "F"
+            c.folders = [{"path": "F", "enabled": True}, {"path": "G", "enabled": False}]
             c.save()
             again = srv.Config.load(Path(d, "x", "config.json"))
-            self.assertEqual(again.folder, "F")
+            self.assertEqual(again.folders, [{"path": "F", "enabled": True}, {"path": "G", "enabled": False}])
             self.assertTrue(again.check_secret("abc"))
             self.assertFalse(again.check_secret("abd"))
+
+    def test_a_config_from_before_several_folders_keeps_its_folder(self):
+        c = srv.Config(Path("unused.json"), {"v": 1, "folder": "D:/old"})
+        self.assertEqual(c.folders, [{"path": "D:/old", "enabled": True}])
+
+    def test_folder_names(self):
+        self.assertEqual(
+            srv.folder_names(["D:\\Study A\\audio", "E:\\Study B\\Audio", "F:\\x\\audio\\", "G:\\", "/srv/pilot"]),
+            ["audio", "Audio 2", "audio 3", "G", "pilot"],
+        )
 
     def test_a_broken_config_starts_empty(self):
         with tempfile.TemporaryDirectory() as d:
@@ -608,11 +689,11 @@ class StartFromEnv(unittest.TestCase):
         self.assertIn(f"127.0.0.1:{run.port}", run.out)
         status, headers, _ = self.get(run.port, "/api/ping", {"Origin": "https://clew.example"})
         self.assertEqual((status, headers["access-control-allow-origin"]), (200, "https://clew.example"))
-        self.assertEqual(self.paths(run), ["a.mp3"])
+        self.assertEqual(self.paths(run), ["from-env/a.mp3"])
 
     def test_the_command_line_wins_over_the_env_file(self):
         run = self.start(["CLEW_AUDIO_FOLDER={env}", "CLEW_AUDIO_PORT={port}"], "--folder", "{cli}")
-        self.assertEqual(self.paths(run), ["b.mp3"])
+        self.assertEqual(self.paths(run), ["from-cli/b.mp3"])
 
     def test_an_origin_from_the_env_file_is_not_written_to_the_remembered_config(self):
         run = self.start(
@@ -629,7 +710,7 @@ class StartFromEnv(unittest.TestCase):
     def test_a_bad_line_is_warned_about_and_the_rest_still_applies(self):
         run = self.start(["CLEW_AUDIO_FOLDER={env}", "CLEW_AUDIO_PORT={port}", "CLEW_AUDIO_TYPO=1"])
         self.assertIn("unknown key CLEW_AUDIO_TYPO", run.out)
-        self.assertEqual(self.paths(run), ["a.mp3"])
+        self.assertEqual(self.paths(run), ["from-env/a.mp3"])
 
 
 if __name__ == "__main__":

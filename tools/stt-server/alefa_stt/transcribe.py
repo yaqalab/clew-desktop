@@ -81,6 +81,32 @@ class PathError(ValueError):
     pass
 
 
+def resolve_served(root: str, folders: dict[str, str], path: str) -> Path:
+    """The audio file `path` names, under the audio server's rules for several folders (clew docs/22
+    §11): `folders` maps each folder's name to its path, "" for one that is off. A path whose first
+    segment is a folder's name is looked for there only (refused while it is off); any other was
+    saved when there was one folder, and is used when exactly one folder that is on has it.
+    Without `folders`, `root` alone (a server started with --audio-root)."""
+    if not folders:
+        return resolve_in_root(root, path)
+    first, _, rest = path.replace("\\", "/").partition("/")
+    if rest and first in folders:
+        if not folders[first]:
+            raise PathError("that audio folder is off")
+        return resolve_in_root(folders[first], rest)
+    found = []
+    for folder in folders.values():
+        if not folder:
+            continue
+        try:
+            found.append(resolve_in_root(folder, path))
+        except PathError:
+            pass
+    if len(found) != 1:
+        raise PathError("no such audio file" if not found else "more than one folder has that file")
+    return found[0]
+
+
 def resolve_in_root(root: str, rel: str) -> Path:
     """The audio file `rel` names inside `root`, or PathError. The audio server's rules: no
     absolute path, no "..", no hidden segment, no ":" (Windows streams and drives), an audio
@@ -273,7 +299,8 @@ class TranscribeSession:
             if start and start.get("type") == "Start":
                 self.voices = Voices.from_messages(start.get("voices") or [])
             if self.params.source == "folder":
-                source = resolve_in_root(self.settings.audio_root or "", self.params.path)
+                source = resolve_served(self.settings.audio_root or "", self.settings.audio_folders,
+                                        self.params.path)
                 source = str(source)
             elif self.params.source == "url":
                 source = check_link(self.params.url)

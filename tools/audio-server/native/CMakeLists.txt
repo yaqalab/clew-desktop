@@ -39,6 +39,7 @@ add_library(clew_core STATIC
   src/core/convert_cache.cpp
   src/core/dictation.cpp
   src/core/files.cpp
+  src/core/folders.cpp
   src/core/headless.cpp
   src/core/json.cpp
   src/core/mp3.cpp

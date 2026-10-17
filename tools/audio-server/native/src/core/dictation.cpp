@@ -186,9 +186,9 @@ void Dictation::launch(std::unique_lock<std::mutex>& lk) {
                                      "--origins",
                                      origins,
                                      "--key-stdin"};
-    if (!config_.audio_root.empty()) {
-        args.push_back("--audio-root");
-        args.push_back(path_to_utf8(config_.audio_root));
+    for (const auto& [name, root] : config_.audio_folders) {
+        args.push_back("--audio-folder");
+        args.push_back(name + "=" + path_to_utf8(root));
     }
     std::uint64_t gen = ++generation_;
     int port = config_.port;

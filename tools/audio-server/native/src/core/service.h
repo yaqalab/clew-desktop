@@ -23,8 +23,8 @@ class Service {
 public:
     using LogFn = std::function<void(const std::string& line)>;
 
-    // `cache_dir` empty: converted copies go to kCacheFolder inside the served folder (the normal
-    // case); otherwise there (the tests).
+    // `cache_dir` empty: converted copies go to kCacheFolder inside the served folder that holds the
+    // recording (the normal case); otherwise there (the tests).
     Service(std::filesystem::path settings_file, std::filesystem::path cache_dir, LogFn log);
     ~Service();
 
@@ -45,7 +45,7 @@ public:
     struct Status {
         bool running = false;
         int port = 0;
-        std::string folder;      // full path, for this machine's own window only
+        std::vector<std::string> folders;  // full paths of the folders that are on, for this machine's own window only
         std::string problem;     // why it is not running, or ""
         std::string converting;  // the file being converted, or ""
         std::uint64_t requests = 0;
@@ -81,7 +81,6 @@ private:
     DictationConfig dictation_config(const Settings& s);
 
     std::filesystem::path settings_file_;
-    std::filesystem::path forced_cache_dir_;
     LogFn log_;
     mutable std::mutex lock_;
     Settings settings_;

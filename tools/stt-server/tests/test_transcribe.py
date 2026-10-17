@@ -11,7 +11,7 @@ from alefa_stt.app import create_app
 from alefa_stt.config import Settings
 from alefa_stt.engine import FakeEngine
 from alefa_stt.speakers import SAME_VOICE, Voices
-from alefa_stt.transcribe import PathError, resolve_in_root
+from alefa_stt.transcribe import PathError, resolve_in_root, resolve_served
 
 from conftest import speechlike, to_wav
 
@@ -256,3 +256,25 @@ def test_paths_are_checked_like_the_audio_servers(folder):
             resolve_in_root(str(folder), bad)
     with pytest.raises(PathError):
         resolve_in_root("", "2026/interview.wav")
+
+
+def test_several_folders_follow_the_audio_servers_rules(folder, tmp_path):
+    other = tmp_path / "pilot"
+    (other / "2026").mkdir(parents=True)
+    (other / "2026" / "interview.wav").write_bytes(b"RIFF")
+    (other / "only-pilot.wav").write_bytes(b"RIFF")
+    off = tmp_path / "old"
+    off.mkdir()
+    (off / "only-old.wav").write_bytes(b"RIFF")
+    folders = {"audio": str(folder), "pilot": str(other), "old": ""}
+    assert resolve_served("", folders, "audio/2026/interview.wav").parent.parent == folder.resolve()
+    assert resolve_served("", folders, "pilot/2026/interview.wav").parent.parent == other.resolve()
+    assert resolve_served("", folders, "only-pilot.wav").parent == other.resolve()  # saved before names
+    for bad in ("2026/interview.wav",  # in both: ambiguous
+                "old/only-old.wav",  # off
+                "audio/only-pilot.wav",  # the named folder only
+                "audio/../pilot/only-pilot.wav"):
+        with pytest.raises(PathError):
+            resolve_served("", folders, bad)
+    # Without names, the one root as before.
+    assert resolve_served(str(folder), {}, "2026/interview.wav").name == "interview.wav"
