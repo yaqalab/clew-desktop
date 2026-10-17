@@ -27,7 +27,7 @@ enum class S {
     StatusProblem,  // %s
     ProblemNoFolder,
     ProblemPortInUse,  // %d
-    ProblemFolderGone,
+    ProblemFolderGone,  // %s folder
     GroupFolder,
     Browse,
     Open,
@@ -120,6 +120,16 @@ enum class S {
     MenuDictationStart,
     MenuDictationStop,
     MenuCopySttKey,
+    // Several folders (docs/22 section 11).
+    MenuFolders,
+    MenuOpenOneFolder,
+    FolderAdd,
+    FolderRemove,
+    FolderRemoveConfirm,  // %s folder
+    FolderAlready,
+    ColFolderName,
+    ColFolderPath,
+    ProblemAllOff,
 };
 
 const wchar_t* tr(S id);

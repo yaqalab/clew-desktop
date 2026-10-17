@@ -18,6 +18,7 @@
 
 #include "../../res/resource.h"
 #include "../core/files.h"
+#include "../core/folders.h"
 #include "../core/platform.h"
 #include "../core/service.h"
 #include "../core/settings.h"
@@ -33,6 +34,7 @@ namespace {
 constexpr UINT WM_APP_TRAY = WM_APP + 1;
 constexpr UINT WM_APP_STATUS = WM_APP + 2;
 constexpr UINT WM_APP_SHOW = WM_APP + 3;
+constexpr UINT WM_APP_TOGGLE_FOLDER = WM_APP + 4;  // wParam: the row whose tick box changed
 constexpr UINT_PTR kRefreshTimer = 1;
 const wchar_t kWindowClass[] = L"ClewAudioServerTray";
 const wchar_t kMutex[] = L"Local\\ClewAudioServer.SingleInstance";
@@ -48,10 +50,13 @@ enum MenuId {
     ID_DICTATION,
     ID_COPY_STT_KEY,
     ID_AUTOSTART,
-    ID_QUIT
+    ID_QUIT,
+    ID_FOLDER_TOGGLE = 100,  // + the folder's index
+    ID_FOLDER_OPEN = 300,    // + the folder's index
 };
+constexpr int kMaxMenuFolders = 100;
 
-const int kAudioPage[] = {IDC_STATUS,    IDC_STARTSTOP,   IDC_G_FOLDER,  IDC_FOLDER,    IDC_BROWSE,   IDC_OPENFOLDER,
+const int kAudioPage[] = {IDC_STATUS,    IDC_STARTSTOP,   IDC_G_FOLDER,  IDC_FOLDER,    IDC_BROWSE,   IDC_REMOVEFOLDER, IDC_OPENFOLDER,
                           IDC_G_CONN,    IDC_L_PORT,      IDC_PORT,      IDC_L_HOURS,   IDC_HOURS,    IDC_L_ORIGINS,
                           IDC_ORIGINS,   IDC_G_SECRET,    IDC_SECRET,    IDC_SHOW,      IDC_COPY,     IDC_NEWSECRET,
                           IDC_L_SECRET,  IDC_G_CONVERT,   IDC_CONVERT,   IDC_PREPARE,   IDC_L_FFMPEG, IDC_FFMPEG,
@@ -79,6 +84,7 @@ struct App {
     int stt_row = 0;          // the model row chosen in the list (kSttModels' order)
     std::wstring stt_note;    // why a grey row cannot be chosen, after a press on it
     bool stopped_by_user = false;
+    bool filling_folders = false;  // the folder list is being drawn: its tick boxes are not the user's
     // A fixed identity for the tray icon: Windows then keeps the user's "show in the taskbar" choice
     // across updates. Windows ties it to the signed program; when it refuses, the icon goes by id.
     bool use_guid = true;
@@ -147,7 +153,9 @@ void copy_text(HWND owner, const std::wstring& text, bool sensitive) {
 std::wstring problem_text(const std::string& p, int port) {
     if (p == "no folder chosen") return tr(S::ProblemNoFolder);
     if (starts_with(p, "port ") && p.find("in use") != std::string::npos) return trf(S::ProblemPortInUse, port);
-    if (starts_with(p, "the folder cannot be opened")) return tr(S::ProblemFolderGone);
+    const std::string gone = "the folder cannot be opened: ";
+    if (starts_with(p, gone)) return trf(S::ProblemFolderGone, widen(p.substr(gone.size())).c_str());
+    if (p == "every folder is off") return tr(S::ProblemAllOff);
     return widen(p);
 }
 
@@ -203,11 +211,40 @@ std::wstring pick(HWND owner, bool folder, const std::wstring& start, const wcha
     return out;
 }
 
-void open_folder() {
-    std::wstring folder = widen(g.svc->settings().folder);
+void open_folder(const std::string& path) {
+    std::wstring folder = widen(path);
     std::error_code ec;
     if (!folder.empty() && std::filesystem::is_directory(folder, ec))
         ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void fill_folders(HWND dlg);
+void message(HWND dlg, const std::wstring& text);
+void refresh_status(HWND dlg);
+void tray(DWORD message);
+
+// A change to the folders takes effect at once, from the window or the tray's menu (docs/22 section
+// 11): switching between projects should not wait for Save. Only the folders change; anything else
+// edited in the window and not saved stays as it is.
+std::string set_folders(std::vector<FolderSetting> folders) {
+    Settings s = g.svc->settings();
+    s.folders = std::move(folders);
+    g.stopped_by_user = false;
+    std::string problem = g.svc->apply(s);
+    if (g.dlg) {
+        fill_folders(g.dlg);
+        message(g.dlg, problem.empty() ? std::wstring(tr(S::Saved)) : problem_text(problem, s.port));
+        refresh_status(g.dlg);
+    }
+    tray(NIM_MODIFY);
+    return problem;
+}
+
+void toggle_folder(std::size_t i) {
+    auto folders = g.svc->settings().folders;
+    if (i >= folders.size()) return;
+    folders[i].enabled = !folders[i].enabled;
+    set_folders(folders);
 }
 
 // The space left on the drive of `p`, which need not exist yet. 0 when unknown.
@@ -285,7 +322,25 @@ void menu(int x, int y) {
     AppendMenuW(m, MF_STRING, ID_OPEN, tr(S::MenuOpen));
     AppendMenuW(m, MF_STRING, ID_COPY_SECRET, tr(S::MenuCopySecret));
     AppendMenuW(m, MF_STRING | (st.running ? 0 : MF_GRAYED), ID_COPY_ADDRESS, tr(S::MenuCopyAddress));
-    AppendMenuW(m, MF_STRING | (st.folder.empty() ? MF_GRAYED : 0), ID_OPEN_FOLDER, tr(S::MenuOpenFolder));
+    // The folders, each ticked when on: the everyday switch between projects.
+    auto folders = g.svc->settings().folders;
+    std::vector<std::string> paths;
+    for (const auto& f : folders) paths.push_back(f.path);
+    auto names = folder_names(paths);
+    HMENU list = CreatePopupMenu();
+    HMENU open = CreatePopupMenu();
+    for (std::size_t i = 0; i < folders.size() && i < kMaxMenuFolders; ++i) {
+        std::wstring text = widen(names[i]) + L"\t" + widen(folders[i].path);
+        AppendMenuW(list, MF_STRING | (folders[i].enabled ? MF_CHECKED : 0), ID_FOLDER_TOGGLE + UINT(i), text.c_str());
+        if (folders[i].enabled) AppendMenuW(open, MF_STRING, ID_FOLDER_OPEN + UINT(i), widen(names[i]).c_str());
+    }
+    AppendMenuW(m, MF_POPUP | (folders.empty() ? MF_GRAYED : 0), UINT_PTR(list), tr(S::MenuFolders));
+    if (st.folders.size() == 1) {
+        DestroyMenu(open);
+        AppendMenuW(m, MF_STRING, ID_OPEN_FOLDER, tr(S::MenuOpenFolder));
+    } else {
+        AppendMenuW(m, MF_POPUP | (st.folders.empty() ? MF_GRAYED : 0), UINT_PTR(open), tr(S::MenuOpenOneFolder));
+    }
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, ID_STARTSTOP, tr(st.running ? S::MenuStop : S::MenuStart));
     bool dictating = g.svc->dictation().wanted();
@@ -304,7 +359,9 @@ void menu(int x, int y) {
         case ID_OPEN: show_settings(); break;
         case ID_COPY_SECRET: copy_text(g.hwnd, widen(g.svc->secret()), true); break;
         case ID_COPY_ADDRESS: copy_text(g.hwnd, L"http://127.0.0.1:" + std::to_wstring(st.port), false); break;
-        case ID_OPEN_FOLDER: open_folder(); break;
+        case ID_OPEN_FOLDER:
+            if (!st.folders.empty()) open_folder(st.folders.front());
+            break;
         case ID_STARTSTOP:
             if (st.running) {
                 g.stopped_by_user = true;
@@ -318,6 +375,13 @@ void menu(int x, int y) {
         case ID_COPY_STT_KEY: copy_text(g.hwnd, widen(g.svc->stt_key()), true); break;
         case ID_AUTOSTART: set_autostart(!autostart_on()); break;
         case ID_QUIT: DestroyWindow(g.hwnd); break;
+        default:
+            if (cmd >= ID_FOLDER_TOGGLE && cmd < ID_FOLDER_TOGGLE + kMaxMenuFolders)
+                toggle_folder(std::size_t(cmd - ID_FOLDER_TOGGLE));
+            else if (cmd >= ID_FOLDER_OPEN && cmd < ID_FOLDER_OPEN + kMaxMenuFolders &&
+                     std::size_t(cmd - ID_FOLDER_OPEN) < folders.size())
+                open_folder(folders[std::size_t(cmd - ID_FOLDER_OPEN)].path);
+            break;
     }
 }
 
@@ -547,9 +611,97 @@ void show_secret(HWND dlg, bool visible) {
     InvalidateRect(edit, nullptr, TRUE);
 }
 
+int selected_folder(HWND dlg) {
+    return int(SendDlgItemMessageW(dlg, IDC_FOLDER, LVM_GETNEXTITEM, WPARAM(-1), LVNI_SELECTED));
+}
+
+// Remove and Open act on the chosen row.
+void enable_folder_buttons(HWND dlg) {
+    bool chosen = selected_folder(dlg) >= 0;
+    EnableWindow(GetDlgItem(dlg, IDC_REMOVEFOLDER), chosen);
+    EnableWindow(GetDlgItem(dlg, IDC_OPENFOLDER), chosen);
+}
+
+// The list's two columns and its tick boxes, once.
+void init_folder_list(HWND dlg) {
+    HWND list = GetDlgItem(dlg, IDC_FOLDER);
+    ListView_SetExtendedListViewStyle(list, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    RECT r{};
+    GetClientRect(list, &r);
+    int scroll = GetSystemMetrics(SM_CXVSCROLL);
+    int name_width = (r.right - scroll) * 2 / 5;
+    LVCOLUMNW col{};
+    col.mask = LVCF_TEXT | LVCF_WIDTH;
+    col.cx = name_width;
+    col.pszText = const_cast<LPWSTR>(tr(S::ColFolderName));
+    ListView_InsertColumn(list, 0, &col);
+    col.cx = r.right - scroll - name_width;
+    col.pszText = const_cast<LPWSTR>(tr(S::ColFolderPath));
+    ListView_InsertColumn(list, 1, &col);
+}
+
+void fill_folders(HWND dlg) {
+    HWND list = GetDlgItem(dlg, IDC_FOLDER);
+    int keep = selected_folder(dlg);
+    auto folders = g.svc->settings().folders;
+    std::vector<std::string> paths;
+    for (const auto& f : folders) paths.push_back(f.path);
+    auto names = folder_names(paths);
+    g.filling_folders = true;
+    ListView_DeleteAllItems(list);
+    for (std::size_t i = 0; i < folders.size(); ++i) {
+        std::wstring name = widen(names[i]), path = widen(folders[i].path);
+        LVITEMW item{};
+        item.mask = LVIF_TEXT;
+        item.iItem = int(i);
+        item.pszText = name.data();
+        ListView_InsertItem(list, &item);
+        ListView_SetItemText(list, int(i), 1, path.data());
+        ListView_SetCheckState(list, int(i), folders[i].enabled);
+    }
+    if (keep >= int(folders.size())) keep = int(folders.size()) - 1;
+    if (keep >= 0) ListView_SetItemState(list, keep, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    g.filling_folders = false;
+    enable_folder_buttons(dlg);
+}
+
+void add_folder(HWND dlg) {
+    auto folders = g.svc->settings().folders;
+    int at = selected_folder(dlg);
+    std::wstring start = at >= 0 && at < int(folders.size()) ? widen(folders[std::size_t(at)].path) : L"";
+    std::wstring p = pick(dlg, true, start);
+    if (p.empty()) return;
+    std::error_code ec;
+    auto chosen = std::filesystem::weakly_canonical(p, ec);
+    for (const auto& f : folders) {
+        std::error_code ec2;
+        auto known = std::filesystem::weakly_canonical(path_from_utf8(f.path), ec2);
+        if (to_lower(path_to_utf8(known)) == to_lower(path_to_utf8(chosen))) {
+            message(dlg, tr(S::FolderAlready));
+            return;
+        }
+    }
+    folders.push_back({narrow(p), true});
+    set_folders(folders);
+    HWND list = GetDlgItem(dlg, IDC_FOLDER);
+    int last = int(folders.size()) - 1;
+    ListView_SetItemState(list, last, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_EnsureVisible(list, last, FALSE);
+}
+
+void remove_folder(HWND dlg) {
+    auto folders = g.svc->settings().folders;
+    int at = selected_folder(dlg);
+    if (at < 0 || at >= int(folders.size())) return;
+    std::wstring ask = trf(S::FolderRemoveConfirm, widen(folders[std::size_t(at)].path).c_str());
+    if (MessageBoxW(dlg, ask.c_str(), tr(S::AppName), MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2) != IDOK) return;
+    folders.erase(folders.begin() + at);
+    set_folders(folders);
+}
+
 void fill(HWND dlg) {
     Settings s = g.svc->settings();
-    SetDlgItemTextW(dlg, IDC_FOLDER, widen(s.folder).c_str());
+    fill_folders(dlg);
     SetDlgItemInt(dlg, IDC_PORT, UINT(s.port), FALSE);
     SetDlgItemInt(dlg, IDC_HOURS, UINT(s.link_hours), FALSE);
     std::wstring origins;
@@ -582,7 +734,8 @@ void label(HWND dlg) {
         int id;
         S s;
     } const texts[] = {
-        {IDC_G_FOLDER, S::GroupFolder},   {IDC_BROWSE, S::Browse},       {IDC_OPENFOLDER, S::Open},
+        {IDC_G_FOLDER, S::GroupFolder},   {IDC_BROWSE, S::FolderAdd},    {IDC_REMOVEFOLDER, S::FolderRemove},
+        {IDC_OPENFOLDER, S::Open},
         {IDC_G_CONN, S::GroupConnection}, {IDC_L_PORT, S::Port},         {IDC_L_HOURS, S::LinkHours},
         {IDC_L_ORIGINS, S::Origins},      {IDC_G_SECRET, S::GroupSecret}, {IDC_L_SECRET, S::SecretHint},
         {IDC_SHOW, S::Show},              {IDC_COPY, S::Copy},           {IDC_NEWSECRET, S::NewSecret},
@@ -637,11 +790,8 @@ void bad(HWND dlg, int id, const std::wstring& text) {
 }
 
 void save(HWND dlg) {
-    Settings s = g.svc->settings();
-    std::wstring folder = window_text(dlg, IDC_FOLDER);
-    folder = widen(trim(narrow(folder)));
+    Settings s = g.svc->settings();  // the folders as they are: they changed when they were changed
     std::error_code ec;
-    if (!folder.empty() && !std::filesystem::is_directory(folder, ec)) return bad(dlg, IDC_FOLDER, tr(S::BadFolder));
     if (!read_int(dlg, IDC_PORT, 1024, 65535, &s.port)) return bad(dlg, IDC_PORT, tr(S::BadPort));
     if (!read_int(dlg, IDC_HOURS, 1, 168, &s.link_hours)) return bad(dlg, IDC_HOURS, tr(S::BadHours));
     if (!read_int(dlg, IDC_CACHEMB, 256, 1024 * 1024, &s.cache_mb)) return bad(dlg, IDC_CACHEMB, tr(S::BadCache));
@@ -669,7 +819,6 @@ void save(HWND dlg) {
     if (lang >= 0 && lang < LRESULT(std::size(kLanguages))) s.stt_language = kLanguages[lang];
     s.stt_enabled = IsDlgButtonChecked(dlg, IDC_STT_AUTOSTART) == BST_CHECKED;
 
-    s.folder = narrow(folder);
     s.origins = origins;
     s.ffmpeg = narrow(ffmpeg);
     s.convert = IsDlgButtonChecked(dlg, IDC_CONVERT) == BST_CHECKED;
@@ -692,13 +841,14 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             SendMessageW(dlg, WM_SETICON, ICON_BIG, LPARAM(icon_big));
             SendMessageW(dlg, WM_SETICON, ICON_SMALL, LPARAM(icon_small));
             label(dlg);
+            init_folder_list(dlg);
             fill(dlg);
             show_secret(dlg, false);
             show_stt_key(dlg, false);
             show_page(dlg, g.tab);
             refresh_status(dlg);
             refresh_cache(dlg);
-            if (g.svc->settings().folder.empty()) message(dlg, tr(S::FirstRun));
+            if (g.svc->settings().folders.empty()) message(dlg, tr(S::FirstRun));
             SetTimer(dlg, kRefreshTimer, 3000, nullptr);
             return TRUE;
         }
@@ -708,6 +858,16 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_STATUS:
             refresh_status(dlg);
             return TRUE;
+        case WM_APP_TOGGLE_FOLDER: {
+            // What the tick box shows now, against what is saved: a click that changed nothing does nothing.
+            auto folders = g.svc->settings().folders;
+            std::size_t i = std::size_t(wp);
+            if (i < folders.size()) {
+                bool ticked = ListView_GetCheckState(GetDlgItem(dlg, IDC_FOLDER), int(i)) != 0;
+                if (ticked != folders[i].enabled) toggle_folder(i);
+            }
+            return TRUE;
+        }
         case WM_MEASUREITEM: {
             auto* m = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
             if (m->CtlID != IDC_STT_MODELS) break;
@@ -729,6 +889,23 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 show_page(dlg, TabCtrl_GetCurSel(hdr->hwndFrom));
                 return TRUE;
             }
+            if (hdr->idFrom == IDC_FOLDER && hdr->code == LVN_ITEMCHANGED && !g.filling_folders) {
+                auto* change = reinterpret_cast<NMLISTVIEW*>(lp);
+                if ((change->uChanged & LVIF_STATE) &&
+                    ((change->uNewState ^ change->uOldState) & LVIS_STATEIMAGEMASK) && change->iItem >= 0) {
+                    // A tick box: takes effect at once. Posted, so the list is not redrawn while it
+                    // is still telling of the change.
+                    PostMessageW(dlg, WM_APP_TOGGLE_FOLDER, WPARAM(change->iItem), 0);
+                }
+                enable_folder_buttons(dlg);
+                return TRUE;
+            }
+            if (hdr->idFrom == IDC_FOLDER && hdr->code == NM_DBLCLK) {
+                auto folders = g.svc->settings().folders;
+                int at = selected_folder(dlg);
+                if (at >= 0 && at < int(folders.size())) open_folder(folders[std::size_t(at)].path);
+                return TRUE;
+            }
             break;
         }
         case WM_COMMAND:
@@ -745,12 +922,14 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                     refresh_status(dlg);
                     return TRUE;
-                case IDC_BROWSE: {
-                    std::wstring p = pick(dlg, true, window_text(dlg, IDC_FOLDER));
-                    if (!p.empty()) SetDlgItemTextW(dlg, IDC_FOLDER, p.c_str());
+                case IDC_BROWSE: add_folder(dlg); return TRUE;
+                case IDC_REMOVEFOLDER: remove_folder(dlg); return TRUE;
+                case IDC_OPENFOLDER: {
+                    auto folders = g.svc->settings().folders;
+                    int at = selected_folder(dlg);
+                    if (at >= 0 && at < int(folders.size())) open_folder(folders[std::size_t(at)].path);
                     return TRUE;
                 }
-                case IDC_OPENFOLDER: open_folder(); return TRUE;
                 case IDC_SHOW: show_secret(dlg, !g.secret_visible); return TRUE;
                 case IDC_COPY:
                     copy_text(dlg, widen(g.svc->secret()), true);
@@ -939,7 +1118,7 @@ int run_tray(HINSTANCE instance) {
     svc.apply(svc.settings(), false);
     svc.start_dictation_if_enabled();
     tray(NIM_ADD);
-    if (svc.settings().folder.empty()) show_settings();
+    if (svc.settings().folders.empty()) show_settings();
 
     MSG m;
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {

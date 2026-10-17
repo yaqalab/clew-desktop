@@ -23,6 +23,8 @@
 #include <string>
 #include <thread>
 
+#include <vector>
+
 #include "mp3.h"
 #include "platform.h"
 
@@ -39,11 +41,16 @@ public:
     // A line for the activity list.
     using NoteFn = std::function<void(const std::string& line)>;
 
+    // `dir` not empty: every copy goes there (the tests). Otherwise each copy goes to kCacheFolder
+    // inside the served folder that holds its recording (set_roots).
     ConvertCache(fs::path dir, ConvertFn convert);
 
-    // Where copies go from now on; empty: nowhere (nothing is converted).
-    void set_dir(fs::path dir);
-    fs::path dir() const;
+    // The served folders (canonical) from now on; a file in none of them is not converted.
+    void set_roots(std::vector<fs::path> roots);
+    // Where the copy of `file` goes; empty: nowhere.
+    fs::path dir_for(const fs::path& file) const;
+    // Every place copies go.
+    std::vector<fs::path> dirs() const;
     ~ConvertCache();
 
     void set_enabled(bool on) { enabled_ = on; }
@@ -79,7 +86,8 @@ private:
     void worker();
     void busy(const std::string& name);
 
-    fs::path dir_;
+    fs::path forced_dir_;
+    std::vector<fs::path> roots_;
     ConvertFn convert_;
     std::atomic<bool> enabled_{true};
     std::atomic<bool> prepare_{true};

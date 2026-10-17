@@ -3,6 +3,7 @@
 #include <ctime>
 
 #include "files.h"
+#include "folders.h"
 #include "platform.h"
 
 namespace clew {
@@ -22,10 +23,26 @@ std::string clock_now() {
     return buf;
 }
 
+// Every folder of the settings with its name (folders.h); a folder that cannot be opened has no root.
+std::vector<ServedFolder> served_folders(const Settings& s) {
+    std::vector<std::string> paths;
+    for (const auto& f : s.folders) paths.push_back(f.path);
+    auto names = folder_names(paths);
+    std::vector<ServedFolder> out;
+    for (std::size_t i = 0; i < s.folders.size(); ++i) {
+        ServedFolder f{names[i], {}, s.folders[i].enabled};
+        std::error_code ec;
+        auto root = std::filesystem::canonical(path_from_utf8(s.folders[i].path), ec);
+        if (!ec && std::filesystem::is_directory(root, ec)) f.root = root;
+        out.push_back(std::move(f));
+    }
+    return out;
+}
+
 }  // namespace
 
 Service::Service(std::filesystem::path settings_file, std::filesystem::path cache_dir, LogFn log)
-    : settings_file_(std::move(settings_file)), forced_cache_dir_(cache_dir), log_(std::move(log)) {
+    : settings_file_(std::move(settings_file)), log_(std::move(log)) {
     settings_ = Settings::load(settings_file_);
     cache_ = std::make_unique<ConvertCache>(
         std::move(cache_dir), [this](const auto& in, const auto& out, const platform::ConvertControl& control,
@@ -201,11 +218,9 @@ DictationConfig Service::dictation_config(const Settings& s) {
     c.language = s.stt_language;
     c.port = s.stt_port;
     c.origins = s.origins;
-    if (!s.folder.empty()) {
-        std::error_code ec;
-        auto root = std::filesystem::canonical(path_from_utf8(s.folder), ec);
-        if (!ec) c.audio_root = root;
-    }
+    // Every folder by its name, so a path means the same file to both servers; one that is off has no
+    // root, so the speech server refuses it rather than looking for it elsewhere.
+    for (const auto& f : served_folders(s)) c.audio_folders.push_back({f.name, f.enabled ? f.root : std::filesystem::path()});
     return c;
 }
 
@@ -232,16 +247,18 @@ ServerConfig Service::server_config(const Settings& s, std::string* problem) {
         std::lock_guard<std::mutex> g(lock_);
         c.secret = secret_;
     }
-    if (s.folder.empty()) {
+    c.folders = served_folders(s);
+    if (s.folders.empty()) {
         *problem = "no folder chosen";
-    } else {
-        std::error_code ec;
-        auto root = std::filesystem::canonical(path_from_utf8(s.folder), ec);
-        if (ec || !std::filesystem::is_directory(root, ec))
-            *problem = "the folder cannot be opened: " + s.folder;
-        else
-            c.root = root;
+        return c;
     }
+    for (std::size_t i = 0; i < s.folders.size(); ++i) {
+        if (s.folders[i].enabled && c.folders[i].root.empty()) {
+            *problem = "the folder cannot be opened: " + s.folders[i].path;
+            return c;
+        }
+    }
+    if (!c.serving()) *problem = "every folder is off";
     return c;
 }
 
@@ -266,13 +283,14 @@ std::string Service::apply(Settings s, bool persist) {
     cache_->set_limit_bytes(std::uint64_t(s.cache_mb) * 1024 * 1024);
     std::string problem;
     ServerConfig config = server_config(s, &problem);
-    cache_->set_dir(!forced_cache_dir_.empty() ? forced_cache_dir_
-                    : config.root.empty()      ? std::filesystem::path()
-                                               : config.root / kCacheFolder);
+    std::vector<std::filesystem::path> roots;
+    for (const auto& f : config.folders)
+        if (f.enabled && !f.root.empty()) roots.push_back(f.root);
+    cache_->set_roots(roots);
     server_->configure(config);
     // Without a folder there is nothing to serve: not listening says so more plainly than a 503.
-    if (server_->running() && (old_port != s.port || config.root.empty())) server_->stop();
-    std::string start_problem = server_->running() || config.root.empty() ? "" : start();
+    if (server_->running() && (old_port != s.port || !config.serving())) server_->stop();
+    std::string start_problem = server_->running() || !config.serving() ? "" : start();
     {
         std::lock_guard<std::mutex> g(lock_);
         problem_ = !start_problem.empty() ? start_problem : problem;
@@ -305,7 +323,8 @@ Service::Status Service::status() const {
     st.port = server_->running() ? server_->port() : settings().port;
     st.requests = server_->requests();
     std::lock_guard<std::mutex> g(lock_);
-    st.folder = settings_.folder;
+    for (const auto& f : settings_.folders)
+        if (f.enabled) st.folders.push_back(f.path);
     st.problem = problem_;
     st.converting = converting_;
     return st;

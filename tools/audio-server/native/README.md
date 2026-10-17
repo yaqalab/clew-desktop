@@ -1,13 +1,13 @@
 # Clew audio server (native)
 
-Lets Clew list and play the audio files in one folder of your computer, without choosing the file
+Lets Clew list and play the audio files in your folders, without choosing the file
 again on each visit and without uploading anything. A small Windows program (about 0.6 MB) with a
 tray icon and a settings window; it needs no Python and no ffmpeg.
 
 ## Use it
 
 1. Install it with `clew-audio-server-setup-<version>.exe` (no administrator rights needed).
-2. The settings window opens. Choose **the folder of your audio files** and press **Save**.
+2. The settings window opens. Press **Add…** and choose **the folder of your audio files**.
    The tray icon, Clew's "c" mark, shows in full: Clew can reach the files.
 3. Press **Copy** next to the secret, and paste it into Clew under **"From the audio server…"**.
 
@@ -26,14 +26,27 @@ choice is kept when the program is updated.
 The mark is ink on a light taskbar and cream on a dark one, and follows a switch at once.
 
 One click on the icon opens the settings; a right click has *Copy the secret*, *Copy the address*,
-*Open the audio folder*, *Stop / Start*, *Start with Windows* and *Quit*. Closing the window keeps
-the server running.
+*Audio folders* (tick or untick one), *Open the audio folder*, *Stop / Start*, *Start with Windows*
+and *Quit*. Closing the window keeps the server running.
+
+### Several folders
+
+Each project can keep its recordings in its own folder. Add each one with **Add…**; Clew lists the files
+of every ticked folder, each under the folder's name ("study-a/p01.mp3"). **Untick** a folder you are
+not working on: it stays in the list with its name, nothing in it is listed or played, and ticking it
+again brings everything back, links in Clew included. A tick, Add… and Remove take effect at once, no
+Save needed; the tray's *Audio folders* menu does the same without opening the window.
+
+Two folders with the same last name ("…\Study A\audio", "…\Study B\audio") are shown as "audio" and
+"audio 2", in the list's order. Removing a folder does not touch it or its recordings; a recording
+linked from it plays again once it is added back. Recordings linked before there could be several
+folders keep working while only one ticked folder has that file.
 
 ### Settings
 
 | Setting | |
 |---|---|
-| Folder | the folder whose audio files Clew may list and play (subfolders too) |
+| Folders | the folders whose audio files Clew may list and play (subfolders too); ticked ones are served |
 | Port | 47821 unless another program uses it |
 | Play links last | how long one play link works (default 4 hours); Clew asks for a new one by itself |
 | Other Clew addresses | a Clew hosted on the web (`https://you.github.io`); a Clew on this computer is always allowed |
@@ -41,10 +54,10 @@ the server running.
 | Convert … | converts .wma, .amr and long variable-bit-rate .mp3 so every browser plays and seeks them |
 | Prepare … in the background | converts .wma and .amr files as soon as Clew lists the folder, so they open at once. The file you open always goes first: preparing stops, waits, and picks up again afterwards |
 | ffmpeg (optional) | only used when Windows itself cannot convert a file |
-| Cache limit | converted copies are kept up to this size, the oldest removed first |
+| Cache limit | converted copies are kept up to this size in each folder, the oldest removed first |
 
 Settings live in `%APPDATA%\clew-audio-server\settings.json`. **Converted copies stay beside your
-recordings**, in a `.clew-converted` folder inside the audio folder: they are as private as the
+recordings**, in a `.clew-converted` folder inside the recording's own audio folder: they are as private as the
 interviews, so they stay wherever you chose to keep those (an encrypted drive, a synced folder). Clew
 never lists that folder and it cannot be asked for; it holds a README saying what it is, and deleting
 it is safe (a copy is made again when needed). Copies are named by a hash, not by the recording's name.
@@ -99,8 +112,9 @@ tools\audio-server\native\installer\build-installer.cmd             build + inst
 set CLEW_AUDIO_SERVER_EXE=...\clew-audio-server.exe && npm run smoke:audio-server   real Clew in Chromium
 ```
 
-`clew-audio-server.exe --headless --folder <dir> [--port n] …` runs without a window (`--help` lists the
-options; they apply to that run only). `CLEW_AUDIO_LANG=ja` or `en` forces the window's language.
+`clew-audio-server.exe --headless --folder <dir> [--folder <dir>…] [--folder-off <dir>] [--port n] …` runs
+without a window (`--help` lists the options; they apply to that run only, and `--folder` replaces the
+window's list for that run). `CLEW_AUDIO_LANG=ja` or `en` forces the window's language.
 
 | Folder | |
 |---|---|

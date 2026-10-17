@@ -2,14 +2,14 @@
 // know which one it talks to.
 //
 //   GET  /api/ping                 nothing needed       {server, api, version, convert}
-//   GET  /api/files                Bearer <secret>      {folder, files, truncated}
+//   GET  /api/files                Bearer <secret>      {folder, folders, files, truncated}
 //   POST /api/url {path}           Bearer <secret>      {url, expires, size}
 //   GET  /api/stream?p&exp&sig     a signed link        the file, with Range and HEAD
 //
 // What it promises (docs/22 section 3): 127.0.0.1 only, the port held exclusively; a Host that is
 // not loopback is refused (DNS rebinding); CORS only for loopback origins and the configured ones;
 // links signed for one file and one expiry with a key that lives in memory only; only files of
-// the folder; nothing logged beyond method, path and status. Added here: limits on the request
+// the folders that are on (folders.h); nothing logged beyond method, path and status. Added here: limits on the request
 // head (16 KB), the body (8 KB) and the connections (64), idle timeouts, and no chunked bodies.
 #pragma once
 
@@ -24,6 +24,7 @@
 #include <thread>
 
 #include "convert_cache.h"
+#include "folders.h"
 
 namespace clew {
 
@@ -32,7 +33,13 @@ constexpr int kApiVersion = 1;
 extern const char* const kVersion;
 
 struct ServerConfig {
-    std::filesystem::path root;  // canonical; empty when no folder is chosen
+    std::vector<ServedFolder> folders;  // every folder, on or off (folders.h); none until one is chosen
+    // Whether any folder is on and can be opened: without one there is nothing to serve.
+    bool serving() const {
+        for (const auto& f : folders)
+            if (f.enabled && !f.root.empty()) return true;
+        return false;
+    }
     std::set<std::string> origins;
     int link_ttl_sec = 4 * 3600;
     std::string secret;

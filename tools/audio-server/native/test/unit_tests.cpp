@@ -11,6 +11,7 @@
 
 #include "dictation.h"
 #include "files.h"
+#include "folders.h"
 #include "json.h"
 #include "mp3.h"
 #include "platform.h"
@@ -192,6 +193,45 @@ static void folders(const fs::path& tmp) {
     }
 }
 
+// Several folders served as one (folders.h, docs/22 section 11).
+static void served_folders(const fs::path& tmp) {
+    CHECK((folder_names({"D:\\Study A\\audio", "E:\\Study B\\Audio", "F:\\x\\audio\\", "G:\\", "D:\\pilot"}) ==
+           std::vector<std::string>{"audio", "Audio 2", "audio 3", "G", "pilot"}));
+
+    fs::path a = tmp / "served" / "study-a", b = tmp / "served" / "study-b", c = tmp / "served" / "study-c";
+    write(a / "p01.mp3", "1");
+    write(a / "pilot" / "p02.mp3", "2");
+    write(b / "p01.mp3", "3");
+    write(b / "only-b.wav", "4");
+    write(c / "only-c.mp3", "5");
+    std::vector<ServedFolder> folders = {{"study-a", fs::canonical(a), true},
+                                         {"study-b", fs::canonical(b), true},
+                                         {"study-c", fs::canonical(c), false}};
+    bool truncated = true;
+    std::vector<std::string> paths;
+    for (const auto& f : list_served(folders, &truncated)) paths.push_back(f.path);
+    CHECK(!truncated);
+    CHECK((paths == std::vector<std::string>{"study-a/p01.mp3", "study-a/pilot/p02.mp3", "study-b/only-b.wav",
+                                             "study-b/p01.mp3"}));
+
+    auto at = [&](const char* path) {
+        auto f = resolve_served(folders, path);
+        return f ? path_to_utf8(fs::relative(*f, tmp / "served")) : std::string("-");
+    };
+    CHECK(at("study-a/p01.mp3") == "study-a" + std::string(1, char(fs::path::preferred_separator)) + "p01.mp3");
+    CHECK(at("study-b/p01.mp3") != "-" && at("study-b/p01.mp3") != at("study-a/p01.mp3"));
+    CHECK(at("study-c/only-c.mp3") == "-");  // off: refused, not looked for elsewhere
+    CHECK(at("study-a/../study-b/p01.mp3") == "-");
+    CHECK(at("study-a/only-b.wav") == "-");  // named folder only
+    // Saved when there was one folder: found where it is not ambiguous.
+    CHECK(at("only-b.wav") != "-");
+    CHECK(at("pilot/p02.mp3") != "-");
+    CHECK(at("p01.mp3") == "-");  // in both folders that are on
+    CHECK(at("only-c.mp3") == "-");  // only in the one that is off
+    CHECK(folder_of(folders, fs::canonical(b / "p01.mp3")) == &folders[1]);
+    CHECK(folder_of(folders, fs::canonical(c / "only-c.mp3")) == nullptr);
+}
+
 static std::string frame(std::uint8_t fill, const char* tag) {
     // MPEG1 layer III, 128 kbit/s, 44.1 kHz, stereo, no padding, no checksum: 417 bytes.
     std::string f(417, char(fill));
@@ -227,7 +267,7 @@ static void mp3_heads(const fs::path& tmp) {
 static void settings_file(const fs::path& tmp) {
     fs::path file = tmp / "settings" / "settings.json";
     Settings s;
-    s.folder = "D:\\interviews \xe6\x97\xa5";
+    s.folders = {{"D:\\interviews \xe6\x97\xa5", true}, {"E:\\pilot", false}};
     s.port = 50000;
     s.origins = {"https://you.github.io"};
     s.convert = false;
@@ -242,13 +282,18 @@ static void settings_file(const fs::path& tmp) {
     CHECK(raw.find(base64_encode("not-a-real-secret")) == std::string::npos);
 #endif
     Settings back = Settings::load(file);
-    CHECK(back.folder == s.folder && back.port == 50000 && back.origins == s.origins && !back.convert);
+    CHECK(back.folders == s.folders && back.port == 50000 && back.origins == s.origins && !back.convert);
+    // Written before there could be several folders: the one it had, on.
+    write(file, "{\"v\":1,\"folder\":\"D:\\\\old\",\"port\":50001}");
+    Settings old = Settings::load(file);
+    CHECK(old.folders.size() == 1 && old.folders[0].path == "D:\\old" && old.folders[0].enabled);
+    CHECK(old.port == 50001);
     CHECK(back.ffmpeg == s.ffmpeg);
     CHECK(back.secret && *platform::open_secret(*back.secret) == "not-a-real-secret");
     // A broken file starts from the defaults.
     write(file, "{ not json");
     Settings broken = Settings::load(file);
-    CHECK(broken.folder.empty() && broken.port == kDefaultPort && !broken.secret);
+    CHECK(broken.folders.empty() && broken.port == kDefaultPort && !broken.secret);
     CHECK(new_secret().size() == 32 && new_secret() != new_secret());
 }
 
@@ -340,6 +385,7 @@ int main() {
     ranges();
     origins_and_hosts();
     folders(tmp);
+    served_folders(tmp);
     mp3_heads(tmp);
     settings_file(tmp);
     dictation_settings(tmp);

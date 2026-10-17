@@ -356,12 +356,12 @@ struct Server::Connection {
 
     void files() {
         if (!auth()) return;
-        if (cfg->root.empty()) {
+        if (!cfg->serving()) {
             refuse(503, "folder");
             return;
         }
         bool truncated = false;
-        auto found = list_audio(cfg->root, &truncated);
+        auto found = list_served(cfg->folders, &truncated);
         json::Value list = json::Value::array();
         std::vector<std::filesystem::path> to_prepare;
         for (const auto& f : found) {
@@ -372,12 +372,20 @@ struct Server::Connection {
             item.set("modified", static_cast<long long>(f.modified_ms));
             item.set("mime", f.mime);
             list.push(item);
-            if (unplayable(path_from_utf8(f.name))) to_prepare.push_back(cfg->root / path_from_utf8(f.path));
+            if (unplayable(path_from_utf8(f.name)))
+                if (auto full = resolve_served(cfg->folders, f.path)) to_prepare.push_back(*full);
         }
-        // The folder's name, not its full path: Clew has no use for the rest.
-        std::string name = path_to_utf8(cfg->root.filename());
+        // The folders' names, not their full paths: Clew has no use for the rest.
+        json::Value names = json::Value::array();
+        std::string joined;
+        for (const auto& folder : cfg->folders) {
+            if (!folder.enabled || folder.root.empty()) continue;
+            names.push(folder.name);
+            joined += (joined.empty() ? "" : ", ") + folder.name;
+        }
         json::Value v = json::Value::object();
-        v.set("folder", name.empty() ? path_to_utf8(cfg->root) : name);
+        v.set("folder", joined);
+        v.set("folders", names);
         v.set("files", list);
         v.set("truncated", truncated);
         json_reply(200, v);
@@ -389,7 +397,7 @@ struct Server::Connection {
         auto body = json::parse(req->body.empty() ? "{}" : req->body);
         const json::Value* rel = body && body->is_object() && (*body)["path"].is_string() ? &(*body)["path"] : nullptr;
         std::optional<std::filesystem::path> path;
-        if (rel && !cfg->root.empty()) path = resolve_audio(cfg->root, rel->str());
+        if (rel) path = resolve_served(cfg->folders, rel->str());
         if (!path) {
             refuse(404, "no such file");
             return;
@@ -429,7 +437,7 @@ struct Server::Connection {
             refuse(401, "link");
             return;
         }
-        auto found = cfg->root.empty() ? std::nullopt : resolve_audio(cfg->root, rel);
+        auto found = resolve_served(cfg->folders, rel);
         if (!found) {
             refuse(404, "no such file");
             return;
