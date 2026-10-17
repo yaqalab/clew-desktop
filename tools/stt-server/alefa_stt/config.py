@@ -47,6 +47,9 @@ class Settings:
     # Live transcription (clew docs/29): the audio server's folder, read-only, for the deferred
     # mode; empty: uploads only. "fake" speakers: the tests' stand-in for the speaker model.
     audio_root: str = ""
+    # The audio server's folders by name (clew docs/22 §11), "" for one that is off; when given,
+    # they replace audio_root.
+    audio_folders: dict[str, str] = field(default_factory=dict)
     speakers: str = "auto"
     max_transcribe_mb: int = 1024
     # Empty: each request names its language (English when it does not). Otherwise the only one.
