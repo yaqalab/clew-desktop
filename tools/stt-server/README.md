@@ -4,7 +4,8 @@
 > with faster-whisper on the CPU instead of a Hailo-8 on the Pi (`docs/28`). Same protocol, so
 > Clew talks to it unchanged. It listens on 127.0.0.1 only: the audio never leaves the computer.
 > The audio server's tray starts and stops it (its **Dictation** tab); you rarely run it by hand.
-> Copied from `C:\DEV\KUBERNETES\stt.alefa.net\stt` (`docs/provenance.md`); the Pi keeps its copy.
+> Adapted from the author's stt.alefa.net server (`docs/provenance.md`), which runs on a
+> Raspberry Pi with a Hailo-8 and keeps its own copy.
 
 ## What it adds to the Pi's server
 

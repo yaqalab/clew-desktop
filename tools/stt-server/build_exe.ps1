@@ -33,5 +33,8 @@ $excludeArgs = $exclude | ForEach-Object { "--exclude-module", $_ }
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
 $dir = Join-Path $PSScriptRoot "dist\clew-stt-server"
+# The licences of everything packed in, installed beside the program (third_party_notices.py).
+& $py third_party_notices.py (Join-Path $dir "THIRD-PARTY-NOTICES.txt")
+if ($LASTEXITCODE -ne 0) { throw "the third-party notices could not be written" }
 $size = (Get-ChildItem $dir -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host "Built $dir ($([math]::Round($size / 1MB)) MB)"
