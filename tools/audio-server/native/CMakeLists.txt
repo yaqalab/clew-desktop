@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
-project(clew_audio_server VERSION 1.0.0 LANGUAGES CXX)
+# The version is written once, in tools/VERSION (the release script and the installer read it too).
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION CLEW_VERSION)
+string(STRIP "${CLEW_VERSION}" CLEW_VERSION)
+if(NOT CLEW_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+  message(FATAL_ERROR "tools/VERSION is not MAJOR.MINOR.PATCH: ${CLEW_VERSION}")
+endif()
+set(CLEW_VERSION_MAJOR ${CMAKE_MATCH_1})
+set(CLEW_VERSION_MINOR ${CMAKE_MATCH_2})
+set(CLEW_VERSION_PATCH ${CMAKE_MATCH_3})
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION)
+project(clew_audio_server VERSION ${CLEW_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,14 +58,16 @@ add_library(clew_core STATIC
   src/core/settings.cpp
   src/core/sha256.cpp
   src/core/text.cpp
+  src/core/update.cpp
 )
-target_include_directories(clew_core PUBLIC src/core)
+configure_file(res/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
+target_include_directories(clew_core PUBLIC src/core ${CMAKE_BINARY_DIR}/generated)
 
 # What each system supplies (platform.h).
 if(WIN32)
-  add_library(clew_platform STATIC src/win/platform_win.cpp src/win/mf_convert.cpp)
+  add_library(clew_platform STATIC src/win/platform_win.cpp src/win/mf_convert.cpp src/win/update_win.cpp)
   target_link_libraries(clew_platform PUBLIC ws2_32 bcrypt crypt32 mfplat mfreadwrite mfuuid wmcodecdspuuid
-    ole32 shell32 advapi32)
+    ole32 shell32 advapi32 winhttp wintrust)
 else()
   # macOS and Linux: compatible, not built or tested yet (README, "Other systems").
   add_library(clew_platform STATIC src/posix/platform_posix.cpp)
@@ -73,6 +85,8 @@ if(WIN32)
     res/app.rc
   )
   target_link_libraries(clew-audio-server PRIVATE clew_core clew_platform comctl32 user32 gdi32 shlwapi)
+  # The version resource reads the generated version.h.
+  target_include_directories(clew-audio-server PRIVATE ${CMAKE_BINARY_DIR}/generated)
   # The manifest is a resource (app.rc), not a step after linking: that step rewrote the fresh exe
   # while an antivirus scan held it open, and failed.
   target_link_options(clew-audio-server PRIVATE /MANIFEST:NO)
@@ -88,3 +102,8 @@ enable_testing()
 add_executable(unit_tests test/unit_tests.cpp)
 target_link_libraries(unit_tests PRIVATE clew_core clew_platform)
 add_test(NAME unit_tests COMMAND unit_tests)
+if(WIN32)
+  # The updater against a stand-in for GitHub (test/test_update.py signs and runs it).
+  add_executable(update_check test/update_check.cpp)
+  target_link_libraries(update_check PRIVATE clew_core clew_platform)
+endif()

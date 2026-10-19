@@ -17,6 +17,9 @@ constexpr int kDefaultLinkHours = 4;
 constexpr int kDefaultCacheMb = 4096;
 constexpr int kDefaultSttPort = 47822;
 constexpr const char* kDefaultSttModel = "small";
+// The hosted Clew (docs/32): allowed on a first start, so the website works without a step more;
+// the window can remove it. The secret is still needed for everything.
+constexpr const char* kHostedClew = "https://clew.alefa.net";
 
 // One folder of recordings (docs/22 section 11). One that is off keeps its place and its name in
 // Clew, but nothing in it is listed or served until it is on again.
@@ -29,7 +32,7 @@ struct FolderSetting {
 struct Settings {
     std::vector<FolderSetting> folders;  // in the order the window lists them; empty until chosen
     int port = kDefaultPort;
-    std::vector<std::string> origins;  // hosted Clew addresses; loopback is always allowed
+    std::vector<std::string> origins = {kHostedClew};  // hosted Clew addresses; loopback is always allowed
     int link_hours = kDefaultLinkHours;
     bool convert = true;  // convert what browsers cannot play
     bool prepare = true;  // convert those ahead, in the background, after a listing

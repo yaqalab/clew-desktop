@@ -2,8 +2,9 @@
 // on a dark one: as it is when Clew can reach the files, faded when stopped or something needs the
 // user, with a badge while converting. One click opens the settings; the right-click
 // menu has the everyday actions. Closing the window keeps the server running; "Quit" stops it.
-// The window has two tabs: "Audio files" and "Dictation" (docs/28: the speech server on this
-// computer, a child process). Both pages are in one dialog, shown and hidden by the tab strip.
+// The window has three tabs: "Audio files", "Dictation" (docs/28: the speech server on this
+// computer, a child process) and "Updates" (docs/32). The pages are in one dialog, shown and hidden
+// by the tab strip.
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -11,9 +12,12 @@
 #include <windowsx.h>
 
 #include <atomic>
+#include <ctime>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../../res/resource.h"
@@ -23,9 +27,12 @@
 #include "../core/service.h"
 #include "../core/settings.h"
 #include "../core/text.h"
+#include "../core/update.h"
 #include "app.h"
 #include "strings.h"
+#include "update_win.h"
 #include "util.h"
+#include "version.h"
 
 namespace clew::win {
 
@@ -35,7 +42,12 @@ constexpr UINT WM_APP_TRAY = WM_APP + 1;
 constexpr UINT WM_APP_STATUS = WM_APP + 2;
 constexpr UINT WM_APP_SHOW = WM_APP + 3;
 constexpr UINT WM_APP_TOGGLE_FOLDER = WM_APP + 4;  // wParam: the row whose tick box changed
-constexpr UINT_PTR kRefreshTimer = 1;
+constexpr UINT WM_APP_UPDATE_CHECKED = WM_APP + 5;     // lParam: a CheckResult to delete
+constexpr UINT WM_APP_UPDATE_PROGRESS = WM_APP + 6;    // wParam: percent
+constexpr UINT WM_APP_UPDATE_DOWNLOADED = WM_APP + 7;  // lParam: a DownloadResult to delete
+constexpr UINT_PTR kRefreshTimer = 1;      // on the settings window
+constexpr UINT_PTR kUpdateFirstTimer = 2;  // on the tray window: the first check, a little after start
+constexpr UINT_PTR kUpdateTimer = 3;       // on the tray window: hourly, checks when a day has passed
 const wchar_t kWindowClass[] = L"ClewAudioServerTray";
 const wchar_t kMutex[] = L"Local\\ClewAudioServer.SingleInstance";
 const wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -50,6 +62,7 @@ enum MenuId {
     ID_DICTATION,
     ID_COPY_STT_KEY,
     ID_AUTOSTART,
+    ID_UPDATE,
     ID_QUIT,
     ID_FOLDER_TOGGLE = 100,  // + the folder's index
     ID_FOLDER_OPEN = 300,    // + the folder's index
@@ -67,12 +80,17 @@ const int kDictationPage[] = {IDC_STT_STATUS,   IDC_STT_STARTSTOP, IDC_G_STT_MOD
                               IDC_STT_OPENFOLDER, IDC_STT_FREE,    IDC_G_STT_CONN,    IDC_L_STT_LANG,  IDC_STT_LANG,
                               IDC_L_STT_PORT,   IDC_STT_PORT,      IDC_G_STT_KEY,     IDC_STT_KEY,     IDC_STT_SHOWKEY,
                               IDC_STT_COPYKEY,  IDC_STT_NEWKEY,    IDC_L_STT_KEY,     IDC_STT_AUTOSTART, IDC_L_STT_LOCAL};
+const int kUpdatesPage[] = {IDC_UPD_VERSION, IDC_G_UPD,       IDC_UPD_AUTO,   IDC_UPD_STATUS, IDC_UPD_CHECK,
+                            IDC_UPD_INSTALL, IDC_UPD_NOTES,   IDC_L_UPD_KEPT, IDC_G_UPD_HOW,  IDC_L_UPD_HOW};
 // The language list, in the combo box's order. Whisper knows many more; these are the ones Clew
 // offers (docs/28 §3.5).
 const char* const kLanguages[] = {"", "en", "ja", "fr", "mg"};
 
+enum class Upd { Idle, Checking, Current, Available, Downloading, Failed };
+
 struct App {
     HINSTANCE inst = nullptr;
+    HANDLE mutex = nullptr;  // one server per Windows session; let go just before an update installs
     HWND hwnd = nullptr;
     HWND dlg = nullptr;
     Service* svc = nullptr;
@@ -88,6 +106,12 @@ struct App {
     // A fixed identity for the tray icon: Windows then keeps the user's "show in the taskbar" choice
     // across updates. Windows ties it to the signed program; when it refuses, the icon goes by id.
     bool use_guid = true;
+    // New versions (docs/32). Only the window's thread touches these; workers post their results.
+    update::State upd;
+    Upd upd_state = Upd::Idle;
+    std::optional<update::Release> upd_release;  // a newer one than this, once found
+    std::string upd_problem;
+    int upd_percent = 0;
 } g;
 
 // {9C2E6B1A-4F7D-4E3B-8A1C-5D0F2B7E9A43}
@@ -312,6 +336,7 @@ void tray(DWORD message) {
 }
 
 void show_settings();
+void show_updates();
 
 void menu(int x, int y) {
     auto st = g.svc->status();
@@ -347,6 +372,10 @@ void menu(int x, int y) {
     AppendMenuW(m, MF_STRING, ID_DICTATION, tr(dictating ? S::MenuDictationStop : S::MenuDictationStart));
     AppendMenuW(m, MF_STRING, ID_COPY_STT_KEY, tr(S::MenuCopySttKey));
     AppendMenuW(m, MF_STRING | (autostart_on() ? MF_CHECKED : 0), ID_AUTOSTART, tr(S::MenuAutostart));
+    if (g.upd_release && g.upd_state == Upd::Available) {
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(m, MF_STRING, ID_UPDATE, trf(S::MenuUpdate, widen(g.upd_release->version).c_str()).c_str());
+    }
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, ID_QUIT, tr(S::MenuQuit));
     SetMenuDefaultItem(m, ID_OPEN, FALSE);
@@ -374,6 +403,7 @@ void menu(int x, int y) {
         case ID_DICTATION: toggle_dictation(); break;
         case ID_COPY_STT_KEY: copy_text(g.hwnd, widen(g.svc->stt_key()), true); break;
         case ID_AUTOSTART: set_autostart(!autostart_on()); break;
+        case ID_UPDATE: show_updates(); break;
         case ID_QUIT: DestroyWindow(g.hwnd); break;
         default:
             if (cmd >= ID_FOLDER_TOGGLE && cmd < ID_FOLDER_TOGGLE + kMaxMenuFolders)
@@ -588,10 +618,38 @@ void download_model(HWND dlg, const SttModel& m) {
     refresh_dictation(dlg);
 }
 
+// Whether this copy can install an update itself: only a signed one, whose signer the new installer
+// is compared with. Asked once; the answer cannot change while the program runs.
+bool can_install() {
+    static const bool signed_copy = updater::self_signed_by_known_signer();
+    return signed_copy;
+}
+
+void refresh_updates(HWND dlg) {
+    std::wstring version = g.upd_release ? widen(g.upd_release->version) : std::wstring();
+    std::wstring text;
+    switch (g.upd_state) {
+        case Upd::Idle: text = tr(S::UpdIdle); break;
+        case Upd::Checking: text = tr(S::UpdChecking); break;
+        case Upd::Current: text = tr(S::UpdCurrent); break;
+        case Upd::Available: text = trf(S::UpdAvailable, version.c_str()); break;
+        case Upd::Downloading: text = trf(S::UpdDownloading, version.c_str(), g.upd_percent); break;
+        case Upd::Failed: text = trf(S::UpdFailed, widen(g.upd_problem).c_str()); break;
+    }
+    SetDlgItemTextW(dlg, IDC_UPD_STATUS, text.c_str());
+    bool busy = g.upd_state == Upd::Checking || g.upd_state == Upd::Downloading;
+    EnableWindow(GetDlgItem(dlg, IDC_UPD_CHECK), !busy);
+    SetDlgItemTextW(dlg, IDC_UPD_INSTALL,
+                    g.upd_release ? trf(S::UpdInstall, version.c_str()).c_str() : tr(S::UpdInstallNone));
+    EnableWindow(GetDlgItem(dlg, IDC_UPD_INSTALL), g.upd_release && !busy && can_install());
+    SetDlgItemTextW(dlg, IDC_L_UPD_KEPT, tr(can_install() ? S::UpdKept : S::UpdUnsigned));
+}
+
 void show_page(HWND dlg, int tab) {
     g.tab = tab;
     for (int id : kAudioPage) ShowWindow(GetDlgItem(dlg, id), tab == 0 ? SW_SHOW : SW_HIDE);
     for (int id : kDictationPage) ShowWindow(GetDlgItem(dlg, id), tab == 1 ? SW_SHOW : SW_HIDE);
+    for (int id : kUpdatesPage) ShowWindow(GetDlgItem(dlg, id), tab == 2 ? SW_SHOW : SW_HIDE);
     TabCtrl_SetCurSel(GetDlgItem(dlg, IDC_TABS), tab);
 }
 
@@ -726,6 +784,7 @@ void fill(HWND dlg) {
     SetDlgItemInt(dlg, IDC_STT_PORT, UINT(s.stt_port), FALSE);
     SetDlgItemTextW(dlg, IDC_STT_KEY, widen(g.svc->stt_key()).c_str());
     CheckDlgButton(dlg, IDC_STT_AUTOSTART, s.stt_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dlg, IDC_UPD_AUTO, g.upd.check ? BST_CHECKED : BST_UNCHECKED);
 }
 
 void label(HWND dlg) {
@@ -750,8 +809,11 @@ void label(HWND dlg) {
         {IDC_G_STT_KEY, S::GroupSttKey},  {IDC_STT_SHOWKEY, S::Show},   {IDC_STT_COPYKEY, S::Copy},
         {IDC_STT_NEWKEY, S::NewKey},   {IDC_L_STT_KEY, S::SttKeyHint}, {IDC_STT_AUTOSTART, S::SttAutostart},
         {IDC_L_STT_LOCAL, S::SttLocal},
+        {IDC_G_UPD, S::GroupUpd},         {IDC_UPD_AUTO, S::UpdAuto},    {IDC_UPD_CHECK, S::UpdCheck},
+        {IDC_UPD_NOTES, S::UpdNotes},     {IDC_G_UPD_HOW, S::GroupUpdHow}, {IDC_L_UPD_HOW, S::UpdHow},
     };
     for (const auto& t : texts) SetDlgItemTextW(dlg, t.id, tr(t.s));
+    SetDlgItemTextW(dlg, IDC_UPD_VERSION, trf(S::UpdVersion, widen(CLEW_VERSION).c_str()).c_str());
     SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_RESETCONTENT, 0, 0);
     for (S s : {S::LangChosen, S::LangEnglish, S::LangJapanese, S::LangFrench, S::LangMalagasy})
         SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_ADDSTRING, 0, LPARAM(tr(s)));
@@ -761,8 +823,8 @@ void label(HWND dlg) {
     for (const auto& m : kSttModels) SendDlgItemMessageW(dlg, IDC_STT_MODELS, LB_ADDSTRING, 0, LPARAM(widen(m.name).c_str()));
     HWND tabs = GetDlgItem(dlg, IDC_TABS);
     TabCtrl_DeleteAllItems(tabs);
-    S tab_names[] = {S::TabAudio, S::TabDictation};
-    for (int i = 0; i < 2; ++i) {
+    S tab_names[] = {S::TabAudio, S::TabDictation, S::TabUpdates};
+    for (int i = 0; i < int(std::size(tab_names)); ++i) {
         TCITEMW item{};
         item.mask = TCIF_TEXT;
         item.pszText = const_cast<LPWSTR>(tr(tab_names[i]));
@@ -832,6 +894,11 @@ void save(HWND dlg) {
     tray(NIM_MODIFY);
 }
 
+void maybe_check();
+void check_now(bool quiet);
+void install_update(HWND dlg);
+void open_release_page();
+
 INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_INITDIALOG: {
@@ -848,6 +915,7 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             show_page(dlg, g.tab);
             refresh_status(dlg);
             refresh_cache(dlg);
+            refresh_updates(dlg);
             if (g.svc->settings().folders.empty()) message(dlg, tr(S::FirstRun));
             SetTimer(dlg, kRefreshTimer, 3000, nullptr);
             return TRUE;
@@ -988,6 +1056,15 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                     ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                     return TRUE;
                 }
+                case IDC_UPD_AUTO:
+                    // Takes effect at once, like the folders.
+                    g.upd.check = IsDlgButtonChecked(dlg, IDC_UPD_AUTO) == BST_CHECKED;
+                    update::save_state(update::state_file(), g.upd);
+                    if (g.upd.check) maybe_check();
+                    return TRUE;
+                case IDC_UPD_CHECK: check_now(false); return TRUE;
+                case IDC_UPD_INSTALL: install_update(dlg); return TRUE;
+                case IDC_UPD_NOTES: open_release_page(); return TRUE;
                 case IDC_STT_SHOWKEY: show_stt_key(dlg, !g.stt_key_visible); return TRUE;
                 case IDC_STT_COPYKEY:
                     copy_text(dlg, widen(g.svc->stt_key()), true);
@@ -1020,6 +1097,153 @@ void show_settings() {
     SetForegroundWindow(g.dlg);
 }
 
+void show_updates() {
+    g.tab = 2;
+    show_settings();
+    if (g.dlg) show_page(g.dlg, 2);
+}
+
+// ---------------------------------------------------------------------------------------------
+// New versions (docs/32): a daily question to GitHub when the user leaves it on; a download, the
+// checks and the installer only after a press on Install.
+// ---------------------------------------------------------------------------------------------
+
+struct CheckResult {
+    std::optional<update::Release> release;
+    std::string why;
+    bool quiet = false;  // the daily check: it tells through the tray, once per version
+};
+
+struct DownloadResult {
+    std::optional<updater::Installer> installer;
+    std::string why;
+};
+
+std::int64_t now_seconds() { return std::int64_t(std::time(nullptr)); }
+
+bool newer_than_this(const update::Release& r) {
+    auto theirs = update::parse_version(r.version);
+    auto mine = update::parse_version(CLEW_VERSION);
+    return theirs && mine && update::compare(*theirs, *mine) > 0;
+}
+
+void open_release_page() {
+    std::string url = g.upd_release ? update::release_page(g.upd_release->version)
+                                    : std::string("https://github.com/") + update::kRepository + "/releases";
+    ShellExecuteW(nullptr, L"open", widen(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void notify_update(const std::string& version) {
+    NOTIFYICONDATAW nid{};
+    nid.uFlags = NIF_INFO;
+    identify(nid);
+    wcsncpy_s(nid.szInfoTitle, tr(S::UpdBalloonTitle), _TRUNCATE);
+    wcsncpy_s(nid.szInfo, trf(S::UpdBalloonText, widen(version).c_str()).c_str(), _TRUNCATE);
+    nid.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+void check_now(bool quiet) {
+    if (g.upd_state == Upd::Checking || g.upd_state == Upd::Downloading) return;
+    g.upd_state = Upd::Checking;
+    if (g.dlg) refresh_updates(g.dlg);
+    HWND hwnd = g.hwnd;
+    std::thread([hwnd, quiet] {
+        auto* res = new CheckResult;
+        res->quiet = quiet;
+        res->release = updater::fetch_latest(&res->why);
+        if (!PostMessageW(hwnd, WM_APP_UPDATE_CHECKED, 0, LPARAM(res))) delete res;
+    }).detach();
+}
+
+void maybe_check() {
+    if (update::check_due(g.upd, now_seconds())) check_now(true);
+}
+
+void on_checked(std::unique_ptr<CheckResult> res) {
+    if (!res->release) {
+        // A daily check that could not reach GitHub (offline, a proxy) says nothing and tries again
+        // within the hour; one the user asked for says why.
+        if (res->quiet) {
+            g.upd_state = g.upd_release ? Upd::Available : Upd::Idle;
+        } else {
+            g.upd_state = Upd::Failed;
+            g.upd_problem = res->why;
+        }
+    } else {
+        g.upd.last_check = now_seconds();
+        if (newer_than_this(*res->release)) {
+            g.upd_release = res->release;
+            g.upd_state = Upd::Available;
+            if (g.upd.notified != res->release->version) {
+                if (res->quiet) notify_update(res->release->version);
+                g.upd.notified = res->release->version;
+            }
+        } else {
+            g.upd_release.reset();
+            g.upd_state = Upd::Current;
+        }
+        update::save_state(update::state_file(), g.upd);
+    }
+    if (g.dlg) refresh_updates(g.dlg);
+}
+
+void install_update(HWND dlg) {
+    if (!g.upd_release || g.upd_state == Upd::Checking || g.upd_state == Upd::Downloading) return;
+    if (!can_install()) return open_release_page();
+    std::wstring ask = trf(S::UpdInstallConfirm, widen(g.upd_release->version).c_str());
+    if (MessageBoxW(dlg, ask.c_str(), tr(S::AppName), MB_OKCANCEL | MB_ICONQUESTION) != IDOK) return;
+    g.upd_state = Upd::Downloading;
+    g.upd_percent = 0;
+    refresh_updates(dlg);
+    HWND hwnd = g.hwnd;
+    update::Release r = *g.upd_release;
+    std::thread([hwnd, r] {
+        auto* res = new DownloadResult;
+        res->installer = updater::download(
+            r, [hwnd](int percent) { PostMessageW(hwnd, WM_APP_UPDATE_PROGRESS, WPARAM(percent), 0); }, &res->why);
+        if (!PostMessageW(hwnd, WM_APP_UPDATE_DOWNLOADED, 0, LPARAM(res))) {
+            if (res->installer) updater::close(*res->installer);
+            delete res;
+        }
+    }).detach();
+}
+
+void on_downloaded(std::unique_ptr<DownloadResult> res) {
+    if (!res->installer) {
+        g.upd_state = Upd::Failed;
+        g.upd_problem = res->why;
+        if (g.dlg) refresh_updates(g.dlg);
+        return;
+    }
+    // Everything of ours stops so the installer can replace the files: the server now, the
+    // children (dictation, a conversion) with this process, by their job objects. The single-
+    // instance mutex goes first, so the installer does not wait for it.
+    g.svc->dictation().stop();
+    g.svc->stop();
+    if (g.mutex) CloseHandle(g.mutex);
+    g.mutex = nullptr;
+    std::string why;
+    bool started = updater::start(*res->installer, &why);
+    updater::close(*res->installer);
+    if (started) {
+        if (g.dlg) DestroyWindow(g.dlg);
+        DestroyWindow(g.hwnd);
+        return;
+    }
+    // The installer did not start: carry on as before.
+    g.mutex = CreateMutexW(nullptr, TRUE, kMutex);
+    g.svc->apply(g.svc->settings(), false);
+    g.svc->start_dictation_if_enabled();
+    g.upd_state = Upd::Failed;
+    g.upd_problem = why;
+    tray(NIM_MODIFY);
+    if (g.dlg) {
+        refresh_status(g.dlg);
+        refresh_updates(g.dlg);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The hidden window that owns the tray icon
 // ---------------------------------------------------------------------------------------------
@@ -1034,6 +1258,7 @@ LRESULT CALLBACK tray_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             switch (LOWORD(lp)) {
                 case NIN_SELECT:
                 case NIN_KEYSELECT: show_settings(); return 0;
+                case NIN_BALLOONUSERCLICK: show_updates(); return 0;
                 case WM_CONTEXTMENU: menu(GET_X_LPARAM(wp), GET_Y_LPARAM(wp)); return 0;
             }
             return 0;
@@ -1043,6 +1268,20 @@ LRESULT CALLBACK tray_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (g.dlg) SendMessageW(g.dlg, WM_APP_STATUS, 0, 0);
             return 0;
         case WM_APP_SHOW: show_settings(); return 0;
+        case WM_TIMER:
+            if (wp == kUpdateFirstTimer) KillTimer(hwnd, kUpdateFirstTimer);
+            if (wp == kUpdateFirstTimer || wp == kUpdateTimer) maybe_check();
+            return 0;
+        case WM_APP_UPDATE_CHECKED:
+            on_checked(std::unique_ptr<CheckResult>(reinterpret_cast<CheckResult*>(lp)));
+            return 0;
+        case WM_APP_UPDATE_PROGRESS:
+            g.upd_percent = int(wp);
+            if (g.dlg && g.upd_state == Upd::Downloading) refresh_updates(g.dlg);
+            return 0;
+        case WM_APP_UPDATE_DOWNLOADED:
+            on_downloaded(std::unique_ptr<DownloadResult>(reinterpret_cast<DownloadResult*>(lp)));
+            return 0;
         case WM_SETTINGCHANGE:
             // The light/dark switch arrives as "ImmersiveColorSet".
             if (lp && wcscmp(reinterpret_cast<const wchar_t*>(lp), L"ImmersiveColorSet") == 0) tray(NIM_MODIFY);
@@ -1077,7 +1316,7 @@ int quit_running() {
 
 int run_tray(HINSTANCE instance) {
     // One server per Windows session: a second start opens the first one's window instead.
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutex);
+    g.mutex = CreateMutexW(nullptr, TRUE, kMutex);
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND other = FindWindowW(kWindowClass, nullptr);
         if (other) {
@@ -1097,6 +1336,7 @@ int run_tray(HINSTANCE instance) {
     g.inst = instance;
     static Service svc(default_settings_file(), {}, nullptr);
     g.svc = &svc;
+    g.upd = update::load_state(update::state_file());
 
     WNDCLASSEXW wc{sizeof wc};
     wc.lpfnWndProc = tray_proc;
@@ -1119,6 +1359,9 @@ int run_tray(HINSTANCE instance) {
     svc.start_dictation_if_enabled();
     tray(NIM_ADD);
     if (svc.settings().folders.empty()) show_settings();
+    // The first daily check two minutes after start (not during Windows' busy sign-in), then hourly.
+    SetTimer(g.hwnd, kUpdateFirstTimer, 2 * 60 * 1000, nullptr);
+    SetTimer(g.hwnd, kUpdateTimer, 60 * 60 * 1000, nullptr);
 
     MSG m;
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
@@ -1127,7 +1370,7 @@ int run_tray(HINSTANCE instance) {
         DispatchMessageW(&m);
     }
     svc.stop();
-    if (mutex) CloseHandle(mutex);
+    if (g.mutex) CloseHandle(g.mutex);
     // Connection threads and a running conversion are not waited for: the process ends, and the
     // job object ends the converter with it.
     ExitProcess(0);

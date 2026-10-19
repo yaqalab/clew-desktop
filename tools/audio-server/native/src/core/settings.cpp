@@ -44,6 +44,7 @@ Settings Settings::load(const std::filesystem::path& file) {
     }
     s.port = clamp_int(d["port"], 1024, 65535, kDefaultPort);
     if (d["origins"].is_array()) {
+        s.origins.clear();  // what was saved, even an empty list, replaces the first-start default
         for (const auto& o : d["origins"].items()) {
             if (!o.is_string()) continue;
             if (auto n = normalize_origin(o.str())) s.origins.push_back(*n);
