@@ -73,3 +73,15 @@
 #define IDC_L_STT_KEY 1145
 #define IDC_STT_AUTOSTART 1150
 #define IDC_L_STT_LOCAL 1151
+
+// The Updates tab (docs/32)
+#define IDC_UPD_VERSION 1200
+#define IDC_G_UPD 1201
+#define IDC_UPD_AUTO 1202
+#define IDC_UPD_STATUS 1203
+#define IDC_UPD_CHECK 1204
+#define IDC_UPD_INSTALL 1205
+#define IDC_UPD_NOTES 1206
+#define IDC_L_UPD_KEPT 1207
+#define IDC_G_UPD_HOW 1208
+#define IDC_L_UPD_HOW 1209

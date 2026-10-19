@@ -130,6 +130,29 @@ enum class S {
     ColFolderName,
     ColFolderPath,
     ProblemAllOff,
+    // New versions (docs/32).
+    TabUpdates,
+    UpdVersion,  // %s version
+    GroupUpd,
+    UpdAuto,
+    UpdCheck,
+    UpdNotes,
+    UpdInstall,  // %s version
+    UpdInstallNone,
+    UpdIdle,
+    UpdChecking,
+    UpdCurrent,
+    UpdAvailable,    // %s version
+    UpdDownloading,  // %s version, %d percent
+    UpdFailed,       // %s why
+    UpdUnsigned,
+    UpdKept,
+    GroupUpdHow,
+    UpdHow,
+    UpdInstallConfirm,  // %s version
+    UpdBalloonTitle,
+    UpdBalloonText,  // %s version
+    MenuUpdate,      // %s version
 };
 
 const wchar_t* tr(S id);

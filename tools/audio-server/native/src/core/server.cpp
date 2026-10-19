@@ -38,10 +38,11 @@ static const int kSendFlags = 0;
 #include "platform.h"
 #include "sha256.h"
 #include "text.h"
+#include "version.h"
 
 namespace clew {
 
-const char* const kVersion = "1.0.0";
+const char* const kVersion = CLEW_VERSION;
 
 namespace {
 

@@ -1,5 +1,5 @@
 @echo off
-rem Builds the program (Release, unit tests run), then the installer:
+rem Builds the program (Release, unit tests run), then the installer, at the version in tools\VERSION:
 rem   tools\audio-server\native\dist\clew-audio-server-setup-<version>.exe
 rem Needs Visual Studio's C++ tools and Inno Setup 6 (winget install JRSoftware.InnoSetup).
 rem
@@ -14,6 +14,8 @@ rem Dictation's speech server (docs/28), built once with Python into tools\stt-s
 if not exist ..\..\..\stt-server\dist\clew-stt-server\clew-stt-server.exe (
   powershell -NoProfile -ExecutionPolicy Bypass -File ..\..\..\stt-server\build_exe.ps1 || exit /b 1
 )
+set /p VERSION=<..\..\..\VERSION
+if not defined VERSION (echo tools\VERSION is empty.& exit /b 1)
 set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (echo Inno Setup 6 was not found: winget install JRSoftware.InnoSetup& exit /b 1)
@@ -21,7 +23,7 @@ if not exist "%ISCC%" (echo Inno Setup 6 was not found: winget install JRSoftwar
 powershell -NoProfile -Command "if (Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -eq 'CN=YaqaLab' -and $_.NotAfter -gt (Get-Date) -and $_.HasPrivateKey }) { exit 0 } else { exit 1 }"
 if errorlevel 1 (
   echo No YaqaLab certificate in this user's store: building unsigned. make-cert.ps1 makes one.
-  "%ISCC%" /Q clew-audio-server.iss || exit /b 1
+  "%ISCC%" /Q /DAppVersion=%VERSION% clew-audio-server.iss || exit /b 1
   goto done
 )
 
@@ -34,7 +36,7 @@ set SIGN=sign /fd SHA256 /n YaqaLab /s My %STAMP%
 
 "%SIGNTOOL%" %SIGN% /d "Clew audio server" ..\build\clew-audio-server.exe || exit /b 1
 "%SIGNTOOL%" %SIGN% /d "Clew dictation server" ..\..\..\stt-server\dist\clew-stt-server\clew-stt-server.exe || exit /b 1
-"%ISCC%" /Q /DSign "/Syaqalab=$q%SIGNTOOL%$q %SIGN% /d $qClew Audio Server$q $f" clew-audio-server.iss || exit /b 1
+"%ISCC%" /Q /DAppVersion=%VERSION% /DSign "/Syaqalab=$q%SIGNTOOL%$q %SIGN% /d $qClew Audio Server$q $f" clew-audio-server.iss || exit /b 1
 
 :done
 echo Built: %~dp0..\dist

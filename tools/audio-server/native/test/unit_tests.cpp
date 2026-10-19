@@ -19,6 +19,7 @@
 #include "settings.h"
 #include "sha256.h"
 #include "text.h"
+#include "update.h"
 
 using namespace clew;
 namespace fs = std::filesystem;
@@ -283,6 +284,12 @@ static void settings_file(const fs::path& tmp) {
 #endif
     Settings back = Settings::load(file);
     CHECK(back.folders == s.folders && back.port == 50000 && back.origins == s.origins && !back.convert);
+    // A first start allows the hosted Clew; a saved empty list stays empty.
+    CHECK(Settings::load(tmp / "none.json").origins == std::vector<std::string>{kHostedClew});
+    Settings none = s;
+    none.origins.clear();
+    CHECK(none.save(tmp / "no-origins.json"));
+    CHECK(Settings::load(tmp / "no-origins.json").origins.empty());
     // Written before there could be several folders: the one it had, on.
     write(file, "{\"v\":1,\"folder\":\"D:\\\\old\",\"port\":50001}");
     Settings old = Settings::load(file);
@@ -374,6 +381,60 @@ static void dictation_helpers(const fs::path& tmp) {
     CHECK(line("INFO alefa_stt.session: session 1 key=local audio=3.0s (client closed)").problem.empty());
 }
 
+static void updates(const fs::path& tmp) {
+    using namespace clew::update;
+    CHECK(parse_version("1.2.3").has_value());
+    CHECK(parse_version("10.0.9999").has_value());
+    CHECK(!parse_version("1.2"));
+    CHECK(!parse_version("1.2.3.4"));
+    CHECK(!parse_version("v1.2.3"));
+    CHECK(!parse_version("1.2.3-beta"));
+    CHECK(!parse_version("1..3"));
+    CHECK(!parse_version("1.2.10000"));
+    CHECK(!parse_version(""));
+    CHECK(compare(*parse_version("1.10.0"), *parse_version("1.9.9")) > 0);
+    CHECK(compare(*parse_version("1.1.0"), *parse_version("1.1.0")) == 0);
+    CHECK(compare(*parse_version("1.1.0"), *parse_version("2.0.0")) < 0);
+
+    std::string hash(64, 'a');
+    std::string good = R"({"version":"1.2.0","installer":"clew-audio-server-setup-1.2.0.exe","sha256":")" + hash +
+                       R"(","size":63081992})";
+    auto r = parse_manifest(good);
+    CHECK(r && r->version == "1.2.0" && r->size == 63081992u);
+    CHECK(r && installer_url(*r) ==
+                   "https://github.com/yaqalab/clew-tools/releases/download/v1.2.0/clew-audio-server-setup-1.2.0.exe");
+    CHECK(manifest_url() == "https://github.com/yaqalab/clew-tools/releases/latest/download/latest.json");
+    auto with = [&](const std::string& from, const std::string& to) {
+        std::string t = good;
+        t.replace(t.find(from), from.size(), to);
+        return parse_manifest(t).has_value();
+    };
+    // The installer's name must follow the version: no other file, no path.
+    CHECK(!with("setup-1.2.0.exe", "setup-1.1.0.exe"));
+    CHECK(!with("clew-audio-server-setup-1.2.0.exe", "../x.exe"));
+    CHECK(!with("\"1.2.0\"", "\"1.2\""));
+    CHECK(!with(hash, std::string(64, 'A')));
+    CHECK(!with(hash, std::string(63, 'a')));
+    CHECK(!with("63081992", "0"));
+    CHECK(!with("63081992", "2000000000"));
+    CHECK(!with("63081992", "1.5"));
+    CHECK(!parse_manifest("[]"));
+    CHECK(!parse_manifest("not json"));
+
+    State fresh = load_state(tmp / "missing.json");
+    CHECK(fresh.check && fresh.last_check == 0 && fresh.notified.empty());
+    CHECK(check_due(fresh, 1000000));
+    State s{false, 1700000000, "1.2.0"};
+    CHECK(save_state(tmp / "update.json", s));
+    State back = load_state(tmp / "update.json");
+    CHECK(!back.check && back.last_check == 1700000000 && back.notified == "1.2.0");
+    CHECK(!check_due(back, 1800000000));  // off: never due
+    back.check = true;
+    CHECK(!check_due(back, 1700000000 + 3600));
+    CHECK(check_due(back, 1700000000 + 24 * 3600));
+    CHECK(check_due(back, 1600000000));  // the clock went back
+}
+
 int main() {
     fs::path tmp = fs::temp_directory_path() / ("clew-unit-" + std::to_string(std::rand()) +
                                                  std::to_string(reinterpret_cast<std::uintptr_t>(&failures) & 0xFFFF));
@@ -390,6 +451,7 @@ int main() {
     settings_file(tmp);
     dictation_settings(tmp);
     dictation_helpers(tmp);
+    updates(tmp);
     std::error_code ec;
     fs::remove_all(tmp, ec);
     std::printf("%d checks, %d failed\n", checks, failures);

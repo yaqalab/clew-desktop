@@ -11,8 +11,9 @@
 ; (about 200 MB), in {app}\clew-stt-server, which the tray finds there. No model is shipped; the
 ; Dictation tab downloads one to %LOCALAPPDATA%\clew-stt\models (or a folder the user chose).
 
+; The version comes from tools/VERSION: build-installer.cmd passes it as /DAppVersion=.
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #error AppVersion is not defined: build with build-installer.cmd
 #endif
 #define AppExe "clew-audio-server.exe"
 
@@ -62,11 +63,11 @@ ja.StartNow=Clew オーディオサーバーを今すぐ開始する
 en.DictationComponent=Dictation on this computer (speech recognition, about 200 MB; models are downloaded later)
 ja.DictationComponent=このコンピューターでの音声入力（音声認識、約 200 MB。モデルは後でダウンロード）
 en.TypeFull=Audio server and dictation
-ja.TypeFull=オーディオサーバーと音声入力
+ja.TypeFull=オーディオサーバーと音声入力
 en.TypeCompact=Audio server only
-ja.TypeCompact=オーディオサーバーのみ
+ja.TypeCompact=オーディオサーバーのみ
 en.TypeCustom=Choose
-ja.TypeCustom=選択する
+ja.TypeCustom=選択する
 en.MainComponent=Audio server
 ja.MainComponent=オーディオサーバー
 en.RemoveModels=Also remove the dictation models downloaded to %1?%n%nThey can be large; keep them if you will install dictation again.
@@ -90,6 +91,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\build\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
+Source: "..\..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\..\..\stt-server\dist\clew-stt-server\*"; DestDir: "{app}\clew-stt-server"; Components: dictation; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
@@ -106,11 +108,19 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:StartNow}"; Flags: nowait postinstall skipifsilent
+; An update started from the program's Updates tab (/SILENT /update=1, docs/32): the program quit to
+; let its files be replaced, so the new version starts again by itself.
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: IsUpdate
 
 [UninstallRun]
 Filename: "{app}\{#AppExe}"; Parameters: "--quit"; RunOnceId: "QuitServer"; Flags: runhidden waituntilterminated
 
 [Code]
+function IsUpdate: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:update|0}') = '1');
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   // The "Start with Windows" value may have been set from the window, not by this installer.

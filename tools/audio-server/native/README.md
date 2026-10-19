@@ -49,14 +49,18 @@ folders keep working while only one ticked folder has that file.
 | Folders | the folders whose audio files Clew may list and play (subfolders too); ticked ones are served |
 | Port | 47821 unless another program uses it |
 | Play links last | how long one play link works (default 4 hours); Clew asks for a new one by itself |
-| Other Clew addresses | a Clew hosted on the web (`https://you.github.io`); a Clew on this computer is always allowed |
+| Other Clew addresses | a Clew hosted on the web; `https://clew.alefa.net` is there after a first install and can be removed; a Clew on this computer is always allowed |
 | Secret | Show / Copy / New secret. A new secret stops the old one at once |
 | Convert … | converts .wma, .amr and long variable-bit-rate .mp3 so every browser plays and seeks them |
 | Prepare … in the background | converts .wma and .amr files as soon as Clew lists the folder, so they open at once. The file you open always goes first: preparing stops, waits, and picks up again afterwards |
 | ffmpeg (optional) | only used when Windows itself cannot convert a file |
 | Cache limit | converted copies are kept up to this size in each folder, the oldest removed first |
 
-Settings live in `%APPDATA%\clew-audio-server\settings.json`. **Converted copies stay beside your
+The **Updates** tab shows the version, checks for a new one once a day (or on *Check now*), and
+installs it on a press; the update keeps every setting and starts the program again by itself.
+
+Settings live in `%APPDATA%\clew-audio-server\settings.json` (the update check's in
+`update.json` beside it). **Converted copies stay beside your
 recordings**, in a `.clew-converted` folder inside the recording's own audio folder: they are as private as the
 interviews, so they stay wherever you chose to keep those (an encrypted drive, a synced folder). Clew
 never lists that folder and it cannot be asked for; it holds a README saying what it is, and deleting
@@ -95,6 +99,13 @@ Windows "N" editions lack the codecs until the free *Media Feature Pack* is inst
   or your documents.
 - **Little to steal.** The activity list keeps method, path and status in memory only; never a link's
   signature, never the secret.
+- **Outgoing connections, only these:** a dictation model download from huggingface.co when you
+  press Download; once a day, if *Check for a new version* is on (Updates tab), a request to
+  github.com/yaqalab/clew-tools for the latest version number; and the new installer's download
+  when you press Install. None carries anything about you or your files.
+- **Updates install only on your press,** and only an installer that matches the release's size and
+  SHA-256 and is signed by the same certificate as the program already installed; otherwise it is
+  deleted and nothing changes (`docs/32` §3).
 - The program, the installer and the uninstaller are **signed by YaqaLab** with a self-signed
   certificate: Properties → Digital Signatures shows it, and any change to a file after signing breaks
   the signature. Windows does not trust a self-signed signer, so SmartScreen still warns on first run
@@ -124,8 +135,9 @@ window's list for that run). `CLEW_AUDIO_LANG=ja` or `en` forces the window's la
 | `res/` | dialog, manifest, icons (`make_icons.py` draws them) |
 | `test/` | `unit_tests.cpp` (SHA-256/HMAC vectors, paths, ranges, JSON, settings) and `test_native.py` |
 
-No third-party code and no libraries beyond what Windows ships. The version is in `CMakeLists.txt`,
-`src/core/server.cpp` (`kVersion`), `res/app.rc` and the installer's `AppVersion`.
+No third-party code and no libraries beyond what Windows ships. The version is written once, in
+`tools/VERSION`: CMake makes `version.h` from it (the program, `res/app.rc`), and
+`build-installer.cmd` passes it to the installer.
 
 ### Signing
 
