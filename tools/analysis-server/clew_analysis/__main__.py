@@ -77,7 +77,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         state = State("", args.backend, origins, args.rscript, scripts, args.timeout)
         for f in state.found().values():
-            print(f"{f.name}: {f.version if f.ready else 'not ready (' + f.why + ')'}")
+            # "R: 4.3.3 at C:\...\Rscript.exe": the tray's Analysis tab reads this line.
+            if f.ready:
+                print(f"{f.name}: {f.version} at {f.path}", flush=True)
+            else:
+                print(f"{f.name}: not ready ({f.why})", flush=True)
         for c in state.commands().values():
             print(f"  {c.id}{'' if args.backend in c.adapters else ' (not for ' + args.backend + ')'}")
         return 0
