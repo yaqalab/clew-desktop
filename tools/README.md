@@ -8,7 +8,7 @@ uploaded: Clew in the browser talks to them at `127.0.0.1`, which means "this co
 |---|---|---|
 | **Clew audio server** | Plays and lists the interview recordings in folders you choose, so you don't have to pick the file again each visit | Windows (tray app); macOS and Linux (Python script) |
 | **Dictation** (optional) | Speech to text with Whisper, on your computer: dictation while writing, transcription of recordings | Windows, installed together with the audio server |
-| **Analysis** (optional) | Runs Clew's survey analyses (regressions, exact and rank tests, reliability) in your own copy of [R](https://cran.r-project.org) | Windows, installed together with the audio server; macOS and Linux (Python) |
+| **Analysis** (optional) | Runs Clew's survey analyses (regressions, exact and rank tests, reliability) in your own statistics program: [R](https://cran.r-project.org), a Conda Python, [PSPP](https://www.gnu.org/software/pspp) or SPSS | Windows, installed together with the audio server; macOS and Linux (Python) |
 
 **[Download the latest version](https://github.com/yaqalab/clew-tools/releases/latest)**
 (`clew-audio-server-setup-<version>.exe`).
@@ -33,9 +33,10 @@ uploaded: Clew in the browser talks to them at `127.0.0.1`, which means "this co
 For dictation, open the **Dictation** tab, download a model (`small` suits most computers), press
 **Copy** next to the key, and paste it in Clew under **Settings › Dictation › This computer**.
 
-For analysis, install [R](https://cran.r-project.org) first (any version from 4.0; nothing else is
-needed). Open the **Analysis** tab: it says which R it found (or press **Change** to choose
-`Rscript.exe`). Press **Start**, then **Copy** next to the key, and paste it in Clew under
+For analysis, you need one statistics program: [R](https://cran.r-project.org) (4.0 or later),
+a Conda environment with pandas, scipy and statsmodels, [PSPP](https://www.gnu.org/software/pspp),
+or SPSS Statistics with its Python plug-in. Open the **Analysis** tab, choose the program, and
+check that it was found (or press **Change** to choose it yourself). Press **Start**, then **Copy** next to the key, and paste it in Clew under
 **Analysis › Start › On this computer › Connect**. Optionally, choose a folder of your own R
 scripts: Clew lists them and can run them by name.
 

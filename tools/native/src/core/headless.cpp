@@ -44,7 +44,11 @@ const char* const kHeadlessHelp =
     "Analysis (the engine that runs Clew's commands in your own R, clew docs/36):\n"
     "  --analysis             start it too\n"
     "  --analysis-port <n>    default 47823\n"
+    "  --analysis-backend <b> r, python (a Conda environment), pspp or spss; default r\n"
     "  --analysis-rscript <p> the Rscript to use (default: found by itself)\n"
+    "  --analysis-python <p>  a Python with pandas, numpy, scipy, statsmodels (default: a Conda one)\n"
+    "  --analysis-pspp <p>    the pspp program to use (default: found by itself)\n"
+    "  --analysis-spss <p>    SPSS Statistics' folder or its Python (default: found by itself)\n"
     "  --analysis-scripts <d> a folder of your own R scripts\n"
     "  --analysis-program <e> the engine program (default: clew-analysis-server beside this one)\n"
     "  --show-analysis-key    print its key\n"
@@ -99,6 +103,7 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
     std::vector<FolderSetting> folders;
     std::string stt_model, stt_models_dir, stt_language, stt_download, stt_program;
     std::string analysis_rscript, analysis_scripts, analysis_program;
+    std::string analysis_backend, analysis_python, analysis_pspp, analysis_spss;
     int analysis_port = -1;
     bool analysis = false, show_analysis_key = false;
     std::vector<std::string> origins;
@@ -137,6 +142,11 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
         else if (a == "--analysis") analysis = true;
         else if (a == "--show-analysis-key") show_analysis_key = true;
         else if (a == "--analysis-rscript") ok = take(args, i, &analysis_rscript);
+        else if (a == "--analysis-backend")
+            ok = take(args, i, &analysis_backend) && analysis_backend_known(analysis_backend);
+        else if (a == "--analysis-python") ok = take(args, i, &analysis_python);
+        else if (a == "--analysis-pspp") ok = take(args, i, &analysis_pspp);
+        else if (a == "--analysis-spss") ok = take(args, i, &analysis_spss);
         else if (a == "--analysis-scripts") ok = take(args, i, &analysis_scripts);
         else if (a == "--analysis-program") ok = take(args, i, &analysis_program);
         else if (a == "--analysis-port") {
@@ -196,6 +206,11 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
     if (analysis_port >= 0) s.analysis_port = analysis_port;
     if (!analysis_rscript.empty())
         s.analysis_rscript = path_to_utf8(std::filesystem::absolute(path_from_utf8(analysis_rscript)));
+    if (!analysis_backend.empty()) s.analysis_backend = analysis_backend;
+    for (const auto& [b, p] : {std::pair<const char*, std::string*>{"python", &analysis_python},
+                               {"pspp", &analysis_pspp},
+                               {"spss", &analysis_spss}})
+        if (!p->empty()) set_analysis_program(&s, b, path_to_utf8(std::filesystem::absolute(path_from_utf8(*p))));
     if (!analysis_scripts.empty())
         s.analysis_scripts = path_to_utf8(std::filesystem::absolute(path_from_utf8(analysis_scripts)));
     if (!analysis_program.empty())

@@ -1,8 +1,9 @@
 // The analysis engine on this computer (clew docs/36 section 5): tools/analysis-server's program,
 // run as a child process. It is a translator: Clew sends it one neutral command with the data, it
-// runs the command in the researcher's own R, and sends one result back. Clew's Analysis board
-// talks to it directly at http://127.0.0.1:<port> with its own key. This side only starts it,
-// stops it, restarts it once if it dies, and finds out which R it will use.
+// runs the command in the researcher's own statistics program (R, a Conda Python, PSPP or SPSS)
+// and sends one result back. Clew's Analysis board talks to it directly at
+// http://127.0.0.1:<port> with its own key. This side only starts it, stops it, restarts it once
+// if it dies, and finds out which programs it can use.
 //
 // One thread of its own does every start and stop, as for dictation (dictation.h), so a child's
 // death (reported from the child's thread) never destroys the child from inside itself.
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -22,21 +24,22 @@
 
 namespace clew {
 
-// A cap on the engine's committed memory, R included (R runs inside the same job). Survey models
-// are small; a runaway one stops here rather than slowing the computer down.
+// A cap on the engine's committed memory, the statistics program included (it runs inside the
+// same job). Survey models are small; a runaway one stops here rather than slowing the computer.
 constexpr std::uint64_t kAnalysisMemoryLimit = std::uint64_t(4) * 1024 * 1024 * 1024;
 
 struct AnalysisConfig {
     std::filesystem::path program;     // clew-analysis-server(.exe); empty: none installed
     int port = 0;
-    std::string backend = "r";
-    std::filesystem::path rscript;     // empty: the engine finds R by itself
+    std::string backend = "r";         // "r", "python", "pspp" or "spss"
+    // Each program chosen in the tab, by backend; one left out is found by the engine itself.
+    std::map<std::string, std::filesystem::path> programs;
     std::filesystem::path scripts;     // the researcher's own R scripts; empty: none
     int timeout = 120;                 // seconds one run may take
     std::vector<std::string> origins;  // pages besides this computer's that may call it
     std::string key;                   // handed over on stdin
     bool operator==(const AnalysisConfig& o) const {
-        return program == o.program && port == o.port && backend == o.backend && rscript == o.rscript &&
+        return program == o.program && port == o.port && backend == o.backend && programs == o.programs &&
                scripts == o.scripts && timeout == o.timeout && origins == o.origins && key == o.key;
     }
     bool operator!=(const AnalysisConfig& o) const { return !(*this == o); }
@@ -51,16 +54,21 @@ public:
         Ready,     // listening
         Failed,    // stopped by itself; `problem` says why
     };
-    // Which R the engine will use, as its `--check` says.
-    enum class R { Unknown, Looking, Found, NotFound };
+    // Which program the engine will use for a backend, as its `--check` says.
+    enum class Look { Unknown, Looking, Found, NotFound };
+    struct Program {
+        Look look = Look::Unknown;
+        std::string version;  // "4.3.3" when found
+        std::string path;     // the program it found, when found
+        std::string why;      // why not, when not found
+    };
     struct Status {
         State state = State::Off;
         std::string problem;
-        R r = R::Unknown;
-        std::string r_version;  // "4.3.3" when found
-        std::string r_path;     // the Rscript it found, when found
-        std::string r_why;      // why not, when not found
+        std::map<std::string, Program> programs;  // by backend: "r", "python", "pspp", "spss"
     };
+    // The backends, in the tab's order, and the name each has in `--check`'s lines.
+    static const std::vector<std::pair<std::string, std::string>>& backends();
 
     using Notify = std::function<void()>;
     using Log = std::function<void(const std::string&)>;
@@ -77,8 +85,8 @@ public:
     void start();
     void stop();
     bool wanted() const;
-    // Asks the engine program again which R it finds (after R was installed, or Rscript chosen).
-    void look_for_r();
+    // Asks the engine program again which programs it finds (after one was installed or chosen).
+    void look_again();
 
     Status status() const;
 
@@ -88,7 +96,7 @@ public:
         std::string problem;
     };
     static LineMeaning read_server_line(const std::string& line, int port);
-    // A line of `--check`: "R: 4.3.3 at C:\...\Rscript.exe" or "R: not ready (why)". False for
+    // A line of `--check`: "R: 4.3.3 at C:\...\Rscript.exe", "PSPP: not ready (why)"... False for
     // any other line.
     static bool read_check_line(const std::string& line, Status* into);
 
@@ -120,7 +128,6 @@ private:
     std::unique_ptr<platform::Child> checker_;
     std::uint64_t check_generation_ = 0;
     bool checker_exited_ = false;
-    bool check_heard_ = false;
 
     std::thread worker_;
 };

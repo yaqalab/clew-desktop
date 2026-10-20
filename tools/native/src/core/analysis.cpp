@@ -41,28 +41,52 @@ Analysis::LineMeaning Analysis::read_server_line(const std::string& line, int po
     return m;
 }
 
+const std::vector<std::pair<std::string, std::string>>& Analysis::backends() {
+    static const std::vector<std::pair<std::string, std::string>> list = {
+        {"r", "R"}, {"python", "Python"}, {"pspp", "PSPP"}, {"spss", "SPSS"}};
+    return list;
+}
+
 bool Analysis::read_check_line(const std::string& line, Status* into) {
-    if (!starts_with(line, "R: ")) return false;
-    std::string rest = trim(line.substr(3));
-    if (starts_with(rest, "not ready")) {
-        into->r = R::NotFound;
-        auto open = rest.find('(');
-        auto close = rest.rfind(')');
-        into->r_why = open != std::string::npos && close != std::string::npos && close > open
-                          ? rest.substr(open + 1, close - open - 1)
-                          : std::string();
-        into->r_version.clear();
-        into->r_path.clear();
+    for (const auto& [id, name] : backends()) {
+        if (!starts_with(line, name + ": ")) continue;
+        std::string rest = trim(line.substr(name.size() + 2));
+        Program p;
+        if (starts_with(rest, "not ready")) {
+            p.look = Look::NotFound;
+            auto open = rest.find('(');
+            auto close = rest.rfind(')');
+            if (open != std::string::npos && close != std::string::npos && close > open)
+                p.why = rest.substr(open + 1, close - open - 1);
+        } else {
+            // "4.3.3 at <path>"; SPSS may say "found" where its folder carries no number.
+            auto at = rest.find(" at ");
+            if (at == std::string::npos || at == 0) return false;
+            p.look = Look::Found;
+            p.version = rest.substr(0, at);
+            p.path = trim(rest.substr(at + 4));
+        }
+        into->programs[id] = p;
         return true;
     }
-    if (rest.empty() || rest[0] < '0' || rest[0] > '9') return false;
-    auto at = rest.find(" at ");
-    into->r = R::Found;
-    into->r_version = at == std::string::npos ? rest : rest.substr(0, at);
-    into->r_path = at == std::string::npos ? std::string() : trim(rest.substr(at + 4));
-    into->r_why.clear();
-    return true;
+    return false;
 }
+
+namespace {
+
+// The engine's options for the programs chosen in the tab.
+void program_args(const AnalysisConfig& c, std::vector<std::string>* args) {
+    static const std::map<std::string, std::string> option = {
+        {"r", "--rscript"}, {"python", "--python"}, {"pspp", "--pspp"}, {"spss", "--spss"}};
+    for (const auto& [id, path] : c.programs) {
+        auto o = option.find(id);
+        if (o == option.end() || path.empty()) continue;
+        args->push_back(o->second);
+        args->push_back(path_to_utf8(path));
+    }
+}
+
+}  // namespace
 
 Analysis::Analysis(Notify notify, Log log) : notify_(std::move(notify)), log_(std::move(log)) {
     worker_ = std::thread([this] { run(); });
@@ -81,10 +105,10 @@ void Analysis::configure(const AnalysisConfig& config) {
     {
         std::lock_guard<std::mutex> g(m_);
         if (config == config_) return;
-        bool r_changed = config.program != config_.program || config.rscript != config_.rscript;
+        bool programs_changed = config.program != config_.program || config.programs != config_.programs;
         config_ = config;
         if (want_) restart_ = true;
-        if (r_changed) check_wanted_ = true;
+        if (programs_changed) check_wanted_ = true;
         wake_ = true;
     }
     cv_.notify_all();
@@ -116,7 +140,7 @@ bool Analysis::wanted() const {
     return want_;
 }
 
-void Analysis::look_for_r() {
+void Analysis::look_again() {
     {
         std::lock_guard<std::mutex> g(m_);
         check_wanted_ = true;
@@ -155,10 +179,7 @@ void Analysis::launch(std::unique_lock<std::mutex>& lk) {
                                      "--backend", config_.backend,
                                      "--timeout", std::to_string(config_.timeout),
                                      "--key-stdin"};
-    if (!config_.rscript.empty()) {
-        args.push_back("--rscript");
-        args.push_back(path_to_utf8(config_.rscript));
-    }
+    program_args(config_, &args);
     if (!config_.scripts.empty()) {
         args.push_back("--scripts");
         args.push_back(path_to_utf8(config_.scripts));
@@ -208,23 +229,20 @@ void Analysis::launch(std::unique_lock<std::mutex>& lk) {
     }
 }
 
-// `clew-analysis-server --check` prints "R: 4.3.3 at <path>" or "R: not ready (why)".
+// `clew-analysis-server --check` prints one line per program: "R: 4.3.3 at <path>", "PSPP: not
+// ready (why)"...
 void Analysis::launch_check(std::unique_lock<std::mutex>& lk) {
     check_wanted_ = false;
     std::error_code ec;
     if (config_.program.empty() || !std::filesystem::is_regular_file(config_.program, ec)) {
-        status_.r = R::Unknown;
+        status_.programs.clear();
         return;
     }
     std::vector<std::string> args = {"--check"};
-    if (!config_.rscript.empty()) {
-        args.push_back("--rscript");
-        args.push_back(path_to_utf8(config_.rscript));
-    }
+    program_args(config_, &args);
     std::uint64_t gen = ++check_generation_;
     checker_exited_ = false;
-    check_heard_ = false;
-    status_.r = R::Looking;
+    for (const auto& b : backends()) status_.programs[b.first] = Program{Look::Looking, "", "", ""};
     std::string why;
     checker_ = platform::start_child(
         config_.program, args, "", 0,
@@ -233,7 +251,6 @@ void Analysis::launch_check(std::unique_lock<std::mutex>& lk) {
                 std::lock_guard<std::mutex> g(m_);
                 if (gen != check_generation_) return;
                 if (!read_check_line(line, &status_)) return;
-                check_heard_ = true;
             }
             changed();
         },
@@ -249,8 +266,7 @@ void Analysis::launch_check(std::unique_lock<std::mutex>& lk) {
         &why);
     (void)lk;
     if (!checker_) {
-        status_.r = R::Unknown;
-        status_.r_why = why;
+        for (auto& [id, p] : status_.programs) p = Program{Look::NotFound, "", "", why};
     }
 }
 
@@ -302,10 +318,8 @@ void Analysis::run() {
         if (checker_ && checker_exited_) {
             kill(checker_, lk);
             checker_exited_ = false;
-            if (!check_heard_ && status_.r == R::Looking) {
-                status_.r = R::NotFound;
-                status_.r_why = "the engine could not look for R";
-            }
+            for (auto& [id, p] : status_.programs)
+                if (p.look == Look::Looking) p = Program{Look::NotFound, "", "", "the engine could not look for it"};
             if (check_wanted_) wake_ = true;
         }
 

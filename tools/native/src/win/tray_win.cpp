@@ -4,7 +4,7 @@
 // menu has the everyday actions. Closing the window keeps the server running; "Quit" stops it.
 // The window has four tabs: "Audio files", "Dictation" (docs/28: the speech server on this
 // computer, a child process), "Analysis" (clew docs/36: the engine that runs Clew's commands in R,
-// another child) and "Updates" (docs/32). The pages are in one dialog, shown and hidden by the tab
+// Python, PSPP or SPSS, another child) and "Updates" (docs/32). The pages are in one dialog, shown and hidden by the tab
 // strip.
 #include <windows.h>
 #include <commctrl.h>
@@ -673,10 +673,40 @@ void refresh_updates(HWND dlg) {
     SetDlgItemTextW(dlg, IDC_L_UPD_KEPT, tr(can_install() ? S::UpdKept : S::UpdUnsigned));
 }
 
+// The tab's programs, in its list's order (Analysis::backends()): what each is called, what its
+// path row says, its short note, why it may not be found, and how its own program is chosen.
+struct AnaProgram {
+    const char* id;
+    S name;
+    S path_label;
+    S note;
+    S not_found;  // %s why
+    S choose;
+    const wchar_t* exe;  // the file to choose; nullptr: a folder (SPSS's)
+};
+const AnaProgram kAnaPrograms[] = {
+    {"r", S::AnaBackendR, S::AnaRscript, S::AnaNoteR, S::AnaRNotFound, S::ChooseRscript, L"Rscript.exe"},
+    {"python", S::AnaBackendPython, S::AnaPathPython, S::AnaNotePython, S::AnaNotFoundPython, S::ChoosePython,
+     L"python.exe"},
+    {"pspp", S::AnaBackendPspp, S::AnaPathPspp, S::AnaNotePspp, S::AnaNotFoundPspp, S::ChoosePspp, L"pspp.exe"},
+    {"spss", S::AnaBackendSpss, S::AnaPathSpss, S::AnaNoteSpss, S::AnaNotFoundSpss, S::ChooseSpss, nullptr},
+};
+
+const AnaProgram& ana_program(const std::string& id) {
+    for (const auto& p : kAnaPrograms)
+        if (id == p.id) return p;
+    return kAnaPrograms[0];
+}
+
 void refresh_analysis(HWND dlg) {
     auto st = g.svc->analysis().status();
     Settings s = g.svc->settings();
-    std::wstring program = st.r_version.empty() ? std::wstring(L"R") : L"R " + widen(st.r_version);
+    const AnaProgram& chosen = ana_program(s.analysis_backend);
+    auto at = st.programs.find(chosen.id);
+    Analysis::Program found = at == st.programs.end() ? Analysis::Program{} : at->second;
+    std::wstring program = found.version.empty() || found.version == "found"
+                               ? std::wstring(tr(chosen.name))
+                               : std::wstring(tr(chosen.name)) + L" " + widen(found.version);
     std::wstring text;
     switch (st.state) {
         case Analysis::State::Off: text = tr(S::AnaOff); break;
@@ -692,31 +722,34 @@ void refresh_analysis(HWND dlg) {
     bool installed = !platform::find_analysis_server().empty();
     SetDlgItemTextW(dlg, IDC_ANA_STARTSTOP, tr(wanted ? S::Stop : S::Start));
     EnableWindow(GetDlgItem(dlg, IDC_ANA_STARTSTOP), wanted || installed);
-    std::wstring r;
-    switch (st.r) {
-        case Analysis::R::Unknown: r = tr(installed ? S::AnaRLooking : S::AnaRNotInstalled); break;
-        case Analysis::R::Looking: r = tr(S::AnaRLooking); break;
-        case Analysis::R::Found: r = trf(S::AnaRFound, widen(st.r_version).c_str(), widen(st.r_path).c_str()); break;
-        case Analysis::R::NotFound: r = trf(S::AnaRNotFound, widen(st.r_why).c_str()); break;
+    std::wstring line;
+    switch (found.look) {
+        case Analysis::Look::Unknown: line = tr(installed ? S::AnaRLooking : S::AnaRNotInstalled); break;
+        case Analysis::Look::Looking: line = tr(S::AnaRLooking); break;
+        case Analysis::Look::Found: line = trf(S::AnaFound, program.c_str(), widen(found.path).c_str()); break;
+        case Analysis::Look::NotFound: line = trf(chosen.not_found, widen(found.why).c_str()); break;
     }
-    SetDlgItemTextW(dlg, IDC_ANA_RFOUND, r.c_str());
+    SetDlgItemTextW(dlg, IDC_ANA_RFOUND, line.c_str());
     EnableWindow(GetDlgItem(dlg, IDC_ANA_RFIND), installed);
 }
 
-// The Rscript and scripts folder as the page shows them; a change to either takes effect at once.
+// The chosen program, its path and the scripts folder as the page shows them; a change to any of
+// them takes effect at once (the engine restarts with it).
 void fill_analysis_paths(HWND dlg, const Settings& s) {
-    SetDlgItemTextW(dlg, IDC_ANA_RSCRIPT,
-                    s.analysis_rscript.empty() ? tr(S::AnaRscriptAuto) : widen(s.analysis_rscript).c_str());
+    const AnaProgram& chosen = ana_program(s.analysis_backend);
+    for (int i = 0; i < int(std::size(kAnaPrograms)); ++i)
+        if (s.analysis_backend == kAnaPrograms[i].id) SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_SETCURSEL, WPARAM(i), 0);
+    SetDlgItemTextW(dlg, IDC_L_ANA_RSCRIPT, tr(chosen.path_label));
+    SetDlgItemTextW(dlg, IDC_L_ANA_LATER, tr(chosen.note));
+    std::string path = analysis_program(s, chosen.id);
+    SetDlgItemTextW(dlg, IDC_ANA_RSCRIPT, path.empty() ? tr(S::AnaRscriptAuto) : widen(path).c_str());
     SetDlgItemTextW(dlg, IDC_ANA_SCRIPTS,
                     s.analysis_scripts.empty() ? tr(S::AnaScriptsEmpty) : widen(s.analysis_scripts).c_str());
     EnableWindow(GetDlgItem(dlg, IDC_ANA_SCLEAR), !s.analysis_scripts.empty());
     EnableWindow(GetDlgItem(dlg, IDC_ANA_SOPEN), !s.analysis_scripts.empty());
 }
 
-void set_analysis_paths(HWND dlg, const std::string* rscript, const std::string* scripts) {
-    Settings s = g.svc->settings();
-    if (rscript) s.analysis_rscript = *rscript;
-    if (scripts) s.analysis_scripts = *scripts;
+void apply_analysis(HWND dlg, const Settings& s) {
     g.svc->apply(s);
     fill_analysis_paths(dlg, g.svc->settings());
     refresh_analysis(dlg);
@@ -871,7 +904,6 @@ void fill(HWND dlg) {
     SetDlgItemTextW(dlg, IDC_STT_KEY, widen(g.svc->stt_key()).c_str());
     CheckDlgButton(dlg, IDC_STT_AUTOSTART, s.stt_enabled ? BST_CHECKED : BST_UNCHECKED);
 
-    SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_SETCURSEL, 0, 0);
     fill_analysis_paths(dlg, s);
     SetDlgItemInt(dlg, IDC_ANA_PORT, UINT(s.analysis_port), FALSE);
     SetDlgItemInt(dlg, IDC_ANA_TIMEOUT, UINT(s.analysis_timeout), FALSE);
@@ -902,8 +934,8 @@ void label(HWND dlg) {
         {IDC_G_STT_KEY, S::GroupSttKey},  {IDC_STT_SHOWKEY, S::Show},   {IDC_STT_COPYKEY, S::Copy},
         {IDC_STT_NEWKEY, S::NewKey},   {IDC_L_STT_KEY, S::SttKeyHint}, {IDC_STT_AUTOSTART, S::SttAutostart},
         {IDC_L_STT_LOCAL, S::SttLocal},
-        {IDC_G_ANA_BACKEND, S::GroupAnaBackend}, {IDC_L_ANA_BACKEND, S::AnaProgram}, {IDC_L_ANA_LATER, S::AnaLater},
-        {IDC_L_ANA_RSCRIPT, S::AnaRscript}, {IDC_ANA_RCHANGE, S::Change}, {IDC_ANA_RFIND, S::FfmpegFind},
+        {IDC_G_ANA_BACKEND, S::GroupAnaBackend}, {IDC_L_ANA_BACKEND, S::AnaProgram},
+        {IDC_ANA_RCHANGE, S::Change}, {IDC_ANA_RFIND, S::FfmpegFind},
         {IDC_G_ANA_SCRIPTS, S::GroupAnaScripts}, {IDC_ANA_SCHANGE, S::Change}, {IDC_ANA_SCLEAR, S::AnaScriptsNone},
         {IDC_ANA_SOPEN, S::Open}, {IDC_L_ANA_SCRIPTS, S::AnaScriptsHint}, {IDC_G_ANA_CONN, S::GroupAnaConn},
         {IDC_L_ANA_PORT, S::Port}, {IDC_L_ANA_TIMEOUT, S::AnaTimeout}, {IDC_G_ANA_KEY, S::GroupAnaKey},
@@ -918,9 +950,9 @@ void label(HWND dlg) {
     for (S s : {S::LangChosen, S::LangEnglish, S::LangJapanese, S::LangFrench, S::LangMalagasy})
         SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_ADDSTRING, 0, LPARAM(tr(s)));
     SendDlgItemMessageW(dlg, IDC_STT_PORT, EM_LIMITTEXT, 5, 0);
-    // One program for now; Conda Python, PSPP and SPSS join this list later (clew docs/36).
+    // The statistics programs the engine translates for (clew docs/36 section 5).
     SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_RESETCONTENT, 0, 0);
-    SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_ADDSTRING, 0, LPARAM(tr(S::AnaBackendR)));
+    for (const auto& p : kAnaPrograms) SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_ADDSTRING, 0, LPARAM(tr(p.name)));
     SendDlgItemMessageW(dlg, IDC_ANA_PORT, EM_LIMITTEXT, 5, 0);
     SendDlgItemMessageW(dlg, IDC_ANA_TIMEOUT, EM_LIMITTEXT, 5, 0);
     // The names are the rows' text for screen readers; what is drawn is model_row_text().
@@ -1185,35 +1217,50 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                     toggle_analysis();
                     refresh_analysis(dlg);
                     return TRUE;
+                case IDC_ANA_BACKEND:
+                    if (HIWORD(wp) == CBN_SELCHANGE) {
+                        LRESULT i = SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_GETCURSEL, 0, 0);
+                        if (i >= 0 && i < LRESULT(std::size(kAnaPrograms))) {
+                            Settings s = g.svc->settings();
+                            s.analysis_backend = kAnaPrograms[i].id;
+                            apply_analysis(dlg, s);
+                        }
+                    }
+                    return TRUE;
                 case IDC_ANA_RCHANGE: {
                     Settings s = g.svc->settings();
-                    std::wstring start = s.analysis_rscript.empty()
-                                             ? std::wstring()
-                                             : path_from_utf8(s.analysis_rscript).parent_path().wstring();
-                    std::wstring p = pick(dlg, false, start, tr(S::ChooseRscript), L"Rscript.exe");
+                    const AnaProgram& chosen = ana_program(s.analysis_backend);
+                    std::string now = analysis_program(s, chosen.id);
+                    std::wstring start = now.empty() ? std::wstring()
+                                         : chosen.exe ? path_from_utf8(now).parent_path().wstring()
+                                                      : path_from_utf8(now).wstring();
+                    std::wstring p = chosen.exe ? pick(dlg, false, start, tr(chosen.choose), chosen.exe)
+                                                : pick(dlg, true, start, tr(chosen.choose));
                     if (p.empty()) return TRUE;
-                    std::string chosen = narrow(p);
-                    set_analysis_paths(dlg, &chosen, nullptr);
+                    set_analysis_program(&s, chosen.id, narrow(p));
+                    apply_analysis(dlg, s);
                     return TRUE;
                 }
                 case IDC_ANA_RFIND: {
-                    // Back to finding R by itself, and look again (R may have just been installed).
-                    std::string none;
-                    set_analysis_paths(dlg, &none, nullptr);
-                    g.svc->analysis().look_for_r();
+                    // Back to finding the program by itself, and look again (it may have just been installed).
+                    Settings s = g.svc->settings();
+                    set_analysis_program(&s, s.analysis_backend, "");
+                    apply_analysis(dlg, s);
+                    g.svc->analysis().look_again();
                     return TRUE;
                 }
                 case IDC_ANA_SCHANGE: {
                     Settings s = g.svc->settings();
                     std::wstring p = pick(dlg, true, widen(s.analysis_scripts), tr(S::ChooseScriptsFolder));
                     if (p.empty()) return TRUE;
-                    std::string chosen = narrow(p);
-                    set_analysis_paths(dlg, nullptr, &chosen);
+                    s.analysis_scripts = narrow(p);
+                    apply_analysis(dlg, s);
                     return TRUE;
                 }
                 case IDC_ANA_SCLEAR: {
-                    std::string none;
-                    set_analysis_paths(dlg, nullptr, &none);
+                    Settings s = g.svc->settings();
+                    s.analysis_scripts.clear();
+                    apply_analysis(dlg, s);
                     return TRUE;
                 }
                 case IDC_ANA_SOPEN: {

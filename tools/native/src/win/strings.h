@@ -163,12 +163,24 @@ enum class S {
     GroupAnaBackend,
     AnaProgram,
     AnaBackendR,
-    AnaLater,
+    AnaBackendPython,
+    AnaBackendPspp,
+    AnaBackendSpss,
     AnaRscript,
+    AnaPathPython,
+    AnaPathPspp,
+    AnaPathSpss,
+    AnaNoteR,
+    AnaNotePython,
+    AnaNotePspp,
+    AnaNoteSpss,
     AnaRscriptAuto,
     AnaRLooking,
-    AnaRFound,     // %s version, %s path
-    AnaRNotFound,  // %s why
+    AnaFound,           // %s program, %s path
+    AnaRNotFound,       // %s why
+    AnaNotFoundPython,  // %s why
+    AnaNotFoundPspp,    // %s why
+    AnaNotFoundSpss,    // %s why
     AnaRNotInstalled,
     GroupAnaScripts,
     AnaScriptsNone,
@@ -182,6 +194,9 @@ enum class S {
     AnaAutostart,
     AnaLocal,
     ChooseRscript,
+    ChoosePython,
+    ChoosePspp,
+    ChooseSpss,
     ChooseScriptsFolder,
     BadAnaPort,
     BadAnaTimeout,

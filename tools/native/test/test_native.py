@@ -1291,6 +1291,31 @@ class Analysis(unittest.TestCase):
         # What the answers were is not logged: method, path and status only.
         self.assertFalse(any("Female" in line for line in server.log))
 
+    @unittest.skipUnless(os.environ.get("CLEW_TEST_PYTHON"), "no Python with the libraries (CLEW_TEST_PYTHON)")
+    def test_a_command_runs_in_the_chosen_python(self):
+        python = os.environ["CLEW_TEST_PYTHON"]
+        server, port, key = self.start("--analysis-backend", "python", "--analysis-python", python)
+        self.assertTrue(self.ready(server), server.log)
+        status, raw = ana_call(port, "GET", "/api/ping")
+        self.assertEqual(json.loads(raw)["backend"], "python")
+        body = {
+            "command": "test.ranks",
+            "dependent": ["hours"],
+            "independent": ["gender"],
+            "groupby": [],
+            "codebook": [
+                {"name": "hours", "level": "scale", "label": "Hours"},
+                {"name": "gender", "level": "nominal", "label": "Gender", "order": ["Female", "Male"]},
+            ],
+            "rows": [{"hours": h, "gender": g} for h, g in
+                     [("2", "Female"), ("4", "Female"), ("5", "Male"), ("9", "Male")]],
+        }
+        status, raw = ana_call(port, "POST", "/api/run", key, body)
+        self.assertEqual(status, 200, raw)
+        result = json.loads(raw)
+        self.assertEqual(result["backend"]["name"], "Python")
+        self.assertIn("Mann-Whitney", result["notes"][0])
+
 
 if __name__ == "__main__":
     unittest.main()
