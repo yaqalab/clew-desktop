@@ -464,6 +464,15 @@ fs::path find_stt_server() {
     return fs::is_regular_file(beside, ec) ? beside : fs::path();
 }
 
+fs::path find_analysis_server() {
+    wchar_t forced[MAX_PATH * 2];
+    DWORD n = GetEnvironmentVariableW(L"CLEW_ANALYSIS_SERVER_EXE", forced, DWORD(std::size(forced)));
+    if (n > 0 && n < std::size(forced)) return fs::path(forced);
+    std::error_code ec;
+    auto beside = self_path().parent_path() / "clew-analysis-server" / "clew-analysis-server.exe";
+    return fs::is_regular_file(beside, ec) ? beside : fs::path();
+}
+
 fs::path default_stt_models_dir() { return known_folder(FOLDERID_LocalAppData) / "clew-stt" / "models"; }
 
 std::uint64_t total_memory() {

@@ -153,6 +153,41 @@ enum class S {
     UpdBalloonTitle,
     UpdBalloonText,  // %s version
     MenuUpdate,      // %s version
+    // The Analysis tab (clew docs/36 section 5).
+    TabAnalysis,
+    AnaOff,
+    AnaMissing,
+    AnaStarting,
+    AnaReady,   // %d port, %s program
+    AnaFailed,  // %s why
+    GroupAnaBackend,
+    AnaProgram,
+    AnaBackendR,
+    AnaLater,
+    AnaRscript,
+    AnaRscriptAuto,
+    AnaRLooking,
+    AnaRFound,     // %s version, %s path
+    AnaRNotFound,  // %s why
+    AnaRNotInstalled,
+    GroupAnaScripts,
+    AnaScriptsNone,
+    AnaScriptsEmpty,
+    AnaScriptsHint,
+    GroupAnaConn,
+    AnaTimeout,
+    GroupAnaKey,
+    AnaKeyHint,
+    NewAnaKeyConfirm,
+    AnaAutostart,
+    AnaLocal,
+    ChooseRscript,
+    ChooseScriptsFolder,
+    BadAnaPort,
+    BadAnaTimeout,
+    MenuAnalysisStart,
+    MenuAnalysisStop,
+    MenuCopyAnaKey,
 };
 
 const wchar_t* tr(S id);

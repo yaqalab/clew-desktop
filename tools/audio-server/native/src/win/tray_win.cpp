@@ -2,9 +2,10 @@
 // on a dark one: as it is when Clew can reach the files, faded when stopped or something needs the
 // user, with a badge while converting. One click opens the settings; the right-click
 // menu has the everyday actions. Closing the window keeps the server running; "Quit" stops it.
-// The window has three tabs: "Audio files", "Dictation" (docs/28: the speech server on this
-// computer, a child process) and "Updates" (docs/32). The pages are in one dialog, shown and hidden
-// by the tab strip.
+// The window has four tabs: "Audio files", "Dictation" (docs/28: the speech server on this
+// computer, a child process), "Analysis" (clew docs/36: the engine that runs Clew's commands in R,
+// another child) and "Updates" (docs/32). The pages are in one dialog, shown and hidden by the tab
+// strip.
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -61,6 +62,8 @@ enum MenuId {
     ID_STARTSTOP,
     ID_DICTATION,
     ID_COPY_STT_KEY,
+    ID_ANALYSIS,
+    ID_COPY_ANA_KEY,
     ID_AUTOSTART,
     ID_UPDATE,
     ID_QUIT,
@@ -80,6 +83,14 @@ const int kDictationPage[] = {IDC_STT_STATUS,   IDC_STT_STARTSTOP, IDC_G_STT_MOD
                               IDC_STT_OPENFOLDER, IDC_STT_FREE,    IDC_G_STT_CONN,    IDC_L_STT_LANG,  IDC_STT_LANG,
                               IDC_L_STT_PORT,   IDC_STT_PORT,      IDC_G_STT_KEY,     IDC_STT_KEY,     IDC_STT_SHOWKEY,
                               IDC_STT_COPYKEY,  IDC_STT_NEWKEY,    IDC_L_STT_KEY,     IDC_STT_AUTOSTART, IDC_L_STT_LOCAL};
+const int kAnalysisPage[] = {IDC_ANA_STATUS,    IDC_ANA_STARTSTOP, IDC_G_ANA_BACKEND, IDC_L_ANA_BACKEND, IDC_ANA_BACKEND,
+                             IDC_L_ANA_LATER,   IDC_L_ANA_RSCRIPT, IDC_ANA_RSCRIPT,   IDC_ANA_RCHANGE,   IDC_ANA_RFIND,
+                             IDC_ANA_RFOUND,    IDC_G_ANA_SCRIPTS, IDC_ANA_SCRIPTS,   IDC_ANA_SCHANGE,   IDC_ANA_SCLEAR,
+                             IDC_ANA_SOPEN,     IDC_L_ANA_SCRIPTS, IDC_G_ANA_CONN,    IDC_L_ANA_PORT,    IDC_ANA_PORT,
+                             IDC_L_ANA_TIMEOUT, IDC_ANA_TIMEOUT,   IDC_G_ANA_KEY,     IDC_ANA_KEY,       IDC_ANA_SHOWKEY,
+                             IDC_ANA_COPYKEY,   IDC_ANA_NEWKEY,    IDC_L_ANA_KEY,     IDC_ANA_AUTOSTART, IDC_L_ANA_LOCAL};
+// The tabs' order: the pages above, then Updates.
+constexpr int kTabAudio = 0, kTabDictation = 1, kTabAnalysis = 2, kTabUpdates = 3;
 const int kUpdatesPage[] = {IDC_UPD_VERSION, IDC_G_UPD,       IDC_UPD_AUTO,   IDC_UPD_STATUS, IDC_UPD_CHECK,
                             IDC_UPD_INSTALL, IDC_UPD_NOTES,   IDC_L_UPD_KEPT, IDC_G_UPD_HOW,  IDC_L_UPD_HOW};
 // The language list, in the combo box's order. Whisper knows many more; these are the ones Clew
@@ -98,6 +109,7 @@ struct App {
     std::atomic<bool> status_pending{false};
     bool secret_visible = false;
     bool stt_key_visible = false;
+    bool ana_key_visible = false;
     int tab = 0;
     int stt_row = 0;          // the model row chosen in the list (kSttModels' order)
     std::wstring stt_note;    // why a grey row cannot be chosen, after a press on it
@@ -201,7 +213,8 @@ std::wstring window_text(HWND dlg, int id) {
     return s;
 }
 
-std::wstring pick(HWND owner, bool folder, const std::wstring& start, const wchar_t* title = nullptr) {
+std::wstring pick(HWND owner, bool folder, const std::wstring& start, const wchar_t* title = nullptr,
+                  const wchar_t* exe = L"ffmpeg.exe") {
     IFileOpenDialog* d = nullptr;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d)))) return {};
     DWORD opts = 0;
@@ -209,7 +222,8 @@ std::wstring pick(HWND owner, bool folder, const std::wstring& start, const wcha
     d->SetOptions(opts | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | (folder ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST));
     d->SetTitle(title ? title : tr(folder ? S::ChooseFolder : S::ChooseFfmpeg));
     if (!folder) {
-        COMDLG_FILTERSPEC spec{L"ffmpeg.exe", L"ffmpeg.exe;*.exe"};
+        std::wstring pattern = std::wstring(exe) + L";*.exe";
+        COMDLG_FILTERSPEC spec{exe, pattern.c_str()};
         d->SetFileTypes(1, &spec);
     }
     if (!start.empty()) {
@@ -285,6 +299,13 @@ void toggle_dictation() {
         g.svc->dictation().stop();
     else
         g.svc->dictation().start();
+}
+
+void toggle_analysis() {
+    if (g.svc->analysis().wanted())
+        g.svc->analysis().stop();
+    else
+        g.svc->analysis().start();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -371,6 +392,9 @@ void menu(int x, int y) {
     bool dictating = g.svc->dictation().wanted();
     AppendMenuW(m, MF_STRING, ID_DICTATION, tr(dictating ? S::MenuDictationStop : S::MenuDictationStart));
     AppendMenuW(m, MF_STRING, ID_COPY_STT_KEY, tr(S::MenuCopySttKey));
+    bool analysing = g.svc->analysis().wanted();
+    AppendMenuW(m, MF_STRING, ID_ANALYSIS, tr(analysing ? S::MenuAnalysisStop : S::MenuAnalysisStart));
+    AppendMenuW(m, MF_STRING, ID_COPY_ANA_KEY, tr(S::MenuCopyAnaKey));
     AppendMenuW(m, MF_STRING | (autostart_on() ? MF_CHECKED : 0), ID_AUTOSTART, tr(S::MenuAutostart));
     if (g.upd_release && g.upd_state == Upd::Available) {
         AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
@@ -402,6 +426,8 @@ void menu(int x, int y) {
             break;
         case ID_DICTATION: toggle_dictation(); break;
         case ID_COPY_STT_KEY: copy_text(g.hwnd, widen(g.svc->stt_key()), true); break;
+        case ID_ANALYSIS: toggle_analysis(); break;
+        case ID_COPY_ANA_KEY: copy_text(g.hwnd, widen(g.svc->analysis_key()), true); break;
         case ID_AUTOSTART: set_autostart(!autostart_on()); break;
         case ID_UPDATE: show_updates(); break;
         case ID_QUIT: DestroyWindow(g.hwnd); break;
@@ -426,6 +452,7 @@ void refresh_cache(HWND dlg) {
 }
 
 void refresh_dictation(HWND dlg);
+void refresh_analysis(HWND dlg);
 
 void refresh_status(HWND dlg) {
     auto st = g.svc->status();
@@ -446,6 +473,7 @@ void refresh_status(HWND dlg) {
     SendMessageW(list, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(list, nullptr, TRUE);
     refresh_dictation(dlg);
+    refresh_analysis(dlg);
 }
 
 std::wstring stt_problem_text(const std::string& p, int port) {
@@ -645,11 +673,61 @@ void refresh_updates(HWND dlg) {
     SetDlgItemTextW(dlg, IDC_L_UPD_KEPT, tr(can_install() ? S::UpdKept : S::UpdUnsigned));
 }
 
+void refresh_analysis(HWND dlg) {
+    auto st = g.svc->analysis().status();
+    Settings s = g.svc->settings();
+    std::wstring program = st.r_version.empty() ? std::wstring(L"R") : L"R " + widen(st.r_version);
+    std::wstring text;
+    switch (st.state) {
+        case Analysis::State::Off: text = tr(S::AnaOff); break;
+        case Analysis::State::Missing: text = tr(S::AnaMissing); break;
+        case Analysis::State::Starting: text = tr(S::AnaStarting); break;
+        case Analysis::State::Ready: text = trf(S::AnaReady, s.analysis_port, program.c_str()); break;
+        case Analysis::State::Failed:
+            text = trf(S::AnaFailed, stt_problem_text(st.problem, s.analysis_port).c_str());
+            break;
+    }
+    SetDlgItemTextW(dlg, IDC_ANA_STATUS, text.c_str());
+    bool wanted = g.svc->analysis().wanted();
+    bool installed = !platform::find_analysis_server().empty();
+    SetDlgItemTextW(dlg, IDC_ANA_STARTSTOP, tr(wanted ? S::Stop : S::Start));
+    EnableWindow(GetDlgItem(dlg, IDC_ANA_STARTSTOP), wanted || installed);
+    std::wstring r;
+    switch (st.r) {
+        case Analysis::R::Unknown: r = tr(installed ? S::AnaRLooking : S::AnaRNotInstalled); break;
+        case Analysis::R::Looking: r = tr(S::AnaRLooking); break;
+        case Analysis::R::Found: r = trf(S::AnaRFound, widen(st.r_version).c_str(), widen(st.r_path).c_str()); break;
+        case Analysis::R::NotFound: r = trf(S::AnaRNotFound, widen(st.r_why).c_str()); break;
+    }
+    SetDlgItemTextW(dlg, IDC_ANA_RFOUND, r.c_str());
+    EnableWindow(GetDlgItem(dlg, IDC_ANA_RFIND), installed);
+}
+
+// The Rscript and scripts folder as the page shows them; a change to either takes effect at once.
+void fill_analysis_paths(HWND dlg, const Settings& s) {
+    SetDlgItemTextW(dlg, IDC_ANA_RSCRIPT,
+                    s.analysis_rscript.empty() ? tr(S::AnaRscriptAuto) : widen(s.analysis_rscript).c_str());
+    SetDlgItemTextW(dlg, IDC_ANA_SCRIPTS,
+                    s.analysis_scripts.empty() ? tr(S::AnaScriptsEmpty) : widen(s.analysis_scripts).c_str());
+    EnableWindow(GetDlgItem(dlg, IDC_ANA_SCLEAR), !s.analysis_scripts.empty());
+    EnableWindow(GetDlgItem(dlg, IDC_ANA_SOPEN), !s.analysis_scripts.empty());
+}
+
+void set_analysis_paths(HWND dlg, const std::string* rscript, const std::string* scripts) {
+    Settings s = g.svc->settings();
+    if (rscript) s.analysis_rscript = *rscript;
+    if (scripts) s.analysis_scripts = *scripts;
+    g.svc->apply(s);
+    fill_analysis_paths(dlg, g.svc->settings());
+    refresh_analysis(dlg);
+}
+
 void show_page(HWND dlg, int tab) {
     g.tab = tab;
-    for (int id : kAudioPage) ShowWindow(GetDlgItem(dlg, id), tab == 0 ? SW_SHOW : SW_HIDE);
-    for (int id : kDictationPage) ShowWindow(GetDlgItem(dlg, id), tab == 1 ? SW_SHOW : SW_HIDE);
-    for (int id : kUpdatesPage) ShowWindow(GetDlgItem(dlg, id), tab == 2 ? SW_SHOW : SW_HIDE);
+    for (int id : kAudioPage) ShowWindow(GetDlgItem(dlg, id), tab == kTabAudio ? SW_SHOW : SW_HIDE);
+    for (int id : kDictationPage) ShowWindow(GetDlgItem(dlg, id), tab == kTabDictation ? SW_SHOW : SW_HIDE);
+    for (int id : kAnalysisPage) ShowWindow(GetDlgItem(dlg, id), tab == kTabAnalysis ? SW_SHOW : SW_HIDE);
+    for (int id : kUpdatesPage) ShowWindow(GetDlgItem(dlg, id), tab == kTabUpdates ? SW_SHOW : SW_HIDE);
     TabCtrl_SetCurSel(GetDlgItem(dlg, IDC_TABS), tab);
 }
 
@@ -658,6 +736,14 @@ void show_stt_key(HWND dlg, bool visible) {
     HWND edit = GetDlgItem(dlg, IDC_STT_KEY);
     SendMessageW(edit, EM_SETPASSWORDCHAR, visible ? 0 : WPARAM(L'●'), 0);
     SetDlgItemTextW(dlg, IDC_STT_SHOWKEY, tr(visible ? S::Hide : S::Show));
+    InvalidateRect(edit, nullptr, TRUE);
+}
+
+void show_ana_key(HWND dlg, bool visible) {
+    g.ana_key_visible = visible;
+    HWND edit = GetDlgItem(dlg, IDC_ANA_KEY);
+    SendMessageW(edit, EM_SETPASSWORDCHAR, visible ? 0 : WPARAM(L'\u25CF'), 0);
+    SetDlgItemTextW(dlg, IDC_ANA_SHOWKEY, tr(visible ? S::Hide : S::Show));
     InvalidateRect(edit, nullptr, TRUE);
 }
 
@@ -784,6 +870,13 @@ void fill(HWND dlg) {
     SetDlgItemInt(dlg, IDC_STT_PORT, UINT(s.stt_port), FALSE);
     SetDlgItemTextW(dlg, IDC_STT_KEY, widen(g.svc->stt_key()).c_str());
     CheckDlgButton(dlg, IDC_STT_AUTOSTART, s.stt_enabled ? BST_CHECKED : BST_UNCHECKED);
+
+    SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_SETCURSEL, 0, 0);
+    fill_analysis_paths(dlg, s);
+    SetDlgItemInt(dlg, IDC_ANA_PORT, UINT(s.analysis_port), FALSE);
+    SetDlgItemInt(dlg, IDC_ANA_TIMEOUT, UINT(s.analysis_timeout), FALSE);
+    SetDlgItemTextW(dlg, IDC_ANA_KEY, widen(g.svc->analysis_key()).c_str());
+    CheckDlgButton(dlg, IDC_ANA_AUTOSTART, s.analysis_enabled ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dlg, IDC_UPD_AUTO, g.upd.check ? BST_CHECKED : BST_UNCHECKED);
 }
 
@@ -809,6 +902,13 @@ void label(HWND dlg) {
         {IDC_G_STT_KEY, S::GroupSttKey},  {IDC_STT_SHOWKEY, S::Show},   {IDC_STT_COPYKEY, S::Copy},
         {IDC_STT_NEWKEY, S::NewKey},   {IDC_L_STT_KEY, S::SttKeyHint}, {IDC_STT_AUTOSTART, S::SttAutostart},
         {IDC_L_STT_LOCAL, S::SttLocal},
+        {IDC_G_ANA_BACKEND, S::GroupAnaBackend}, {IDC_L_ANA_BACKEND, S::AnaProgram}, {IDC_L_ANA_LATER, S::AnaLater},
+        {IDC_L_ANA_RSCRIPT, S::AnaRscript}, {IDC_ANA_RCHANGE, S::Change}, {IDC_ANA_RFIND, S::FfmpegFind},
+        {IDC_G_ANA_SCRIPTS, S::GroupAnaScripts}, {IDC_ANA_SCHANGE, S::Change}, {IDC_ANA_SCLEAR, S::AnaScriptsNone},
+        {IDC_ANA_SOPEN, S::Open}, {IDC_L_ANA_SCRIPTS, S::AnaScriptsHint}, {IDC_G_ANA_CONN, S::GroupAnaConn},
+        {IDC_L_ANA_PORT, S::Port}, {IDC_L_ANA_TIMEOUT, S::AnaTimeout}, {IDC_G_ANA_KEY, S::GroupAnaKey},
+        {IDC_ANA_SHOWKEY, S::Show}, {IDC_ANA_COPYKEY, S::Copy}, {IDC_ANA_NEWKEY, S::NewKey},
+        {IDC_L_ANA_KEY, S::AnaKeyHint}, {IDC_ANA_AUTOSTART, S::AnaAutostart}, {IDC_L_ANA_LOCAL, S::AnaLocal},
         {IDC_G_UPD, S::GroupUpd},         {IDC_UPD_AUTO, S::UpdAuto},    {IDC_UPD_CHECK, S::UpdCheck},
         {IDC_UPD_NOTES, S::UpdNotes},     {IDC_G_UPD_HOW, S::GroupUpdHow}, {IDC_L_UPD_HOW, S::UpdHow},
     };
@@ -818,12 +918,17 @@ void label(HWND dlg) {
     for (S s : {S::LangChosen, S::LangEnglish, S::LangJapanese, S::LangFrench, S::LangMalagasy})
         SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_ADDSTRING, 0, LPARAM(tr(s)));
     SendDlgItemMessageW(dlg, IDC_STT_PORT, EM_LIMITTEXT, 5, 0);
+    // One program for now; Conda Python, PSPP and SPSS join this list later (clew docs/36).
+    SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_RESETCONTENT, 0, 0);
+    SendDlgItemMessageW(dlg, IDC_ANA_BACKEND, CB_ADDSTRING, 0, LPARAM(tr(S::AnaBackendR)));
+    SendDlgItemMessageW(dlg, IDC_ANA_PORT, EM_LIMITTEXT, 5, 0);
+    SendDlgItemMessageW(dlg, IDC_ANA_TIMEOUT, EM_LIMITTEXT, 5, 0);
     // The names are the rows' text for screen readers; what is drawn is model_row_text().
     SendDlgItemMessageW(dlg, IDC_STT_MODELS, LB_RESETCONTENT, 0, 0);
     for (const auto& m : kSttModels) SendDlgItemMessageW(dlg, IDC_STT_MODELS, LB_ADDSTRING, 0, LPARAM(widen(m.name).c_str()));
     HWND tabs = GetDlgItem(dlg, IDC_TABS);
     TabCtrl_DeleteAllItems(tabs);
-    S tab_names[] = {S::TabAudio, S::TabDictation, S::TabUpdates};
+    S tab_names[] = {S::TabAudio, S::TabDictation, S::TabAnalysis, S::TabUpdates};
     for (int i = 0; i < int(std::size(tab_names)); ++i) {
         TCITEMW item{};
         item.mask = TCIF_TEXT;
@@ -873,13 +978,23 @@ void save(HWND dlg) {
     std::wstring ffmpeg = widen(trim(narrow(window_text(dlg, IDC_FFMPEG))));
     if (!ffmpeg.empty() && !std::filesystem::is_regular_file(ffmpeg, ec)) return bad(dlg, IDC_FFMPEG, tr(S::BadFfmpeg));
     if (!read_int(dlg, IDC_STT_PORT, 1024, 65535, &s.stt_port) || s.stt_port == s.port) {
-        show_page(dlg, 1);
+        show_page(dlg, kTabDictation);
         return bad(dlg, IDC_STT_PORT, tr(S::BadSttPort));
     }
     s.stt_model = kSttModels[std::size_t(g.stt_row)].name;
     LRESULT lang = SendDlgItemMessageW(dlg, IDC_STT_LANG, CB_GETCURSEL, 0, 0);
     if (lang >= 0 && lang < LRESULT(std::size(kLanguages))) s.stt_language = kLanguages[lang];
     s.stt_enabled = IsDlgButtonChecked(dlg, IDC_STT_AUTOSTART) == BST_CHECKED;
+    if (!read_int(dlg, IDC_ANA_PORT, 1024, 65535, &s.analysis_port) || s.analysis_port == s.port ||
+        s.analysis_port == s.stt_port) {
+        show_page(dlg, kTabAnalysis);
+        return bad(dlg, IDC_ANA_PORT, tr(S::BadAnaPort));
+    }
+    if (!read_int(dlg, IDC_ANA_TIMEOUT, 10, 24 * 3600, &s.analysis_timeout)) {
+        show_page(dlg, kTabAnalysis);
+        return bad(dlg, IDC_ANA_TIMEOUT, tr(S::BadAnaTimeout));
+    }
+    s.analysis_enabled = IsDlgButtonChecked(dlg, IDC_ANA_AUTOSTART) == BST_CHECKED;
 
     s.origins = origins;
     s.ffmpeg = narrow(ffmpeg);
@@ -912,6 +1027,7 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             fill(dlg);
             show_secret(dlg, false);
             show_stt_key(dlg, false);
+            show_ana_key(dlg, false);
             show_page(dlg, g.tab);
             refresh_status(dlg);
             refresh_cache(dlg);
@@ -1065,6 +1181,60 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 case IDC_UPD_CHECK: check_now(false); return TRUE;
                 case IDC_UPD_INSTALL: install_update(dlg); return TRUE;
                 case IDC_UPD_NOTES: open_release_page(); return TRUE;
+                case IDC_ANA_STARTSTOP:
+                    toggle_analysis();
+                    refresh_analysis(dlg);
+                    return TRUE;
+                case IDC_ANA_RCHANGE: {
+                    Settings s = g.svc->settings();
+                    std::wstring start = s.analysis_rscript.empty()
+                                             ? std::wstring()
+                                             : path_from_utf8(s.analysis_rscript).parent_path().wstring();
+                    std::wstring p = pick(dlg, false, start, tr(S::ChooseRscript), L"Rscript.exe");
+                    if (p.empty()) return TRUE;
+                    std::string chosen = narrow(p);
+                    set_analysis_paths(dlg, &chosen, nullptr);
+                    return TRUE;
+                }
+                case IDC_ANA_RFIND: {
+                    // Back to finding R by itself, and look again (R may have just been installed).
+                    std::string none;
+                    set_analysis_paths(dlg, &none, nullptr);
+                    g.svc->analysis().look_for_r();
+                    return TRUE;
+                }
+                case IDC_ANA_SCHANGE: {
+                    Settings s = g.svc->settings();
+                    std::wstring p = pick(dlg, true, widen(s.analysis_scripts), tr(S::ChooseScriptsFolder));
+                    if (p.empty()) return TRUE;
+                    std::string chosen = narrow(p);
+                    set_analysis_paths(dlg, nullptr, &chosen);
+                    return TRUE;
+                }
+                case IDC_ANA_SCLEAR: {
+                    std::string none;
+                    set_analysis_paths(dlg, nullptr, &none);
+                    return TRUE;
+                }
+                case IDC_ANA_SOPEN: {
+                    Settings s = g.svc->settings();
+                    if (!s.analysis_scripts.empty())
+                        ShellExecuteW(nullptr, L"open", widen(s.analysis_scripts).c_str(), nullptr, nullptr,
+                                      SW_SHOWNORMAL);
+                    return TRUE;
+                }
+                case IDC_ANA_SHOWKEY: show_ana_key(dlg, !g.ana_key_visible); return TRUE;
+                case IDC_ANA_COPYKEY:
+                    copy_text(dlg, widen(g.svc->analysis_key()), true);
+                    message(dlg, tr(S::Copied));
+                    return TRUE;
+                case IDC_ANA_NEWKEY:
+                    if (MessageBoxW(dlg, tr(S::NewAnaKeyConfirm), tr(S::AppName),
+                                    MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2) == IDOK) {
+                        SetDlgItemTextW(dlg, IDC_ANA_KEY, widen(g.svc->reset_analysis_key()).c_str());
+                        show_ana_key(dlg, true);
+                    }
+                    return TRUE;
                 case IDC_STT_SHOWKEY: show_stt_key(dlg, !g.stt_key_visible); return TRUE;
                 case IDC_STT_COPYKEY:
                     copy_text(dlg, widen(g.svc->stt_key()), true);
@@ -1084,6 +1254,7 @@ INT_PTR CALLBACK settings_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             // Nothing of the secret stays in the closed window's memory longer than needed.
             SetDlgItemTextW(dlg, IDC_SECRET, L"");
             SetDlgItemTextW(dlg, IDC_STT_KEY, L"");
+            SetDlgItemTextW(dlg, IDC_ANA_KEY, L"");
             g.dlg = nullptr;
             return TRUE;
     }
@@ -1098,9 +1269,9 @@ void show_settings() {
 }
 
 void show_updates() {
-    g.tab = 2;
+    g.tab = kTabUpdates;
     show_settings();
-    if (g.dlg) show_page(g.dlg, 2);
+    if (g.dlg) show_page(g.dlg, kTabUpdates);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1219,6 +1390,7 @@ void on_downloaded(std::unique_ptr<DownloadResult> res) {
     // Everything of ours stops so the installer can replace the files: the server now, the
     // children (dictation, a conversion) with this process, by their job objects. The single-
     // instance mutex goes first, so the installer does not wait for it.
+    g.svc->analysis().stop();
     g.svc->dictation().stop();
     g.svc->stop();
     if (g.mutex) CloseHandle(g.mutex);
@@ -1235,6 +1407,7 @@ void on_downloaded(std::unique_ptr<DownloadResult> res) {
     g.mutex = CreateMutexW(nullptr, TRUE, kMutex);
     g.svc->apply(g.svc->settings(), false);
     g.svc->start_dictation_if_enabled();
+    g.svc->start_analysis_if_enabled();
     g.upd_state = Upd::Failed;
     g.upd_problem = why;
     tray(NIM_MODIFY);
@@ -1357,6 +1530,7 @@ int run_tray(HINSTANCE instance) {
     svc.secret();
     svc.apply(svc.settings(), false);
     svc.start_dictation_if_enabled();
+    svc.start_analysis_if_enabled();
     tray(NIM_ADD);
     if (svc.settings().folders.empty()) show_settings();
     // The first daily check two minutes after start (not during Windows' busy sign-in), then hourly.

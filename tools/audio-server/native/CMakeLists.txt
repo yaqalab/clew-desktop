@@ -46,6 +46,7 @@ endif()
 
 # The portable core: the HTTP server, links, files, mp3 tags, settings, conversion cache.
 add_library(clew_core STATIC
+  src/core/analysis.cpp
   src/core/convert_cache.cpp
   src/core/dictation.cpp
   src/core/files.cpp

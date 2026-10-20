@@ -64,9 +64,11 @@ Service::Service(std::filesystem::path settings_file, std::filesystem::path cach
         notify();
     });
     dictation_ = std::make_unique<Dictation>([this] { notify(); }, [this](const std::string& line) { record(line); });
+    analysis_ = std::make_unique<Analysis>([this] { notify(); }, [this](const std::string& line) { record(line); });
 }
 
 Service::~Service() {
+    analysis_.reset();
     dictation_.reset();
     server_->stop();
     server_.reset();
@@ -224,6 +226,67 @@ DictationConfig Service::dictation_config(const Settings& s) {
     return c;
 }
 
+std::string Service::analysis_key(bool* made) {
+    if (made) *made = false;
+    std::lock_guard<std::mutex> g(lock_);
+    if (!analysis_key_.empty()) return analysis_key_;
+    if (settings_.analysis_secret) {
+        if (auto opened = platform::open_secret(*settings_.analysis_secret)) {
+            analysis_key_ = *opened;
+            return analysis_key_;
+        }
+    }
+    std::string fresh = new_analysis_key();
+    auto sealed = platform::seal_secret(fresh);
+    if (!sealed) return "";
+    settings_.analysis_secret = *sealed;
+    settings_.save(settings_file_);
+    analysis_key_ = fresh;
+    if (made) *made = true;
+    return analysis_key_;
+}
+
+std::string Service::reset_analysis_key() {
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        analysis_key_.clear();
+        settings_.analysis_secret.reset();
+    }
+    std::string key = analysis_key();
+    analysis_->configure(analysis_config(settings()));
+    record("a new analysis key was made; the old one no longer works");
+    notify();
+    return key;
+}
+
+void Service::set_analysis_program(std::filesystem::path program) {
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        analysis_program_ = std::move(program);
+    }
+    analysis_->configure(analysis_config(settings()));
+}
+
+void Service::start_analysis_if_enabled() {
+    if (settings().analysis_enabled) analysis_->start();
+}
+
+AnalysisConfig Service::analysis_config(const Settings& s) {
+    AnalysisConfig c;
+    c.key = analysis_key();
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        c.program = analysis_program_.empty() ? platform::find_analysis_server() : analysis_program_;
+    }
+    c.port = s.analysis_port;
+    c.backend = s.analysis_backend;
+    c.rscript = s.analysis_rscript.empty() ? std::filesystem::path() : path_from_utf8(s.analysis_rscript);
+    c.scripts = s.analysis_scripts.empty() ? std::filesystem::path() : path_from_utf8(s.analysis_scripts);
+    c.timeout = s.analysis_timeout;
+    c.origins = s.origins;
+    return c;
+}
+
 std::string Service::reset_secret() {
     {
         std::lock_guard<std::mutex> g(lock_);
@@ -265,12 +328,15 @@ ServerConfig Service::server_config(const Settings& s, std::string* problem) {
 std::string Service::apply(Settings s, bool persist) {
     int old_port;
     bool stt_was_enabled;
+    bool analysis_was_enabled;
     {
         std::lock_guard<std::mutex> g(lock_);
         old_port = settings_.port;
         stt_was_enabled = settings_.stt_enabled;
+        analysis_was_enabled = settings_.analysis_enabled;
         s.secret = settings_.secret;  // the secret is changed only by reset_secret()
         s.stt_secret = settings_.stt_secret;  // and the dictation key only by reset_stt_key()
+        s.analysis_secret = settings_.analysis_secret;  // and the analysis key only by reset_analysis_key()
         settings_ = s;
     }
     if (persist) settings_.save(settings_file_);
@@ -278,6 +344,8 @@ std::string Service::apply(Settings s, bool persist) {
     dictation_->configure(dictation_config(s));
     // Ticking "start with the server" means wanting it now as well.
     if (s.stt_enabled && !stt_was_enabled) dictation_->start();
+    analysis_->configure(analysis_config(s));
+    if (s.analysis_enabled && !analysis_was_enabled) analysis_->start();
     cache_->set_enabled(s.convert);
     cache_->set_prepare(s.prepare);
     cache_->set_limit_bytes(std::uint64_t(s.cache_mb) * 1024 * 1024);

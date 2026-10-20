@@ -14,6 +14,10 @@ when you turn a folder of them on.
 You need [R](https://cran.r-project.org) (4.0 or later). Nothing else: the commands use base R and
 `MASS`, which comes with R.
 
+**On Windows**, tick **Analysis** in the Clew audio server's installer: the engine is packed with
+Python inside it (`build_exe.ps1`, about 18 MB), and the settings window's **Analysis** tab starts
+it, shows which R it found, and keeps its key (encrypted for your Windows account). Elsewhere:
+
 ```
 clew-analysis-server            # installed with pipx as part of clew-tools
 python -m clew_analysis         # or from this folder

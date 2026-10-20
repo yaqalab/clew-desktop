@@ -7,8 +7,15 @@ Each section is the text of that version's release on GitHub.
 **The analysis engine** (`analysis-server/`, `clew-analysis-server`): runs regressions, exact and
 rank tests and Cronbach's alpha for Clew in your own copy of R, as a translator: Clew sends one
 neutral command with the data and gets one result back, with the R script that ran. Standard
-library only; the commands use base R. Your own R scripts can be added with `--scripts`. The
-Windows tray's Analysis tab comes later.
+library only; the commands use base R. Your own R scripts can be added with `--scripts`.
+
+**Windows: the Analysis tab.** The installer has a new optional part, **Analysis** (about 18 MB;
+R itself is not included). The settings window's new **Analysis** tab shows which R it found
+(or lets you choose `Rscript.exe`), starts and stops the engine, keeps its key (encrypted for
+your Windows account, with Show, Copy and New), and takes a folder of your own R scripts, a
+port and a time limit. The tray menu gains "Analysis: start/stop" and "Copy the analysis key".
+The engine runs as a child of the tray program: it ends with it, and R runs inside the same
+memory limit. Conda Python, PSPP and SPSS will come later.
 
 ## 1.2.0 — 2026-10-19
 

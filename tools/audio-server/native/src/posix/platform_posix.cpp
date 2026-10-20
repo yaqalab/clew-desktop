@@ -160,6 +160,13 @@ fs::path find_stt_server() {
     return fs::is_regular_file(beside, ec) ? beside : fs::path();
 }
 
+fs::path find_analysis_server() {
+    if (const char* forced = std::getenv("CLEW_ANALYSIS_SERVER_EXE")) return fs::path(forced);
+    std::error_code ec;
+    auto beside = self_path().parent_path() / "clew-analysis-server" / "clew-analysis-server";
+    return fs::is_regular_file(beside, ec) ? beside : fs::path();
+}
+
 std::uint64_t total_memory() {
     long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGE_SIZE);
     return pages > 0 && size > 0 ? std::uint64_t(pages) * std::uint64_t(size) : 0;

@@ -78,6 +78,10 @@ std::unique_ptr<Child> start_child(const fs::path& exe, const std::vector<std::s
 // this program (where the installer puts it). Empty when there is none.
 fs::path find_stt_server();
 
+// The analysis engine (clew docs/36): CLEW_ANALYSIS_SERVER_EXE, else
+// clew-analysis-server/clew-analysis-server(.exe) beside this program. Empty when there is none.
+fs::path find_analysis_server();
+
 // Where models go unless the user chose a folder: %LOCALAPPDATA%\clew-stt\models on Windows.
 fs::path default_stt_models_dir();
 

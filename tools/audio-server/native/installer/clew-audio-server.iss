@@ -10,6 +10,10 @@
 ; Dictation (docs/28) is an optional component: the speech server, tools/stt-server's build
 ; (about 200 MB), in {app}\clew-stt-server, which the tray finds there. No model is shipped; the
 ; Dictation tab downloads one to %LOCALAPPDATA%\clew-stt\models (or a folder the user chose).
+;
+; Analysis (clew docs/36) is another optional component: the analysis engine, tools/analysis-server's
+; build (about 18 MB, Python packed in, no R), in {app}\clew-analysis-server. It runs Clew's commands
+; in the researcher's own R, which this installer does not bring.
 
 ; The version comes from tools/VERSION: build-installer.cmd passes it as /DAppVersion=.
 #ifndef AppVersion
@@ -62,8 +66,10 @@ en.StartNow=Start the Clew audio server now
 ja.StartNow=Clew オーディオサーバーを今すぐ開始する
 en.DictationComponent=Dictation on this computer (speech recognition, about 200 MB; models are downloaded later)
 ja.DictationComponent=このコンピューターでの音声入力（音声認識、約 200 MB。モデルは後でダウンロード）
-en.TypeFull=Audio server and dictation
-ja.TypeFull=オーディオサーバーと音声入力
+en.AnalysisComponent=Analysis on this computer (runs Clew's analyses in your own R, about 18 MB; R is not included)
+ja.AnalysisComponent=このコンピューターでの分析（Clew の分析をあなたの R で実行、約 18 MB。R は含まれません）
+en.TypeFull=Audio server, dictation and analysis
+ja.TypeFull=オーディオサーバー、音声入力、分析
 en.TypeCompact=Audio server only
 ja.TypeCompact=オーディオサーバーのみ
 en.TypeCustom=Choose
@@ -83,6 +89,7 @@ Name: "custom"; Description: "{cm:TypeCustom}"; Flags: iscustom
 [Components]
 Name: "main"; Description: "{cm:MainComponent}"; Types: full compact custom; Flags: fixed
 Name: "dictation"; Description: "{cm:DictationComponent}"; Types: full
+Name: "analysis"; Description: "{cm:AnalysisComponent}"; Types: full
 
 [Tasks]
 Name: "autostart"; Description: "{cm:AutostartTask}"
@@ -93,10 +100,12 @@ Source: "..\build\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
 Source: "..\..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\..\..\stt-server\dist\clew-stt-server\*"; DestDir: "{app}\clew-stt-server"; Components: dictation; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\..\analysis-server\dist\clew-analysis-server\*"; DestDir: "{app}\clew-analysis-server"; Components: analysis; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 ; Dictation unticked on an update: the old copy goes, so the tray does not offer it.
 Type: filesandordirs; Name: "{app}\clew-stt-server"; Components: not dictation
+Type: filesandordirs; Name: "{app}\clew-analysis-server"; Components: not analysis
 
 [Icons]
 Name: "{group}\Clew Audio Server"; Filename: "{app}\{#AppExe}"
