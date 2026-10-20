@@ -125,9 +125,16 @@ clew_read <- function() {
   list(spec = spec, data = d)
 }
 
-# The lines a reader would run to rebuild `d` from data.csv (exported with the same columns).
+# The lines a reader would run to rebuild `d` from Clew's Export for analysis: data-labels.csv
+# holds the choices' labels, which is what the engine was sent.
 clew_prelude <- function(spec, d) {
-  out <- c('d <- read.csv("data.csv", colClasses = "character", na.strings = "", check.names = FALSE)')
+  out <- c(
+    "# data-labels.csv: from Survey entry's Export for analysis",
+    paste0(
+      'd <- read.csv("data-labels.csv", fileEncoding = "UTF-8-BOM", colClasses = "character", ',
+      'na.strings = "", check.names = FALSE)'
+    )
+  )
   for (name in names(d)) {
     level <- spec$levels[[name]]
     if (is.null(level)) next
