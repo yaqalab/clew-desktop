@@ -457,13 +457,27 @@ static void analysis_settings(const fs::path& tmp) {
     Settings back = Settings::load(file);
     CHECK(back.analysis_enabled && back.analysis_port == 50002 && back.analysis_timeout == 300);
     CHECK(back.analysis_rscript == s.analysis_rscript && back.analysis_scripts == s.analysis_scripts);
+    // The other programs, each with its own chosen path, and the backend.
+    Settings more = back;
+    more.analysis_backend = "pspp";
+    set_analysis_program(&more, "python", "C:\\conda\\envs\\clew\\python.exe");
+    set_analysis_program(&more, "pspp", "C:\\PSPP\\bin\\pspp.exe");
+    set_analysis_program(&more, "spss", "C:\\IBM\\SPSS Statistics");
+    // A file of its own: the one above is still open for reading here.
+    fs::path other = tmp / "analysis" / "more.json";
+    CHECK(more.save(other));
+    Settings again = Settings::load(other);
+    CHECK(again.analysis_backend == "pspp" && analysis_program(again, "pspp") == "C:\\PSPP\\bin\\pspp.exe");
+    CHECK(analysis_program(again, "python") == more.analysis_python && again.analysis_spss == more.analysis_spss);
+    CHECK(analysis_program(again, "r") == s.analysis_rscript && analysis_program(again, "sas").empty());
+    for (const char* b : {"r", "python", "pspp", "spss"}) CHECK(analysis_backend_known(b));
     CHECK(back.analysis_secret && *platform::open_secret(*back.analysis_secret) == key);
     // A backend this version does not run, a port or time limit out of range: the defaults.
-    write(file, R"({"v":1,"analysisBackend":"spss","analysisPort":80,"analysisTimeout":1})");
+    write(file, R"({"v":1,"analysisBackend":"sas","analysisPort":80,"analysisTimeout":1})");
     Settings odd = Settings::load(file);
     CHECK(odd.analysis_backend == "r" && odd.analysis_port == kDefaultAnalysisPort);
     CHECK(odd.analysis_timeout == kDefaultAnalysisTimeout);
-    CHECK(analysis_backend_known("r") && !analysis_backend_known("spss"));
+    CHECK(analysis_backend_known("r") && !analysis_backend_known("sas"));
 }
 
 // What the engine prints, read for its state; what --check prints, read for R.
@@ -476,15 +490,23 @@ static void analysis_lines() {
     CHECK(line("The key on standard input is too short.").problem == "the key was not accepted");
     CHECK(line("ModuleNotFoundError: No module named 'email'").problem == "No module named 'email'");
 
+    using Look = Analysis::Look;
     Analysis::Status st;
     CHECK(Analysis::read_check_line("R: 4.3.3 at C:\\Program Files\\R\\R-4.3.3\\bin\\Rscript.exe", &st));
-    CHECK(st.r == Analysis::R::Found && st.r_version == "4.3.3");
-    CHECK(st.r_path == "C:\\Program Files\\R\\R-4.3.3\\bin\\Rscript.exe");
+    CHECK(st.programs["r"].look == Look::Found && st.programs["r"].version == "4.3.3");
+    CHECK(st.programs["r"].path == "C:\\Program Files\\R\\R-4.3.3\\bin\\Rscript.exe");
+    CHECK(Analysis::read_check_line("Python: 3.12.4 at C:\\conda\\envs\\clew\\python.exe", &st));
+    CHECK(st.programs["python"].look == Look::Found && st.programs["python"].version == "3.12.4");
+    CHECK(Analysis::read_check_line("PSPP: not ready (PSPP was not found on this computer)", &st));
+    CHECK(st.programs["pspp"].look == Look::NotFound && st.programs["pspp"].why == "PSPP was not found on this computer");
+    CHECK(Analysis::read_check_line("SPSS: found at C:\\IBM\\SPSS Statistics\\Python3\\python.exe", &st));
+    CHECK(st.programs["spss"].look == Look::Found && st.programs["spss"].version == "found");
+    // Earlier findings stay; another line changes nothing.
     CHECK(Analysis::read_check_line("R: not ready (R was not found on this computer)", &st));
-    CHECK(st.r == Analysis::R::NotFound && st.r_why == "R was not found on this computer" && st.r_version.empty());
-    CHECK(!Analysis::read_check_line("Python (Conda): not ready (not yet)", &st));
+    CHECK(st.programs["r"].look == Look::NotFound && st.programs["r"].version.empty());
     CHECK(!Analysis::read_check_line("  regression.linear", &st));
-    CHECK(st.r == Analysis::R::NotFound);
+    CHECK(!Analysis::read_check_line("Rust: 1.0 at x", &st));
+    CHECK(st.programs.size() == 4 && Analysis::backends().size() == 4);
 }
 
 int main() {

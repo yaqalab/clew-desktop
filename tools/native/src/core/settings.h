@@ -56,8 +56,12 @@ struct Settings {
     // Clew's commands in the researcher's own R.
     bool analysis_enabled = false;              // start it with the server
     int analysis_port = kDefaultAnalysisPort;
-    std::string analysis_backend = "r";        // only R so far; Conda Python, PSPP and SPSS later
-    std::string analysis_rscript;               // UTF-8; empty: found by itself (PATH, registry, Program Files)
+    std::string analysis_backend = "r";        // "r", "python" (a Conda environment), "pspp" or "spss"
+    // Each program chosen in the tab (UTF-8); empty: the engine finds it by itself.
+    std::string analysis_rscript;               // Rscript(.exe)
+    std::string analysis_python;                // a Python with pandas, numpy, scipy and statsmodels
+    std::string analysis_pspp;                  // pspp(.exe)
+    std::string analysis_spss;                  // SPSS Statistics' folder, or its Python
     std::string analysis_scripts;               // UTF-8; the researcher's own R scripts; empty: none
     int analysis_timeout = kDefaultAnalysisTimeout;  // seconds one run may take
     std::optional<platform::Sealed> analysis_secret;  // its key, sealed like `secret`
@@ -81,6 +85,9 @@ std::string new_stt_key();
 // A new analysis key: "ana.<secret>".
 std::string new_analysis_key();
 bool analysis_backend_known(const std::string& id);
+// The chosen program of a backend (empty: found by itself), and a way to change it.
+std::string analysis_program(const Settings& s, const std::string& backend);
+void set_analysis_program(Settings* s, const std::string& backend, const std::string& path);
 
 // The models the Dictation tab lists (tools/stt-server/alefa_stt/models.py has their sources),
 // smallest first. Sizes as listed on Hugging Face, 2026-10-16. What each needs (docs/28 §3.6):

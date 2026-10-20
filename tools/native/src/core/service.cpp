@@ -280,7 +280,10 @@ AnalysisConfig Service::analysis_config(const Settings& s) {
     }
     c.port = s.analysis_port;
     c.backend = s.analysis_backend;
-    c.rscript = s.analysis_rscript.empty() ? std::filesystem::path() : path_from_utf8(s.analysis_rscript);
+    for (const char* b : {"r", "python", "pspp", "spss"}) {
+        std::string chosen = analysis_program(s, b);
+        if (!chosen.empty()) c.programs[b] = path_from_utf8(chosen);
+    }
     c.scripts = s.analysis_scripts.empty() ? std::filesystem::path() : path_from_utf8(s.analysis_scripts);
     c.timeout = s.analysis_timeout;
     c.origins = s.origins;

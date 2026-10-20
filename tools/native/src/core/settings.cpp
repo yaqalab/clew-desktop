@@ -73,6 +73,9 @@ Settings Settings::load(const std::filesystem::path& file) {
     if (d["analysisBackend"].is_string() && analysis_backend_known(d["analysisBackend"].str()))
         s.analysis_backend = d["analysisBackend"].str();
     if (d["analysisRscript"].is_string()) s.analysis_rscript = d["analysisRscript"].str();
+    if (d["analysisPython"].is_string()) s.analysis_python = d["analysisPython"].str();
+    if (d["analysisPspp"].is_string()) s.analysis_pspp = d["analysisPspp"].str();
+    if (d["analysisSpss"].is_string()) s.analysis_spss = d["analysisSpss"].str();
     if (d["analysisScripts"].is_string()) s.analysis_scripts = d["analysisScripts"].str();
     s.analysis_timeout = clamp_int(d["analysisTimeout"], 10, 24 * 3600, kDefaultAnalysisTimeout);
     const auto& analysis_secret = d["analysisSecret"];
@@ -125,6 +128,9 @@ bool Settings::save(const std::filesystem::path& file) const {
     d.set("analysisPort", analysis_port);
     d.set("analysisBackend", analysis_backend);
     d.set("analysisRscript", analysis_rscript);
+    d.set("analysisPython", analysis_python);
+    d.set("analysisPspp", analysis_pspp);
+    d.set("analysisSpss", analysis_spss);
     d.set("analysisScripts", analysis_scripts);
     d.set("analysisTimeout", analysis_timeout);
     if (analysis_secret) {
@@ -180,8 +186,24 @@ std::string new_stt_key() { return "stt.local." + new_secret(); }
 
 std::string new_analysis_key() { return "ana." + new_secret(); }
 
-// Only R runs today; the others are named so a settings file from a later version still loads.
-bool analysis_backend_known(const std::string& id) { return id == "r"; }
+bool analysis_backend_known(const std::string& id) {
+    return id == "r" || id == "python" || id == "pspp" || id == "spss";
+}
+
+std::string analysis_program(const Settings& s, const std::string& backend) {
+    return backend == "r"        ? s.analysis_rscript
+           : backend == "python" ? s.analysis_python
+           : backend == "pspp"   ? s.analysis_pspp
+           : backend == "spss"   ? s.analysis_spss
+                                 : std::string();
+}
+
+void set_analysis_program(Settings* s, const std::string& backend, const std::string& path) {
+    if (backend == "r") s->analysis_rscript = path;
+    if (backend == "python") s->analysis_python = path;
+    if (backend == "pspp") s->analysis_pspp = path;
+    if (backend == "spss") s->analysis_spss = path;
+}
 
 const SttModel* find_stt_model(const std::string& name) {
     for (const auto& m : kSttModels)
