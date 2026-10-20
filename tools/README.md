@@ -212,7 +212,7 @@ problem, please write to alefa-support@googlegroups.com instead of opening a pub
 
 | Folder | |
 |---|---|
-| [audio-server/native/](audio-server/native/) | The Windows program: C++17, Windows APIs only, no third-party code. Tray, settings window, installer (Inno Setup) |
+| [native/](native/) | The Windows program: C++17, Windows APIs only, no third-party code. Tray, settings window, installer (Inno Setup) |
 | [audio-server/](audio-server/) | The Python audio server (standard library only): macOS, Linux, or a backup on Windows. `clew_audio_server.py` runs alone; the `clew_audio/` package beside it adds the window (Tkinter), the keystore, start at login, dictation and the update check |
 | [pyproject.toml](pyproject.toml) | The `clew-tools` package pipx installs (the audio server, and with `[dictation]` the dictation server and faster-whisper) |
 | [stt-server/](stt-server/) | The dictation server: Python, faster-whisper, packed with PyInstaller for Windows |

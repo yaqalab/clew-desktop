@@ -9,7 +9,7 @@ Composes the native server's icons (res/icons/*.ico) from Clew's own brand files
   (-dark). Running: the mark as it is. Stopped: faded and grey. Converting: the mark with a small
   badge in the accent colour.
 
-    python tools/audio-server/native/res/make_icons.py      (needs Pillow; only to regenerate)
+    python tools/native/res/make_icons.py      (needs Pillow; only to regenerate)
 """
 
 from pathlib import Path
@@ -17,7 +17,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageOps
 
 HERE = Path(__file__).resolve().parent
-BRAND = HERE.parents[3] / "packages" / "kit" / "brand"
+BRAND = HERE.parents[2] / "packages" / "kit" / "brand"
 OUT = HERE / "icons"
 
 CREAM = (0xF7, 0xF2, 0xE9)

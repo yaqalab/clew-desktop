@@ -117,9 +117,9 @@ Design and API: `docs/22-audio-server.md` (§10 for this program). The API is th
 server's (`tools/audio-server/`), which stays as a backup and for macOS and Linux.
 
 ```
-tools\audio-server\native\build.cmd                   build + unit tests (Visual Studio 2022 C++ tools)
-python -m unittest discover -s tools\audio-server\native\test -v     the real program over HTTP
-tools\audio-server\native\installer\build-installer.cmd             build + installer (Inno Setup 6)
+tools\native\build.cmd                   build + unit tests (Visual Studio 2022 C++ tools)
+python -m unittest discover -s tools\native\test -v     the real program over HTTP
+tools\native\installer\build-installer.cmd             build + installer (Inno Setup 6)
 set CLEW_AUDIO_SERVER_EXE=...\clew-audio-server.exe && npm run smoke:audio-server   real Clew in Chromium
 ```
 
@@ -142,7 +142,7 @@ No third-party code and no libraries beyond what Windows ships. The version is w
 ### Signing
 
 ```
-powershell -ExecutionPolicy Bypass -File tools\audio-server\native\installer\make-cert.ps1
+powershell -ExecutionPolicy Bypass -File tools\native\installer\make-cert.ps1
 ```
 
 makes, once, a self-signed code-signing certificate `CN=YaqaLab` (RSA 3072, 10 years) in this Windows
