@@ -37,9 +37,16 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: audio-server
         run: python -m unittest discover -s . -p "test_*.py" -v
+      - name: R for the analysis engine (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y -qq r-base-core
+      - name: Analysis engine tests (R on Linux; skipped without it)
+        working-directory: analysis-server
+        run: python -m unittest discover -s tests -v
       - name: Install as users do
         run: |
           python -m venv /tmp/user
           /tmp/user/bin/pip install .
           /tmp/user/bin/clew-audio-server --version
           /tmp/user/bin/clew-audio-server --check-update
+          /tmp/user/bin/clew-analysis-server --check

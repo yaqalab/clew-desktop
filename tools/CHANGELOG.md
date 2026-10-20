@@ -2,6 +2,14 @@
 
 Each section is the text of that version's release on GitHub.
 
+## Unreleased
+
+**The analysis engine** (`analysis-server/`, `clew-analysis-server`): runs regressions, exact and
+rank tests and Cronbach's alpha for Clew in your own copy of R, as a translator: Clew sends one
+neutral command with the data and gets one result back, with the R script that ran. Standard
+library only; the commands use base R. Your own R scripts can be added with `--scripts`. The
+Windows tray's Analysis tab comes later.
+
 ## 1.2.0 — 2026-10-19
 
 **macOS and Linux.** The Python audio server becomes a package you install with
