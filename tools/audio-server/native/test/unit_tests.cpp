@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "analysis.h"
 #include "dictation.h"
 #include "files.h"
 #include "folders.h"
@@ -435,6 +436,57 @@ static void updates(const fs::path& tmp) {
     CHECK(check_due(back, 1600000000));  // the clock went back
 }
 
+// The Analysis tab's settings (clew docs/36): kept and read back, the key sealed, odd values refused.
+static void analysis_settings(const fs::path& tmp) {
+    fs::path file = tmp / "analysis" / "settings.json";
+    Settings s;
+    CHECK(!s.analysis_enabled && s.analysis_port == kDefaultAnalysisPort && s.analysis_backend == "r");
+    CHECK(s.analysis_rscript.empty() && s.analysis_scripts.empty() && s.analysis_timeout == kDefaultAnalysisTimeout);
+    s.analysis_enabled = true;
+    s.analysis_port = 50002;
+    s.analysis_rscript = "C:\\Program Files\\R\\R-4.3.3\\bin\\Rscript.exe";
+    s.analysis_scripts = "E:\\scripts \xe6\x97\xa5";
+    s.analysis_timeout = 300;
+    std::string key = new_analysis_key();
+    CHECK(starts_with(key, "ana.") && key.size() == 4 + 32 && key != new_analysis_key());
+    s.analysis_secret = platform::seal_secret(key);
+    CHECK(s.save(file));
+    std::ifstream in(file, std::ios::binary);
+    std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(raw.find(key) == std::string::npos);
+    Settings back = Settings::load(file);
+    CHECK(back.analysis_enabled && back.analysis_port == 50002 && back.analysis_timeout == 300);
+    CHECK(back.analysis_rscript == s.analysis_rscript && back.analysis_scripts == s.analysis_scripts);
+    CHECK(back.analysis_secret && *platform::open_secret(*back.analysis_secret) == key);
+    // A backend this version does not run, a port or time limit out of range: the defaults.
+    write(file, R"({"v":1,"analysisBackend":"spss","analysisPort":80,"analysisTimeout":1})");
+    Settings odd = Settings::load(file);
+    CHECK(odd.analysis_backend == "r" && odd.analysis_port == kDefaultAnalysisPort);
+    CHECK(odd.analysis_timeout == kDefaultAnalysisTimeout);
+    CHECK(analysis_backend_known("r") && !analysis_backend_known("spss"));
+}
+
+// What the engine prints, read for its state; what --check prints, read for R.
+static void analysis_lines() {
+    auto line = [](const std::string& l) { return Analysis::read_server_line(l, 47823); };
+    CHECK(line("Clew analysis server 0.1.0 on http://127.0.0.1:47823 (backend: r)").ready);
+    CHECK(!line("GET /api/ping -> 200").ready && line("GET /api/ping -> 200").problem.empty());
+    CHECK(line("Port 47823 is not available ([WinError 10048] ...). Try --port <number>.").problem ==
+          "port 47823 is in use");
+    CHECK(line("The key on standard input is too short.").problem == "the key was not accepted");
+    CHECK(line("ModuleNotFoundError: No module named 'email'").problem == "No module named 'email'");
+
+    Analysis::Status st;
+    CHECK(Analysis::read_check_line("R: 4.3.3 at C:\\Program Files\\R\\R-4.3.3\\bin\\Rscript.exe", &st));
+    CHECK(st.r == Analysis::R::Found && st.r_version == "4.3.3");
+    CHECK(st.r_path == "C:\\Program Files\\R\\R-4.3.3\\bin\\Rscript.exe");
+    CHECK(Analysis::read_check_line("R: not ready (R was not found on this computer)", &st));
+    CHECK(st.r == Analysis::R::NotFound && st.r_why == "R was not found on this computer" && st.r_version.empty());
+    CHECK(!Analysis::read_check_line("Python (Conda): not ready (not yet)", &st));
+    CHECK(!Analysis::read_check_line("  regression.linear", &st));
+    CHECK(st.r == Analysis::R::NotFound);
+}
+
 int main() {
     fs::path tmp = fs::temp_directory_path() / ("clew-unit-" + std::to_string(std::rand()) +
                                                  std::to_string(reinterpret_cast<std::uintptr_t>(&failures) & 0xFFFF));
@@ -451,6 +503,8 @@ int main() {
     settings_file(tmp);
     dictation_settings(tmp);
     dictation_helpers(tmp);
+    analysis_settings(tmp);
+    analysis_lines();
     updates(tmp);
     std::error_code ec;
     fs::remove_all(tmp, ec);

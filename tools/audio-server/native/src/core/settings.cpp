@@ -68,6 +68,16 @@ Settings Settings::load(const std::filesystem::path& file) {
     const auto& stt_secret = d["sttSecret"];
     if (stt_secret["kind"].is_string() && stt_secret["data"].is_string())
         s.stt_secret = platform::Sealed{stt_secret["kind"].str(), stt_secret["data"].str()};
+    if (d["analysisEnabled"].is_bool()) s.analysis_enabled = d["analysisEnabled"].boolean();
+    s.analysis_port = clamp_int(d["analysisPort"], 1024, 65535, kDefaultAnalysisPort);
+    if (d["analysisBackend"].is_string() && analysis_backend_known(d["analysisBackend"].str()))
+        s.analysis_backend = d["analysisBackend"].str();
+    if (d["analysisRscript"].is_string()) s.analysis_rscript = d["analysisRscript"].str();
+    if (d["analysisScripts"].is_string()) s.analysis_scripts = d["analysisScripts"].str();
+    s.analysis_timeout = clamp_int(d["analysisTimeout"], 10, 24 * 3600, kDefaultAnalysisTimeout);
+    const auto& analysis_secret = d["analysisSecret"];
+    if (analysis_secret["kind"].is_string() && analysis_secret["data"].is_string())
+        s.analysis_secret = platform::Sealed{analysis_secret["kind"].str(), analysis_secret["data"].str()};
     return s;
 }
 
@@ -110,6 +120,18 @@ bool Settings::save(const std::filesystem::path& file) const {
         sv.set("kind", stt_secret->kind);
         sv.set("data", stt_secret->data);
         d.set("sttSecret", sv);
+    }
+    d.set("analysisEnabled", analysis_enabled);
+    d.set("analysisPort", analysis_port);
+    d.set("analysisBackend", analysis_backend);
+    d.set("analysisRscript", analysis_rscript);
+    d.set("analysisScripts", analysis_scripts);
+    d.set("analysisTimeout", analysis_timeout);
+    if (analysis_secret) {
+        json::Value sv = json::Value::object();
+        sv.set("kind", analysis_secret->kind);
+        sv.set("data", analysis_secret->data);
+        d.set("analysisSecret", sv);
     }
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
@@ -155,6 +177,11 @@ std::optional<std::string> normalize_origin(const std::string& text) {
 std::string new_secret() { return base64url_encode(platform::random_bytes(24)); }
 
 std::string new_stt_key() { return "stt.local." + new_secret(); }
+
+std::string new_analysis_key() { return "ana." + new_secret(); }
+
+// Only R runs today; the others are named so a settings file from a later version still loads.
+bool analysis_backend_known(const std::string& id) { return id == "r"; }
 
 const SttModel* find_stt_model(const std::string& name) {
     for (const auto& m : kSttModels)

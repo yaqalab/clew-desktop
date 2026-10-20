@@ -14,6 +14,8 @@ rem Dictation's speech server (docs/28), built once with Python into tools\stt-s
 if not exist ..\..\..\stt-server\dist\clew-stt-server\clew-stt-server.exe (
   powershell -NoProfile -ExecutionPolicy Bypass -File ..\..\..\stt-server\build_exe.ps1 || exit /b 1
 )
+rem The analysis engine (clew docs/36), small and quick to pack: built anew every time.
+powershell -NoProfile -ExecutionPolicy Bypass -File ..\..\..\analysis-server\build_exe.ps1 || exit /b 1
 set /p VERSION=<..\..\..\VERSION
 if not defined VERSION (echo tools\VERSION is empty.& exit /b 1)
 set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
@@ -36,6 +38,7 @@ set SIGN=sign /fd SHA256 /n YaqaLab /s My %STAMP%
 
 "%SIGNTOOL%" %SIGN% /d "Clew audio server" ..\build\clew-audio-server.exe || exit /b 1
 "%SIGNTOOL%" %SIGN% /d "Clew dictation server" ..\..\..\stt-server\dist\clew-stt-server\clew-stt-server.exe || exit /b 1
+"%SIGNTOOL%" %SIGN% /d "Clew analysis engine" ..\..\..\analysis-server\dist\clew-analysis-server\clew-analysis-server.exe || exit /b 1
 "%ISCC%" /Q /DAppVersion=%VERSION% /DSign "/Syaqalab=$q%SIGNTOOL%$q %SIGN% /d $qClew Audio Server$q $f" clew-audio-server.iss || exit /b 1
 
 :done

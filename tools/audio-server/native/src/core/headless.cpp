@@ -40,6 +40,14 @@ const char* const kHeadlessHelp =
     "  --stt-download <name>  fetch a model (or \"speakers\", the speaker model), then quit\n"
     "  --stt-program <exe>    the server program (default: clew-stt-server beside this one)\n"
     "  --show-stt-key         print its key\n"
+    "\n"
+    "Analysis (the engine that runs Clew's commands in your own R, clew docs/36):\n"
+    "  --analysis             start it too\n"
+    "  --analysis-port <n>    default 47823\n"
+    "  --analysis-rscript <p> the Rscript to use (default: found by itself)\n"
+    "  --analysis-scripts <d> a folder of your own R scripts\n"
+    "  --analysis-program <e> the engine program (default: clew-analysis-server beside this one)\n"
+    "  --show-analysis-key    print its key\n"
     "  --version\n";
 
 namespace {
@@ -90,6 +98,9 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
     std::string config, cache_dir, ffmpeg, value;
     std::vector<FolderSetting> folders;
     std::string stt_model, stt_models_dir, stt_language, stt_download, stt_program;
+    std::string analysis_rscript, analysis_scripts, analysis_program;
+    int analysis_port = -1;
+    bool analysis = false, show_analysis_key = false;
     std::vector<std::string> origins;
     int port = -1, link_seconds = 0;  // -1: the settings' port; 0: any free port
     int stt_port = -1;
@@ -123,6 +134,16 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
         else if (a == "--stt-download")
             ok = take(args, i, &stt_download) && (stt_model_known(stt_download) || stt_download == "speakers");
         else if (a == "--stt-program") ok = take(args, i, &stt_program);
+        else if (a == "--analysis") analysis = true;
+        else if (a == "--show-analysis-key") show_analysis_key = true;
+        else if (a == "--analysis-rscript") ok = take(args, i, &analysis_rscript);
+        else if (a == "--analysis-scripts") ok = take(args, i, &analysis_scripts);
+        else if (a == "--analysis-program") ok = take(args, i, &analysis_program);
+        else if (a == "--analysis-port") {
+            ok = take(args, i, &value) && all_digits(value) && value.size() <= 5 && std::stoi(value) >= 1024 &&
+                 std::stoi(value) <= 65535;
+            if (ok) analysis_port = std::stoi(value);
+        }
         else if (a == "--stt-port") {
             ok = take(args, i, &value) && all_digits(value) && value.size() <= 5 && std::stoi(value) >= 1024 &&
                  std::stoi(value) <= 65535;
@@ -171,6 +192,14 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
     if (stt_port >= 0) s.stt_port = stt_port;
     if (!stt_program.empty()) svc.set_stt_program(std::filesystem::absolute(path_from_utf8(stt_program)));
     if (stt_fake) svc.set_stt_fake_engine(true);
+    const bool had_analysis_key = s.analysis_secret.has_value();
+    if (analysis_port >= 0) s.analysis_port = analysis_port;
+    if (!analysis_rscript.empty())
+        s.analysis_rscript = path_to_utf8(std::filesystem::absolute(path_from_utf8(analysis_rscript)));
+    if (!analysis_scripts.empty())
+        s.analysis_scripts = path_to_utf8(std::filesystem::absolute(path_from_utf8(analysis_scripts)));
+    if (!analysis_program.empty())
+        svc.set_analysis_program(std::filesystem::absolute(path_from_utf8(analysis_program)));
 
     if (!stt_download.empty()) return download_model(svc, s, stt_download, console);
 
@@ -256,8 +285,19 @@ int run_headless(const std::vector<std::string>& args, const Console& console) {
                     ", starting)");
         if (made_key || show_stt_key) console.out("Dictation key - paste it into Clew's Dictation settings:\n    " + key);
     }
+    if (analysis) {
+        bool made_key = false;
+        std::string key = svc.analysis_key(&made_key);
+        made_key = made_key || !had_analysis_key;
+        svc.analysis().start();
+        console.out("Analysis  ->  http://127.0.0.1:" + std::to_string(s.analysis_port) + "  (backend " +
+                    s.analysis_backend + ", starting)");
+        if (made_key || show_analysis_key)
+            console.out("Analysis key - paste it into Clew (Analysis > Start > On this computer):\n    " + key);
+    }
     console.out("Press Ctrl+C to stop.");
     console.wait_for_stop();
+    svc.analysis().stop();
     svc.dictation().stop();
     svc.stop();
     return 0;

@@ -1,5 +1,5 @@
 // The running service: settings, secret, conversion cache and HTTP server together, and the
-// dictation server beside them (dictation.h). The tray app and the headless mode both drive one of
+// dictation server and the analysis engine beside them (dictation.h, analysis.h). The tray app and the headless mode both drive one of
 // these; neither talks to the server directly.
 #pragma once
 
@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "analysis.h"
 #include "convert_cache.h"
 #include "dictation.h"
 #include "server.h"
@@ -69,6 +70,15 @@ public:
     void set_stt_program(std::filesystem::path program);
     void set_stt_fake_engine(bool fake);
 
+    // Analysis (clew docs/36): the engine that runs Clew's commands in R. Its key is kept like
+    // the dictation key: sealed in the settings, made on first use.
+    Analysis& analysis() { return *analysis_; }
+    std::string analysis_key(bool* made = nullptr);
+    std::string reset_analysis_key();  // the old key stops working at once (a running engine restarts)
+    void start_analysis_if_enabled();
+    // Headless and the tests: another engine program.
+    void set_analysis_program(std::filesystem::path program);
+
     // Called from any thread when the status changed; keep it short (post a message).
     void on_change(std::function<void()> fn);
 
@@ -79,6 +89,7 @@ private:
                  const platform::ConvertControl& control, std::string* why);
     ServerConfig server_config(const Settings& s, std::string* problem);
     DictationConfig dictation_config(const Settings& s);
+    AnalysisConfig analysis_config(const Settings& s);
 
     std::filesystem::path settings_file_;
     LogFn log_;
@@ -95,6 +106,9 @@ private:
     std::filesystem::path stt_program_;
     bool stt_fake_engine_ = false;
     std::unique_ptr<Dictation> dictation_;
+    std::string analysis_key_;
+    std::filesystem::path analysis_program_;
+    std::unique_ptr<Analysis> analysis_;
 };
 
 }  // namespace clew

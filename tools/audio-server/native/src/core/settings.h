@@ -17,6 +17,8 @@ constexpr int kDefaultLinkHours = 4;
 constexpr int kDefaultCacheMb = 4096;
 constexpr int kDefaultSttPort = 47822;
 constexpr const char* kDefaultSttModel = "small";
+constexpr int kDefaultAnalysisPort = 47823;
+constexpr int kDefaultAnalysisTimeout = 120;
 // The hosted Clew (docs/32): allowed on a first start, so the website works without a step more;
 // the window can remove it. The secret is still needed for everything.
 constexpr const char* kHostedClew = "https://clew.alefa.net";
@@ -50,6 +52,16 @@ struct Settings {
     int stt_port = kDefaultSttPort;
     std::optional<platform::Sealed> stt_secret;  // its key, sealed like `secret`
 
+    // Analysis (docs/36 section 5): the analysis engine, a child process (analysis.h) that runs
+    // Clew's commands in the researcher's own R.
+    bool analysis_enabled = false;              // start it with the server
+    int analysis_port = kDefaultAnalysisPort;
+    std::string analysis_backend = "r";        // only R so far; Conda Python, PSPP and SPSS later
+    std::string analysis_rscript;               // UTF-8; empty: found by itself (PATH, registry, Program Files)
+    std::string analysis_scripts;               // UTF-8; the researcher's own R scripts; empty: none
+    int analysis_timeout = kDefaultAnalysisTimeout;  // seconds one run may take
+    std::optional<platform::Sealed> analysis_secret;  // its key, sealed like `secret`
+
     static Settings load(const std::filesystem::path& file);
     // Atomic: written beside, then renamed over.
     bool save(const std::filesystem::path& file) const;
@@ -65,6 +77,10 @@ std::string new_secret();
 
 // A new dictation key, in the speech server's shape: "stt.local.<secret>".
 std::string new_stt_key();
+
+// A new analysis key: "ana.<secret>".
+std::string new_analysis_key();
+bool analysis_backend_known(const std::string& id);
 
 // The models the Dictation tab lists (tools/stt-server/alefa_stt/models.py has their sources),
 // smallest first. Sizes as listed on Hugging Face, 2026-10-16. What each needs (docs/28 §3.6):

@@ -1138,5 +1138,159 @@ class Dictation(unittest.TestCase):
         self.assertFalse(Path(models, "small.part").exists())
 
 
+
+# --- Analysis (clew docs/36): the analysis engine as a child of this one -----------------------------
+
+ANA_EXE = Path(
+    os.environ.get("CLEW_ANALYSIS_SERVER_EXE")
+    or HERE.parents[2] / "analysis-server" / "dist" / "clew-analysis-server" / "clew-analysis-server.exe"
+)
+
+
+def r_found():
+    """Whether the packed engine finds R on this machine (its --check says so)."""
+    if not ANA_EXE.is_file():
+        return False
+    out = subprocess.run([str(ANA_EXE), "--check"], capture_output=True, text=True, timeout=60).stdout
+    return bool(re.search(r"^R: \d", out, re.M))
+
+
+def ana_call(port, method, path, key=None, body=None, host=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
+    try:
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        if host:
+            headers["Host"] = host
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        c.request(method, path, body=data, headers=headers)
+        r = c.getresponse()
+        return r.status, r.read()
+    finally:
+        c.close()
+
+
+@unittest.skipUnless(EXE.is_file() and ANA_EXE.is_file(), f"build both programs first: {ANA_EXE}")
+class Analysis(unittest.TestCase):
+    """The real, packed analysis engine (tools/analysis-server/build_exe.ps1), started by the real tray
+    program, and real R when this machine has it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name, "home")
+        self.folder = Path(self.tmp.name, "audio")
+        self.folder.mkdir()
+        self.servers = []
+
+    def tearDown(self):
+        for s in self.servers:
+            s.stop()
+        for _ in range(20):
+            try:
+                self.tmp.cleanup()
+                return
+            except OSError:
+                time.sleep(0.25)
+
+    def start(self, *extra, port=None):
+        port = port or free_port()
+        s = Server(self.folder, self.home, "--analysis", "--analysis-port", str(port),
+                   "--analysis-program", str(ANA_EXE), *extra)
+        self.servers.append(s)
+        k = re.search(r"Analysis key[^\n]*\n\s+(\S+)", s.banner)
+        return s, port, (k.group(1) if k else None)
+
+    def ready(self, server):
+        return wait_for(lambda: any("analysis engine ready" in l for l in server.log), 60)
+
+    def test_it_starts_with_its_key_and_answers_only_to_it(self):
+        server, port, key = self.start()
+        self.assertIn(f"Analysis  ->  http://127.0.0.1:{port}", server.banner)
+        self.assertRegex(key or "", r"^ana\.[A-Za-z0-9_-]{32}$")
+        self.assertTrue(self.ready(server), server.log)
+        status, raw = ana_call(port, "GET", "/api/ping")
+        self.assertEqual(status, 200, raw)
+        self.assertEqual(json.loads(raw)["server"], "clew-analysis-server")
+        status, raw = ana_call(port, "GET", "/api/commands", key)
+        self.assertEqual(status, 200, raw)
+        self.assertIn("regression.linear", [c["id"] for c in json.loads(raw)["commands"]])
+        self.assertEqual(ana_call(port, "GET", "/api/commands", "ana.wrong-key-000000000000")[0], 401)
+        self.assertEqual(ana_call(port, "GET", "/api/commands")[0], 401)
+        self.assertEqual(ana_call(port, "GET", "/api/ping", host="rebound.example")[0], 403)
+        # The key is kept sealed, not in clear, and never in the log.
+        settings = Path(self.home, "settings.json").read_text(encoding="utf-8")
+        self.assertIn("analysisSecret", settings)
+        self.assertNotIn(key, settings)
+        self.assertFalse(any(key in line for line in server.log))
+
+    def test_the_key_is_kept_across_runs(self):
+        first, _, key = self.start()
+        first.stop()
+        self.servers.remove(first)
+        again, port, shown = self.start()
+        self.assertIsNone(shown)  # not made now, so not shown unasked
+        self.assertTrue(self.ready(again), again.log)
+        self.assertEqual(ana_call(port, "GET", "/api/commands", key)[0], 200)
+
+    def test_it_ends_with_the_server(self):
+        server, port, _ = self.start()
+        self.assertTrue(wait_for(lambda: listening(port), 60))
+        server.stop()
+        self.servers.remove(server)
+        self.assertTrue(wait_for(lambda: not listening(port), 10), "the analysis engine outlived its parent")
+
+    def test_a_taken_port_is_said(self):
+        holder = socket.socket()
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        try:
+            taken = holder.getsockname()[1]
+            server, _, _ = self.start(port=taken)
+            self.assertTrue(
+                wait_for(lambda: any(f"port {taken} is in use" in l for l in server.log), 60), server.log)
+        finally:
+            holder.close()
+
+    def test_the_researchers_own_scripts_are_offered(self):
+        scripts = Path(self.tmp.name, "my scripts")
+        scripts.mkdir()
+        Path(scripts, "Mean.R").write_text(
+            "#' title: Mean of each column\nanalyse <- function(d, spec) list(tables = list(), notes = 'x')\n",
+            encoding="utf-8")
+        server, port, key = self.start("--analysis-scripts", str(scripts))
+        self.assertTrue(self.ready(server), server.log)
+        status, raw = ana_call(port, "GET", "/api/commands", key)
+        self.assertEqual(status, 200, raw)
+        mine = [c for c in json.loads(raw)["commands"] if c["user"]]
+        self.assertEqual([c["title"]["en"] for c in mine], ["Mean of each column"])
+
+    @unittest.skipUnless(r_found(), "R is not installed")
+    def test_a_command_runs_in_r(self):
+        server, port, key = self.start()
+        self.assertTrue(self.ready(server), server.log)
+        body = {
+            "command": "regression.linear",
+            "dependent": ["hours"],
+            "independent": ["gender"],
+            "groupby": [],
+            "codebook": [
+                {"name": "hours", "level": "scale", "label": "Hours"},
+                {"name": "gender", "level": "nominal", "label": "Gender", "order": ["Female", "Male"]},
+            ],
+            "rows": [{"hours": h, "gender": g} for h, g in
+                     [("2", "Female"), ("4", "Female"), ("5", "Male"), ("9", "Male")]],
+        }
+        status, raw = ana_call(port, "POST", "/api/run", key, body)
+        self.assertEqual(status, 200, raw)
+        result = json.loads(raw)
+        self.assertEqual(result["backend"]["name"], "R")
+        rows = {row[0]: row[1] for row in result["tables"][0]["body"]}
+        self.assertEqual(rows, {"(Intercept)": "3.000", "Gender: Male": "4.000"})
+        # What the answers were is not logged: method, path and status only.
+        self.assertFalse(any("Female" in line for line in server.log))
+
+
 if __name__ == "__main__":
     unittest.main()
