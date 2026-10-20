@@ -3,7 +3,7 @@ The updater's Windows half (src/win/update_win.cpp) against a stand-in for GitHu
 description, the download, and every check before an installer may run (docs/32 section 3). The
 real code, in build/update_check.exe, signed here with the YaqaLab certificate as a release is.
 
-    python -m unittest discover -s tools/audio-server/native/test -p test_update.py -v
+    python -m unittest discover -s tools/native/test -p test_update.py -v
 
 Skipped without that certificate in this user's store (make-cert.ps1) or without signtool. The
 "installers" served are copies of update_check.exe, signed or not: nothing is installed or run.

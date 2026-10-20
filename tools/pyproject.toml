@@ -4,7 +4,7 @@
 #   pipx install "clew-tools @ git+https://github.com/yaqalab/clew-tools"
 #   pipx install "clew-tools[dictation] @ git+https://github.com/yaqalab/clew-tools"
 #
-# The Windows installer does not use this file (audio-server/native, stt-server/build_exe.ps1).
+# The Windows installer does not use this file (native/, stt-server/build_exe.ps1, analysis-server/build_exe.ps1).
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

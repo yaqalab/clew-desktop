@@ -3,9 +3,9 @@ Black-box tests for the native Clew audio server: the real program, started head
 a real folder, real HTTP. No mocks. Mirrors tools/audio-server/test_server.py where the behaviour is
 the same, and adds what is new (request limits, conversion with Windows' own codecs, the sandbox).
 
-    python -m unittest discover -s tools/audio-server/native/test -v
+    python -m unittest discover -s tools/native/test -v
 
-The program: CLEW_AUDIO_SERVER_EXE, else tools/audio-server/native/build/clew-audio-server(.exe).
+The program: CLEW_AUDIO_SERVER_EXE, else tools/native/build/clew-audio-server(.exe).
 Fixtures are made with ffmpeg when it is on PATH (only to make them; the server never uses it
 unless a test says so).
 """
@@ -933,7 +933,7 @@ class CommandLine(unittest.TestCase):
 
 STT_EXE = Path(
     os.environ.get("CLEW_STT_SERVER_EXE")
-    or HERE.parents[2] / "stt-server" / "dist" / "clew-stt-server" / "clew-stt-server.exe"
+    or HERE.parents[1] / "stt-server" / "dist" / "clew-stt-server" / "clew-stt-server.exe"
 )
 
 
@@ -1143,7 +1143,7 @@ class Dictation(unittest.TestCase):
 
 ANA_EXE = Path(
     os.environ.get("CLEW_ANALYSIS_SERVER_EXE")
-    or HERE.parents[2] / "analysis-server" / "dist" / "clew-analysis-server" / "clew-analysis-server.exe"
+    or HERE.parents[1] / "analysis-server" / "dist" / "clew-analysis-server" / "clew-analysis-server.exe"
 )
 
 

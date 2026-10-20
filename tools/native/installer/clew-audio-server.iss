@@ -98,9 +98,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\build\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
-Source: "..\..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
-Source: "..\..\..\stt-server\dist\clew-stt-server\*"; DestDir: "{app}\clew-stt-server"; Components: dictation; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\..\..\analysis-server\dist\clew-analysis-server\*"; DestDir: "{app}\clew-analysis-server"; Components: analysis; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\..\stt-server\dist\clew-stt-server\*"; DestDir: "{app}\clew-stt-server"; Components: dictation; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\analysis-server\dist\clew-analysis-server\*"; DestDir: "{app}\clew-analysis-server"; Components: analysis; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 ; Dictation unticked on an update: the old copy goes, so the tray does not offer it.

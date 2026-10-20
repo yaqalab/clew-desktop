@@ -2,7 +2,7 @@
 
 Each section is the text of that version's release on GitHub.
 
-## Unreleased
+## 1.3.0 — 2026-10-20
 
 **The analysis engine** (`analysis-server/`, `clew-analysis-server`): runs regressions, exact and
 rank tests and Cronbach's alpha for Clew in your own copy of R, as a translator: Clew sends one
