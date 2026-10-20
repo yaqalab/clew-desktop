@@ -57,6 +57,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--backend", choices=BACKENDS, default="r")
     p.add_argument("--rscript", default=None, help="Rscript to use, when it is not found by itself")
+    p.add_argument("--python", default=None, help="a Python with pandas, numpy, scipy, statsmodels "
+                   "(default: a Conda environment that has them)")
+    p.add_argument("--pspp", default=None, help="pspp(.exe) to use, when it is not found by itself")
+    p.add_argument("--spss", default=None, help="SPSS Statistics' folder or its Python, when not found by itself")
     p.add_argument("--scripts", default=None, help="a folder of your own R scripts")
     p.add_argument("--timeout", type=float, default=120.0)
     p.add_argument("--allow-origin", action="append", default=[])
@@ -75,9 +79,10 @@ def main(argv: list[str] | None = None) -> int:
     scripts = Path(args.scripts).expanduser() if args.scripts else None
 
     if args.check:
-        state = State("", args.backend, origins, args.rscript, scripts, args.timeout)
+        state = State("", args.backend, origins, args.rscript, scripts, args.timeout,
+                      args.python, args.pspp, args.spss)
         for f in state.found().values():
-            # "R: 4.3.3 at C:\...\Rscript.exe": the tray's Analysis tab reads this line.
+            # "R: 4.3.3 at C:\...\Rscript.exe": the tray's Analysis tab reads these lines.
             if f.ready:
                 print(f"{f.name}: {f.version} at {f.path}", flush=True)
             else:
@@ -97,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         if made:
             print(f"Key (paste it into Clew; --show-key shows it again): {key}", flush=True)
 
-    state = State(key, args.backend, origins, args.rscript, scripts, args.timeout)
+    state = State(key, args.backend, origins, args.rscript, scripts, args.timeout,
+                  args.python, args.pspp, args.spss)
     try:
         server = create_server(state, args.port)
     except OSError as e:

@@ -13,14 +13,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .sps import SUPPORT as SPS_SUPPORT
+
+SPS_FILE = Path(__file__).resolve().parent / "sps.py"
+
 COMMANDS_DIR = Path(__file__).resolve().parent / "commands"
 LEVELS = ("scale", "nominal", "ordinal", "text")
 ROLES = ("dependent", "independent", "groupby")
 # Names a backend may put in a formula or a script: Clew sends the export's safe names.
 NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
 COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
-# Adapter file per backend.
-ADAPTER_FILE = {"r": "r.R", "python": "python.py", "pspp": "pspp.sps", "spss": "spss.sps"}
+# Adapter file per backend; PSPP and SPSS share one generator (sps.py), which says what it covers.
+ADAPTER_FILE = {"r": "r.R", "python": "python.py"}
 
 
 @dataclass
@@ -74,6 +78,9 @@ def load_shipped(root: Path = COMMANDS_DIR) -> dict[str, Command]:
         adapters = {
             b: meta.parent / f for b, f in ADAPTER_FILE.items() if (meta.parent / f).is_file()
         }
+        for dialect, ids in SPS_SUPPORT.items():
+            if cid in ids:
+                adapters[dialect] = SPS_FILE
         out[cid] = Command(
             id=cid,
             version=int(raw.get("version", 1)),
@@ -86,17 +93,17 @@ def load_shipped(root: Path = COMMANDS_DIR) -> dict[str, Command]:
     return out
 
 
-_HEADER = re.compile(r"^#'\s*(title|dependent|independent)\s*:\s*(.*)$")
+_HEADER = re.compile(r"^#'?\s*(title|dependent|independent)\s*:\s*(.*)$")
 
 
 def load_user(folder: Path | None) -> dict[str, Command]:
-    """The researcher's own R scripts: `<name>.R` defining `analyse(d, spec)`, with optional header
-    lines `#' title: ...`, `#' dependent: 1-3`, `#' independent: 0-5`. Clew can choose one by name;
-    it can never send one."""
+    """The researcher's own scripts: `<name>.R` (run by R) or `<name>.py` (run by Python), each
+    defining `analyse(d, spec)`, with optional header lines `#' title: ...` (R) or `# title: ...`
+    (Python), `dependent: 1-3`, `independent: 0-5`. Clew can choose one by name; it can never send one."""
     out: dict[str, Command] = {}
     if folder is None or not folder.is_dir():
         return out
-    for script in sorted(folder.glob("*.R")):
+    for script in sorted([*folder.glob("*.R"), *folder.glob("*.py")]):
         stem = re.sub(r"[^a-z0-9_-]+", "-", script.stem.lower()).strip("-")
         if not stem:
             continue
@@ -127,7 +134,7 @@ def load_user(folder: Path | None) -> dict[str, Command]:
             needs=needs,
             folder=folder,
             user=True,
-            adapters={"r": script},
+            adapters={"r" if script.suffix == ".R" else "python": script},
         )
     return out
 

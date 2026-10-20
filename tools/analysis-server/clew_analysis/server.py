@@ -24,7 +24,17 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from . import API_VERSION, APP_NAME, __version__
-from .backends import BackendError, Found, detect_r, run_r
+from .backends import (
+    BackendError,
+    Found,
+    detect_pspp,
+    detect_python,
+    detect_r,
+    detect_spss,
+    run_python,
+    run_r,
+    run_sps,
+)
 from .catalog import Command, RequestError, check_request, load_shipped, load_user
 
 LOOPBACK_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
@@ -42,11 +52,17 @@ class State:
         rscript: str | None = None,
         scripts: Path | None = None,
         timeout: float = 120.0,
+        python: str | None = None,
+        pspp: str | None = None,
+        spss: str | None = None,
     ) -> None:
         self.key = key
         self.backend = backend
         self.origins = set(origins or [])
         self.rscript = rscript
+        self.python = python
+        self.pspp = pspp
+        self.spss = spss
         self.scripts = scripts
         self.timeout = timeout
         self.failures = 0
@@ -75,9 +91,9 @@ class State:
             if not self._found:
                 self._found = {
                     "r": detect_r(self.rscript),
-                    "python": Found("python", "Python (Conda)", None, "", False, "not yet"),
-                    "pspp": Found("pspp", "PSPP", None, "", False, "not yet"),
-                    "spss": Found("spss", "SPSS", None, "", False, "not yet"),
+                    "python": detect_python(self.python),
+                    "pspp": detect_pspp(self.pspp),
+                    "spss": detect_spss(self.spss),
                 }
             return self._found
 
@@ -220,7 +236,13 @@ def make_handler(state: State) -> type[BaseHTTPRequestHandler]:
                 self._refuse(HTTPStatus.CONFLICT, "busy")
                 return
             try:
-                result = run_r(found.path, command, req, state.timeout)
+                if state.backend == "r":
+                    result = run_r(found.path, command, req, state.timeout)
+                elif state.backend == "python":
+                    result = run_python(found.path, command, req, state.timeout)
+                else:
+                    result = run_sps(state.backend, found.path, command, req, state.timeout)
+                    result["backend"]["version"] = found.version
             except BackendError as e:
                 self._refuse(HTTPStatus.UNPROCESSABLE_ENTITY, str(e))
                 return
