@@ -1,0 +1,36 @@
+{
+  "main": "clew",
+  "sites": [
+    {
+      "name": "clew",
+      "host": "clew.alefa.net",
+      "repo": "https://github.com/yaqalab/tadidy.git",
+      "ref": "main",
+      "envFile": ".env",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build:hub",
+      "outputDir": "apps/hub/dist",
+      "devServer": "vite",
+      "devRoot": "apps/hub",
+      "devPrepare": "npm run pwa -- hub && npm run predev -w @clew/hub",
+      "devPort": 5173
+    },
+    {
+      "name": "yaqatw",
+      "host": "yaqatw.alefa.net",
+      "repo": "https://github.com/yaqalab/yaqatw.git",
+      "ref": "main",
+      "envFile": ".env",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build",
+      "buildEnv": {
+        "NODE_OPTIONS": "--max-old-space-size=6144"
+      },
+      "outputDir": "addin",
+      "devServer": "webpack",
+      "devRoot": ".",
+      "devPrepare": null,
+      "devPort": 3000
+    }
+  ]
+}

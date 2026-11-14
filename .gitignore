@@ -5,6 +5,10 @@
 sites/*/
 sites.local.json
 
+# Build-time settings for each app (copied from the apps' own .env; never committed)
+env/*
+!env/README.md
+
 # Dependencies
 node_modules/
 

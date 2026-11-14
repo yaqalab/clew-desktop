@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+    />
+    <title>Choose what to share</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font: 14px/1.4 system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        box-sizing: border-box;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 13px;
+        margin: 12px 0 6px;
+        opacity: 0.7;
+      }
+      .list {
+        flex: 1;
+        overflow: auto;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 10px;
+      }
+      button.source {
+        all: unset;
+        cursor: pointer;
+        border: 2px solid transparent;
+        border-radius: 8px;
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      button.source:hover,
+      button.source:focus-visible {
+        border-color: Highlight;
+      }
+      button.source[aria-pressed='true'] {
+        border-color: Highlight;
+        background: color-mix(in srgb, Highlight 15%, transparent);
+      }
+      button.source img,
+      button.source .blank {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: contain;
+        background: color-mix(in srgb, CanvasText 8%, transparent);
+        border-radius: 4px;
+      }
+      button.source span {
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding-top: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Choose what to share</h1>
+    <div class="list" id="list"></div>
+    <footer>
+      <button id="cancel" type="button">Cancel</button>
+      <button id="share" type="button" disabled>Share</button>
+    </footer>
+    <script>
+      let selected = null;
+      const list = document.getElementById('list');
+      const share = document.getElementById('share');
+
+      function section(title, items) {
+        if (!items.length) return;
+        const h = document.createElement('h2');
+        h.textContent = title;
+        const grid = document.createElement('div');
+        grid.className = 'grid';
+        for (const s of items) {
+          const b = document.createElement('button');
+          b.className = 'source';
+          b.type = 'button';
+          b.setAttribute('aria-pressed', 'false');
+          const thumb = s.thumbnail ? document.createElement('img') : document.createElement('div');
+          if (s.thumbnail) {
+            thumb.src = s.thumbnail;
+            thumb.alt = '';
+          } else thumb.className = 'blank';
+          const label = document.createElement('span');
+          label.textContent = s.name;
+          label.title = s.name;
+          b.append(thumb, label);
+          b.addEventListener('click', () => {
+            for (const other of list.querySelectorAll('button.source')) other.setAttribute('aria-pressed', 'false');
+            b.setAttribute('aria-pressed', 'true');
+            selected = s.id;
+            share.disabled = false;
+          });
+          b.addEventListener('dblclick', () => window.picker.choose(s.id));
+          grid.append(b);
+        }
+        list.append(h, grid);
+      }
+
+      window.picker.sources().then((sources) => {
+        section('Screens', sources.filter((s) => s.kind === 'screen'));
+        section('Windows', sources.filter((s) => s.kind === 'window'));
+        list.querySelector('button.source')?.focus();
+      });
+      share.addEventListener('click', () => selected && window.picker.choose(selected));
+      document.getElementById('cancel').addEventListener('click', () => window.picker.choose(null));
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.picker.choose(null);
+      });
+    </script>
+  </body>
+</html>

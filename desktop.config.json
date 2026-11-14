@@ -1,0 +1,20 @@
+{
+  "inAppPopupHosts": [
+    "accounts.google.com",
+    "www.dropbox.com",
+    "login.microsoftonline.com",
+    "login.live.com"
+  ],
+  "grantedPermissions": [
+    "media",
+    "display-capture",
+    "clipboard-read",
+    "clipboard-sanitized-write",
+    "notifications",
+    "fullscreen",
+    "fileSystem",
+    "storage-access",
+    "persistent-storage",
+    "pointerLock"
+  ]
+}

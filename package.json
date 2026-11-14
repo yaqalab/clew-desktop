@@ -1,0 +1,77 @@
+{
+  "name": "clew-desktop",
+  "productName": "Clew",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clew and yaqatw as an installable desktop app, served under their real origins.",
+  "license": "UNLICENSED",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "sources": "node scripts/fetch-sources.mjs",
+    "build:sites": "node scripts/build-sites.mjs",
+    "dist": "npm run sources && npm run build:sites && electron-builder",
+    "pack": "electron-builder --dir",
+    "start": "node scripts/electron.mjs",
+    "dev": "node scripts/dev.mjs",
+    "smoke": "node scripts/electron.mjs --smoke",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "net.alefa.clew",
+    "productName": "Clew",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "sites.config.json",
+      "desktop.config.json"
+    ],
+    "extraResources": [
+      {
+        "from": "sites",
+        "to": "sites",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.education",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Clew uses the camera when you scan a code or record an observation.",
+        "NSMicrophoneUsageDescription": "Clew uses the microphone for dictation, recordings and calls."
+      }
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Education"
+    }
+  },
+  "dependencies": {
+    "selfsigned": "5.5.0"
+  }
+}
