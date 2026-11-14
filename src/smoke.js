@@ -53,7 +53,7 @@ async function finalUrl(ses, url) {
   }
 }
 
-async function run(win, ses, server, tools) {
+async function run(win, ses, server, tools, folder) {
   const { stats } = server;
   setTimeout(() => {
     console.error('smoke: timed out');
@@ -136,6 +136,30 @@ async function run(win, ses, server, tools) {
       const seen = await frame.executeJavaScript('typeof window.alefaDesktop');
       assert(seen === 'object', `alefaDesktop in frame: ${seen}`);
       return frame.url;
+    });
+
+    await check('Clew has its folder (write, list, read, remove), yaqatw does not', async () => {
+      const r = await js(`(async () => {
+        const f = window.alefaDesktop.folder;
+        const bytes = new Uint8Array([1, 2, 3, 250]);
+        await f.write('Smoke vault/research/memo/x.bin', bytes);
+        const listed = (await f.list('Smoke vault')).map((i) => i.path);
+        const back = Array.from(await f.read('Smoke vault/research/memo/x.bin'));
+        let escaped = 'refused';
+        try { await f.write('../outside.bin', bytes); escaped = 'written'; } catch {}
+        await f.remove('Smoke vault/research/memo/x.bin');
+        const after = (await f.list('', { recursive: false })).map((i) => i.path);
+        return { listed, back, escaped, after, root: await f.root() };
+      })()`);
+      assert(r.listed.join() === 'research/memo/x.bin', `listed ${r.listed}`);
+      assert(r.back.join() === '1,2,3,250', `read ${r.back}`);
+      assert(r.escaped === 'refused', 'a path outside the folder was written');
+      assert(r.after.length === 0, `left behind: ${r.after}`);
+      assert(r.root === folder.root, r.root);
+      const frame = win.webContents.mainFrame.framesInSubtree.find((f) => f.origin === 'https://yaqatw.alefa.net');
+      const inFrame = frame ? await frame.executeJavaScript('typeof window.alefaDesktop.folder') : 'no frame';
+      assert(inFrame === 'undefined', `yaqatw sees folder: ${inFrame}`);
+      return `round trip in ${r.root}; refused ../; yaqatw: none`;
     });
 
     await check('external requests reach the network with Origin/Referer as a browser sends them', async () => {
@@ -252,6 +276,7 @@ async function run(win, ses, server, tools) {
     });
   } finally {
     echoSrv.close();
+    if (folder) require('node:fs').rmSync(folder.root, { recursive: true, force: true });
   }
 
   let failed = 0;

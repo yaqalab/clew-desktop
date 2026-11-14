@@ -32,7 +32,7 @@ let tools = null;
 let quitting = false;
 
 const preloadArg = `--alefa-desktop=${encodeURIComponent(
-  JSON.stringify({ version: app.getVersion(), origins: sites.origins }),
+  JSON.stringify({ version: app.getVersion(), origins: sites.origins, folderOrigin: sites.main.origin }),
 )}`;
 
 /** The webPreferences every app window and in-app popup gets. */
@@ -335,6 +335,15 @@ app.whenReady().then(async () => {
   const server = await network.install(appSession, sites);
   permissions.install(appSession, sites);
   screenPicker.install(appSession, sites, () => BrowserWindow.getFocusedWindow() ?? mainWindow);
+  // Documents/Clew, for Clew's copy of each vault (`folder.js`); a throwaway one in a smoke run.
+  const folder = require('./folder-ipc').install({
+    origin: sites.main.origin,
+    root:
+      process.env.CLEW_FOLDER_ROOT ||
+      (SMOKE
+        ? path.join(require('node:os').tmpdir(), `clew-smoke-folder-${process.pid}`)
+        : path.join(app.getPath('documents'), 'Clew')),
+  });
   if (WITH_TOOLS) {
     tools = new Tools({
       openApp: showMainWindow,
@@ -356,7 +365,7 @@ app.whenReady().then(async () => {
   win.hiddenAtStart = HIDDEN;
   if (SMOKE) {
     require('./smoke')
-      .run(win, appSession, server, tools)
+      .run(win, appSession, server, tools, folder)
       .catch((err) => {
         console.error(err);
         app.exit(1);

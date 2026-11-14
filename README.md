@@ -52,6 +52,13 @@ All of it is in [sites.config.json](sites.config.json). A third app is one more 
   system picker, elsewhere a small window/screen chooser.
 - **`window.alefaDesktop`** (preload, bundled origins only): `isDesktop`, `version`, `platform`,
   `buildInfo()`, `about()`.
+- **`window.alefaDesktop.folder`** (Clew's origin only, checked again in the main process on
+  every call): one folder on this computer, `Documents\Clew`, where Clew keeps an encrypted copy
+  of each vault beside its cloud (Clew's `docs/44`). `root()`, `list(dir, { recursive })`,
+  `read(path)`, `write(path, bytes)` (whole or not at all), `remove(path)`, `reveal(path)`.
+  Paths are relative and `/`-separated; `..`, absolute paths, drives, backslashes and links
+  leading out are refused ([src/folder.js](src/folder.js)). `CLEW_FOLDER_ROOT` points it
+  elsewhere; a smoke run uses a throwaway folder.
 
 ## Setup
 
