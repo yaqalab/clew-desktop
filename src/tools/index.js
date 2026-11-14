@@ -78,9 +78,12 @@ class Tools {
    *        update"), shown in the tray above Quit
    * @param {{ snapshot: () => object, check: () => Promise<object>, restart: () => void }} [opts.updates]
    *        the site updates (src/site-updates.js) that Settings › General shows and checks
+   * @param {() => BrowserWindow | null} [opts.parentWindow]  the window Settings opens as a modal
+   *        over, when there is one on screen (from the tray with Clew hidden, it opens on its own)
    */
-  constructor({ openApp, quitApp, firstRunLoginItem = false, appItems = () => [], updates = null }) {
+  constructor({ openApp, quitApp, firstRunLoginItem = false, appItems = () => [], updates = null, parentWindow = () => null }) {
     this.openApp = openApp;
+    this.parentWindow = parentWindow;
     this.quitApp = quitApp;
     this.appItems = appItems;
     this.updates = updates;
@@ -299,7 +302,11 @@ class Tools {
       this.settingsWin.focus();
       return;
     }
+    const parent = this.parentWindow() ?? undefined;
     this.settingsWin = new BrowserWindow({
+      parent,
+      modal: Boolean(parent),
+      minimizable: !parent,
       width: 860,
       height: 680,
       minWidth: 640,

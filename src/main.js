@@ -341,6 +341,7 @@ app.whenReady().then(async () => {
       quitApp,
       firstRunLoginItem: app.isPackaged && !SMOKE,
       appItems: restartItems,
+      parentWindow: () => (mainWindow?.isVisible() && !mainWindow.isMinimized() ? mainWindow : null),
       updates: {
         snapshot: updatesSnapshot,
         check: () => checkSiteUpdates().then(updatesSnapshot),
