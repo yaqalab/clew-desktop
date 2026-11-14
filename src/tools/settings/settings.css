@@ -176,3 +176,11 @@ progress {
   padding: 8px 14px;
   border-radius: 6px;
 }
+
+/* Updates: each site's name beside the first line of its own lines. */
+#update-sites {
+  align-items: start;
+}
+#update-sites .muted {
+  margin: 2px 0 0;
+}

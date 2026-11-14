@@ -154,6 +154,14 @@
         <h2>General</h2>
         <label class="check"><input id="login" type="checkbox" /> Start Clew when I sign in (in the tray, without a window)</label>
         <p><button id="open-app">Open Clew</button></p>
+        <h3>Updates</h3>
+        <p class="muted" id="updates-note"></p>
+        <div class="grid" id="update-sites"></div>
+        <p class="row">
+          <button id="check-updates">Check for updates</button>
+          <button id="restart-update" hidden>Restart to update</button>
+          <span class="muted" id="update-state" role="status"></span>
+        </p>
         <h3>Activity</h3>
         <pre id="log" class="log"></pre>
         <p class="muted" id="about"></p>

@@ -76,11 +76,58 @@ function activateSiteUpdates() {
   }
 }
 
-async function checkSiteUpdates() {
+/** The last check: when, whether one is running, and per site `{ status, id?, minDesktop?, error? }`. */
+const lastCheck = { at: null, results: {} };
+let checking = null;
+
+/** What Settings › General shows. */
+function updatesSnapshot() {
+  return {
+    enabled: SITE_UPDATES,
+    checking: Boolean(checking),
+    checkedAt: lastCheck.at,
+    intervalHours: desktopConfig.siteUpdates.intervalHours || 4,
+    sites: sites.list.map((site) => {
+      const info = sites.buildInfo(site);
+      const next = waiting.get(site.name);
+      return {
+        name: site.name,
+        host: site.host,
+        commit: info?.commit ?? null,
+        committedAt: info?.committedAt ?? null,
+        builtAt: info?.builtAt ?? null,
+        from: site.root.startsWith(siteUpdatesDir()) ? 'update' : 'installer',
+        waiting: next ? { commit: next.commit, committedAt: next.committedAt } : null,
+        last: lastCheck.results[site.name] ?? null,
+      };
+    }),
+  };
+}
+
+function updatesChanged() {
+  buildMenu();
+  tools?.updateTray();
+  tools?.send('tools:updates', updatesSnapshot());
+}
+
+/** Checks every site; a check asked for while one runs joins it. */
+function checkSiteUpdates() {
+  if (!SITE_UPDATES) return Promise.resolve();
+  if (!checking) {
+    checking = runSiteUpdateCheck().finally(() => {
+      checking = null;
+      updatesChanged();
+    });
+    updatesChanged();
+  }
+  return checking;
+}
+
+async function runSiteUpdateCheck() {
   // The live sites, through the default session: it is not diverted to the bundled files.
   const base = process.env.CLEW_SITE_UPDATES_BASE;
-  let found = false;
   for (const site of sites.list) {
+    let result;
     try {
       const current = waiting.get(site.name) ?? sites.buildInfo(site);
       const r = await siteUpdates.check(siteUpdatesDir(), site.name, {
@@ -89,21 +136,20 @@ async function checkSiteUpdates() {
         current,
         fetchImpl: (url, opts) => net.fetch(url, opts),
       });
+      result = { status: r.status, id: r.build?.id, minDesktop: r.build?.minDesktop };
       if (r.status === 'ready') {
         waiting.set(site.name, r.info);
-        found = true;
         console.log(`[updates] ${site.name}: ${r.build.id} downloaded, used from the next start`);
       } else if (r.status === 'needs-app') {
         console.log(`[updates] ${site.name}: ${r.build.id} needs Clew Desktop ${r.build.minDesktop}`);
       }
     } catch (err) {
+      result = { status: 'error', error: err.message };
       console.warn(`[updates] ${site.name}: ${err.message}`);
     }
+    lastCheck.results[site.name] = result;
   }
-  if (found) {
-    buildMenu();
-    tools?.updateTray();
-  }
+  lastCheck.at = new Date().toISOString();
 }
 
 function startSiteUpdates() {
@@ -116,6 +162,12 @@ function startSiteUpdates() {
 function restartItems() {
   if (!waiting.size) return [];
   return [{ label: 'Restart to update', click: () => restartApp() }, { type: 'separator' }];
+}
+
+/** Help › Check for updates: Settings › General shows the check and its result. */
+function checkFromMenu() {
+  tools?.openSettings('general');
+  checkSiteUpdates();
 }
 
 function restartApp() {
@@ -203,7 +255,14 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
-    { role: 'help', submenu: [...restartItems(), ...(isMac ? [] : [about])] },
+    {
+      role: 'help',
+      submenu: [
+        ...restartItems(),
+        ...(SITE_UPDATES ? [{ label: 'Check for updates…', click: () => checkFromMenu() }] : []),
+        ...(isMac ? [] : [about]),
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -282,6 +341,11 @@ app.whenReady().then(async () => {
       quitApp,
       firstRunLoginItem: app.isPackaged && !SMOKE,
       appItems: restartItems,
+      updates: {
+        snapshot: updatesSnapshot,
+        check: () => checkSiteUpdates().then(updatesSnapshot),
+        restart: restartApp,
+      },
     });
     tools.start();
   }

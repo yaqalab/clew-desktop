@@ -409,6 +409,66 @@ $('login').addEventListener('change', async () => {
 });
 $('open-app').addEventListener('click', () => window.tools.openApp());
 
+// Updates (src/site-updates.js, driven from main.js)
+const SITE_NAMES = { clew: 'Clew', yaqatw: 'yaqatw' };
+const when = (iso) => (iso ? new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
+const short = (commit) => (commit ? commit.slice(0, 8) : '?');
+
+function textEl(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+
+function renderUpdates(u) {
+  if (!u) return;
+  $('updates-note').textContent = u.enabled
+    ? `Clew and yaqatw update themselves from their websites: checked when Clew starts and every ${u.intervalHours} hours, used from the next start.`
+    : 'Updates are off in this run (development or test).';
+  const grid = $('update-sites');
+  grid.replaceChildren();
+  for (const s of u.sites) {
+    grid.append(textEl('span', SITE_NAMES[s.name] ?? s.name));
+    const cell = textEl('div');
+    const date = s.committedAt || s.builtAt;
+    cell.append(
+      textEl('div', `${short(s.commit)}${date ? ` · ${when(date)}` : ''} · ${s.from === 'update' ? 'updated' : 'from the installer'}`),
+    );
+    if (s.waiting) {
+      cell.append(textEl('div', `Ready: ${short(s.waiting.commit)} · ${when(s.waiting.committedAt)}, used from the next start`, 'muted'));
+    }
+    if (s.last?.status === 'needs-app') {
+      cell.append(textEl('div', `A newer build needs Clew Desktop ${s.last.minDesktop}: install the new version`, 'muted'));
+    } else if (s.last?.status === 'error') {
+      cell.append(textEl('div', `Last check failed: ${s.last.error}`, 'muted'));
+    }
+    grid.append(cell);
+  }
+  const ready = u.sites.some((s) => s.waiting);
+  const failed = u.sites.some((s) => s.last?.status === 'error');
+  $('restart-update').hidden = !ready;
+  $('check-updates').disabled = !u.enabled || u.checking;
+  $('update-state').textContent = u.checking
+    ? 'Checking…'
+    : !u.checkedAt
+      ? u.enabled
+        ? 'Not checked yet'
+        : ''
+      : `Checked ${when(u.checkedAt)}${ready ? ' · update ready' : failed ? '' : ' · up to date'}`;
+}
+
+$('check-updates').addEventListener('click', async () => {
+  $('check-updates').disabled = true;
+  $('update-state').textContent = 'Checking…';
+  const u = await run(() => window.tools.checkUpdates());
+  if (u) renderUpdates(u);
+  else renderUpdates(await window.tools.updates());
+});
+$('restart-update').addEventListener('click', () => window.tools.restartToUpdate());
+window.tools.onUpdates(renderUpdates);
+window.tools.updates().then(renderUpdates);
+
 // Tabs
 function showTab(name) {
   for (const b of document.querySelectorAll('[role=tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === name));

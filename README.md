@@ -129,7 +129,9 @@ up their newer builds by itself, **straight from the live sites** ([src/site-upd
    built from the site and commit, and every part and the whole must match their size and
    SHA-256. It unpacks into `userData/site-updates/<name>/`.
 3. **It switches at the next start** (a running page never has its files swapped underneath it);
-   **Restart to update** appears in the tray and the Help menu meanwhile. A downloaded build is
+   **Restart to update** appears in the tray and the Help menu meanwhile. **Settings › General ›
+   Updates** shows which build of each site is running and what is waiting, and has **Check for
+   updates** (also in the Help menu). A downloaded build is
    used only while it is newer than the installer's own, so a newer installer wins.
 
 The trust is the site's own: the app runs what `clew.alefa.net` serves, as a browser does. No

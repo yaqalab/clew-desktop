@@ -74,12 +74,16 @@ class Tools {
    * @param {() => void} opts.quitApp   quits everything
    * @param {boolean} [opts.firstRunLoginItem]  on the first run, start at login (the installed
    *        app only: a development or test run must never register itself with the system)
-   * - `appItems()`: menu items of the app's own (e.g. "Restart to update"), shown above Quit
+   * @param {() => object[]} [opts.appItems]  menu items of the app's own (e.g. "Restart to
+   *        update"), shown in the tray above Quit
+   * @param {{ snapshot: () => object, check: () => Promise<object>, restart: () => void }} [opts.updates]
+   *        the site updates (src/site-updates.js) that Settings › General shows and checks
    */
-  constructor({ openApp, quitApp, firstRunLoginItem = false, appItems = () => [] }) {
+  constructor({ openApp, quitApp, firstRunLoginItem = false, appItems = () => [], updates = null }) {
     this.openApp = openApp;
     this.quitApp = quitApp;
     this.appItems = appItems;
+    this.updates = updates;
     this.firstRunLoginItem = firstRunLoginItem;
     this.tray = null;
     this.settingsWin = null;
@@ -352,6 +356,9 @@ class Tools {
       const r = await dialog.showOpenDialog(this.settingsWin, { title, properties: ['openFile'] });
       return r.canceled ? null : r.filePaths[0];
     });
+    handle('tools:updates', () => this.updates?.snapshot() ?? null);
+    handle('tools:check-updates', () => this.updates?.check() ?? null);
+    handle('tools:restart-to-update', () => this.updates?.restart());
     handle('tools:login-item', () => loginItem());
     handle('tools:set-login-item', (on) => {
       setLoginItem(Boolean(on));
