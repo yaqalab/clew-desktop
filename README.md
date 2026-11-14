@@ -51,7 +51,11 @@ All of it is in [sites.config.json](sites.config.json). A third app is one more 
   the two bundled origins, a yaqatw frame inside Clew included. Screen sharing uses the macOS
   system picker, elsewhere a small window/screen chooser.
 - **`window.alefaDesktop`** (preload, bundled origins only): `isDesktop`, `version`, `platform`,
-  `buildInfo()`, `about()`.
+  `buildInfo()`, `about()`, `onBeforeQuit(fn)`.
+- **Quitting waits for unsaved work.** Before the app quits, restarts for an update or reloads a
+  page, it asks each app page to finish what it registered with `onBeforeQuit` and waits, five
+  seconds at most ([src/settle.js](src/settle.js)). Clew writes out the edits it still holds
+  there, so the last words typed are not lost to Quit.
 - **`window.alefaDesktop.folder`** (Clew's origin only, checked again in the main process on
   every call): one folder on this computer, `Documents\Clew`, where Clew keeps an encrypted copy
   of each vault beside its cloud (Clew's `docs/44`). `root()`, `list(dir, { recursive })`,
@@ -59,6 +63,32 @@ All of it is in [sites.config.json](sites.config.json). A third app is one more 
   Paths are relative and `/`-separated; `..`, absolute paths, drives, backslashes and links
   leading out are refused ([src/folder.js](src/folder.js)). `CLEW_FOLDER_ROOT` points it
   elsewhere; a smoke run uses a throwaway folder.
+
+## Your data on this computer
+
+Clew is used for research with people in it. What the app keeps on this computer, and what
+protects it:
+
+| Where | What | Encrypted |
+|---|---|---|
+| The app's data folder (`%APPDATA%\Clew` on Windows, `~/Library/Application Support/Clew` on macOS, `~/.config/Clew` on Linux) | Clew's vaults, yaqatw's own storage, downloaded site updates, settings | Clew's vaults: yes, with the vault's passphrase. **yaqatw's storage: no** |
+| `Documents\Clew\<vault name>\` | A copy of each vault beside its cloud (on by default; Settings › Copy on this computer in Clew) | Contents: yes. **Folder and file names: no** — they carry the vault's name and the titles of transcripts, papers and files |
+
+Worth knowing before you rely on it:
+
+- **`Documents` is often synced by OneDrive or iCloud Drive.** The vault copy then reaches that
+  cloud too. It is encrypted, but its names are readable. Turn the copy off per vault in Clew's
+  Settings if that is not wanted.
+- **yaqatw keeps its codes and coded passages unencrypted** in the app's data folder. Clew cannot
+  lock or wipe them, and locking a vault does not hide them. Use a computer account only you
+  can open.
+- **Removing a vault in Clew does not delete its folder copy**, and **uninstalling the app keeps
+  both the data folder and `Documents\Clew`**. On a shared or borrowed computer, delete those two
+  folders yourself when you are done.
+- **Quit waits for what you are typing** (a few seconds at most). Switching the computer off
+  without quitting does not: lock the vault or quit first.
+- **A vault that is only on this computer is one disk failure from gone.** Connect a cloud in
+  Clew, or keep the folder copy on.
 
 ## Setup
 
@@ -123,9 +153,9 @@ up their newer builds by itself, **straight from the live sites** ([src/site-upd
    with `scripts/desktop-package.mjs` in each app's repo (npm's `postbuild:hub` in Clew,
    `postbuild` in yaqatw). On Cloudflare (`CF_PAGES=1`), for `main` only, it adds to the
    deployed site:
-   - `/desktop/<name>-site-<commit12>.part1…N`: the whole output, with its `.build-info.json`,
+   - `/desktop/<name>-site-<commit12>.part1…N`: the whole output, with its `.build-info.json`,
      as one `.tar.gz` cut in parts of at most 20 MiB (Cloudflare Pages refuses files over
-     25 MiB; today each site is one part, 17–20 MB);
+     25 MiB; today each site is one part, 17–20 MB);
    - `/desktop/version.json`: commit, commit date, size, SHA-256, the parts, `minDesktop`.
 
    Local builds, this repo's included, are unchanged.
