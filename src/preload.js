@@ -26,6 +26,19 @@ const folder = Object.freeze({
   reveal: (path) => ipcRenderer.invoke('folder:reveal', path),
 });
 
+/**
+ * What the page asked to finish before the app quits, restarts or reloads it: Clew writes out
+ * the edits it still holds (`src/settle.js`). The main process sends `alefa:settle`; the answer
+ * goes back once every handler has finished, whatever it did. With no handler — yaqatw, a
+ * sign-in popup, an older Clew — the answer is immediate.
+ */
+const beforeQuit = new Set();
+ipcRenderer.on('alefa:settle', (_event, id) => {
+  Promise.allSettled([...beforeQuit].map((fn) => Promise.resolve().then(fn))).then(() =>
+    ipcRenderer.send('alefa:settled', id),
+  );
+});
+
 if (info && info.origins.includes(location.origin)) {
   contextBridge.exposeInMainWorld(
     'alefaDesktop',
@@ -37,6 +50,13 @@ if (info && info.origins.includes(location.origin)) {
       buildInfo: () => ipcRenderer.invoke('alefa:build-info'),
       /** Opens the About dialog. */
       about: () => ipcRenderer.invoke('alefa:about'),
+      /**
+       * Registers work to finish before the app quits, restarts or reloads the page: `fn` may
+       * return a promise, which is waited for (a few seconds at most).
+       */
+      onBeforeQuit: (fn) => {
+        if (typeof fn === 'function') beforeQuit.add(fn);
+      },
       ...(location.origin === info.folderOrigin ? { folder } : {}),
     }),
   );

@@ -8,6 +8,7 @@ const network = require('./network');
 const policy = require('./policy');
 const permissions = require('./permissions');
 const screenPicker = require('./screen-picker');
+const { createSettler } = require('./settle');
 const { Tools } = require('./tools');
 
 const PARTITION = 'persist:alefa';
@@ -30,6 +31,29 @@ let mainWindow = null;
 let appSession = null;
 let tools = null;
 let quitting = false;
+
+/** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
+const settle = createSettler(ipcMain);
+
+/** The app's own pages: the main window and its in-app popups, not the Settings window. */
+function appContents() {
+  return BrowserWindow.getAllWindows()
+    .map((w) => w.webContents)
+    .filter((c) => c && !c.isDestroyed() && c.session === appSession);
+}
+
+/** Reloads a window once its page has written out what it holds. */
+function reloadSettled(win, ignoreCache = false) {
+  const contents = win?.webContents;
+  if (!contents || contents.isDestroyed()) return;
+  const reload = () => {
+    if (contents.isDestroyed()) return;
+    if (ignoreCache) contents.reloadIgnoringCache();
+    else contents.reload();
+  };
+  if (contents.session === appSession) settle([contents]).then(reload);
+  else reload();
+}
 
 const preloadArg = `--alefa-desktop=${encodeURIComponent(
   JSON.stringify({ version: app.getVersion(), origins: sites.origins, folderOrigin: sites.main.origin }),
@@ -58,7 +82,7 @@ function childWindowOptions() {
 // Site updates
 
 const siteUpdatesDir = () => path.join(app.getPath('userData'), 'site-updates');
-/** name → build info of a newer build, downloaded and used from the next start. */
+/** name → build info of a newer build, downloaded and used from the next start. */
 const waiting = new Map();
 
 /** At start, before anything is served: a newer downloaded build replaces the installer's. */
@@ -164,7 +188,7 @@ function restartItems() {
   return [{ label: 'Restart to update', click: () => restartApp() }, { type: 'separator' }];
 }
 
-/** Help › Check for updates: Settings › General shows the check and its result. */
+/** Help › Check for updates: Settings › General shows the check and its result. */
 function checkFromMenu() {
   tools?.openSettings('general');
   checkSiteUpdates();
@@ -233,7 +257,7 @@ function buildMenu() {
           {
             label: 'File',
             submenu: [
-              { label: 'Settings…', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() },
+              { label: 'Settings…', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() },
               { type: 'separator' },
               { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => quitApp() },
             ],
@@ -243,8 +267,13 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
+        // Not the stock roles: those reload at once, in the middle of a save.
+        { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: (_item, win) => reloadSettled(win) },
+        {
+          label: 'Force Reload',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: (_item, win) => reloadSettled(win, true),
+        },
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
@@ -259,7 +288,7 @@ function buildMenu() {
       role: 'help',
       submenu: [
         ...restartItems(),
-        ...(SITE_UPDATES ? [{ label: 'Check for updates…', click: () => checkFromMenu() }] : []),
+        ...(SITE_UPDATES ? [{ label: 'Check for updates…', click: () => checkFromMenu() }] : []),
         ...(isMac ? [] : [about]),
       ],
     },
@@ -317,16 +346,24 @@ function quitApp() {
 
 app.on('second-instance', () => showMainWindow());
 
-// The audio server is asked to stop before the app goes (it would end with its stdin anyway).
-let toolsStopped = false;
+// Before the app goes, however it was asked to (the menu, the tray, Restart to update, the
+// system): the pages write out what they still hold — an edit inside its save delay was lost
+// otherwise — and the audio server is asked to stop (it would end with its stdin anyway).
+let readyToQuit = false;
+let leaving = false;
 app.on('before-quit', (event) => {
   quitting = true;
-  if (!tools || toolsStopped) return;
+  if (readyToQuit) return;
   event.preventDefault();
-  tools.stop().finally(() => {
-    toolsStopped = true;
-    app.quit();
-  });
+  if (leaving) return;
+  leaving = true;
+  settle(appContents())
+    .then(() => (tools ? tools.stop() : undefined))
+    .catch(() => undefined)
+    .finally(() => {
+      readyToQuit = true;
+      app.quit();
+    });
 });
 
 app.whenReady().then(async () => {
