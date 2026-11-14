@@ -146,7 +146,8 @@ async function check(dir, name, { at, appVersion, current, signal, fetchImpl = f
     cache: 'no-store',
     headers: { 'cache-control': 'no-cache' },
   });
-  if (res.status === 404) return { status: 'none' };
+  // A single-page site answers a missing file with its page (200, HTML): nothing published either.
+  if (res.status === 404 || /text\/html/i.test(res.headers.get('content-type') || '')) return { status: 'none' };
   if (!res.ok) throw new Error(`could not read version.json (${res.status})`);
   const build = parse(await res.json(), name, at);
   if (!isNewer(build, current)) return { status: 'current', build };

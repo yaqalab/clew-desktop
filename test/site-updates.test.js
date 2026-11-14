@@ -147,6 +147,18 @@ test('a site that publishes nothing for the desktop is not an error', async () =
   } finally {
     server.close();
   }
+  // Nor is a single-page site that answers every missing file with its page.
+  const spa = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end('<!doctype html><div id="app"></div>');
+  });
+  await new Promise((r) => spa.listen(0, '127.0.0.1', r));
+  try {
+    const at = `http://127.0.0.1:${spa.address().port}/desktop`;
+    assert.equal((await updates.check(tmp('upd-'), 'clew', opts(at, bundled))).status, 'none');
+  } finally {
+    spa.close();
+  }
 });
 
 test('part addresses come from the site and commit, never from version.json', () => {
