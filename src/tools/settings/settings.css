@@ -1,0 +1,178 @@
+:root {
+  color-scheme: light dark;
+  font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --line: color-mix(in srgb, CanvasText 15%, transparent);
+  --soft: color-mix(in srgb, CanvasText 60%, transparent);
+  --ok: #2e7d32;
+  --warn: #b26a00;
+  --bad: #c62828;
+}
+body {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  height: 100vh;
+}
+nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 8px;
+  border-right: 1px solid var(--line);
+}
+nav button {
+  all: unset;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+nav button:hover {
+  background: color-mix(in srgb, CanvasText 6%, transparent);
+}
+nav button[aria-selected='true'] {
+  background: color-mix(in srgb, Highlight 18%, transparent);
+  font-weight: 600;
+}
+nav button:focus-visible {
+  outline: 2px solid Highlight;
+}
+main {
+  overflow: auto;
+  padding: 8px 28px 40px;
+}
+h2 {
+  font-size: 18px;
+  margin: 16px 0 4px;
+}
+h3 {
+  font-size: 14px;
+  margin: 22px 0 6px;
+}
+.muted {
+  color: var(--soft);
+  margin: 4px 0 8px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 14px;
+  align-items: center;
+  margin-top: 10px;
+}
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+}
+.list li:first-child {
+  border-top: none;
+}
+.list li .grow {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list li.empty {
+  color: var(--soft);
+}
+.state::before {
+  content: '●';
+  margin-right: 6px;
+}
+.state.ok::before {
+  color: var(--ok);
+}
+.state.warn::before {
+  color: var(--warn);
+}
+.state.bad::before {
+  color: var(--bad);
+}
+.state.off::before {
+  color: var(--soft);
+}
+.secret,
+.path {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  min-width: 14em;
+  overflow-wrap: anywhere;
+}
+input[type='number'] {
+  width: 7em;
+}
+input[type='url'] {
+  width: 22em;
+}
+button.link {
+  all: unset;
+  cursor: pointer;
+  text-decoration: underline;
+  color: LinkText;
+}
+.models {
+  border-collapse: collapse;
+  margin: 6px 0;
+  width: 100%;
+}
+.models td,
+.models th {
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.models th {
+  font-weight: 600;
+  color: var(--soft);
+}
+.banner {
+  background: color-mix(in srgb, var(--bad) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.log {
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+progress {
+  width: 100%;
+}
+.toast {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  background: CanvasText;
+  color: Canvas;
+  padding: 8px 14px;
+  border-radius: 6px;
+}

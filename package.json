@@ -12,12 +12,14 @@
   "scripts": {
     "sources": "node scripts/fetch-sources.mjs",
     "build:sites": "node scripts/build-sites.mjs",
-    "dist": "npm run sources && npm run build:sites && electron-builder",
+    "build:tools": "node scripts/build-tools.mjs",
+    "dist": "npm run sources && npm run build:sites && npm run build:tools && electron-builder",
     "pack": "electron-builder --dir",
     "start": "node scripts/electron.mjs",
     "dev": "node scripts/dev.mjs",
     "smoke": "node scripts/electron.mjs --smoke",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "package:dictation": "node scripts/package-dictation.mjs"
   },
   "devDependencies": {
     "electron": "45.3.2",
@@ -40,6 +42,13 @@
       {
         "from": "sites",
         "to": "sites",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "tools-dist",
+        "to": "tools",
         "filter": [
           "**/*"
         ]

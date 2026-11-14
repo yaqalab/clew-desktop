@@ -6,9 +6,15 @@ const network = require('./network');
 const policy = require('./policy');
 const permissions = require('./permissions');
 const screenPicker = require('./screen-picker');
+const { Tools } = require('./tools');
 
 const PARTITION = 'persist:alefa';
 const SMOKE = process.argv.includes('--smoke');
+// Started at login: the tray only, no window until asked for.
+const HIDDEN = process.argv.includes('--hidden');
+// The tools (tray, audio server) stay out of the smoke run unless asked for: it would bind the
+// audio server's port, which a running Clew or the standalone tools may hold.
+const WITH_TOOLS = !SMOKE || process.env.CLEW_SMOKE_TOOLS === '1';
 
 if (!SMOKE && !app.requestSingleInstanceLock()) {
   app.quit();
@@ -16,6 +22,8 @@ if (!SMOKE && !app.requestSingleInstanceLock()) {
 
 let mainWindow = null;
 let appSession = null;
+let tools = null;
+let quitting = false;
 
 const preloadArg = `--alefa-desktop=${encodeURIComponent(
   JSON.stringify({ version: app.getVersion(), origins: sites.origins }),
@@ -92,7 +100,16 @@ function buildMenu() {
   const template = [
     ...(isMac
       ? [{ label: app.name, submenu: [about, { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }]
-      : [{ label: 'File', submenu: [{ role: 'quit' }] }]),
+      : [
+          {
+            label: 'File',
+            submenu: [
+              { label: 'Settings…', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() },
+              { type: 'separator' },
+              { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => quitApp() },
+            ],
+          },
+        ]),
     { role: 'editMenu' },
     {
       label: 'View',
@@ -125,7 +142,14 @@ function createMainWindow() {
     webPreferences: webPreferences(),
   });
   mainWindow.once('ready-to-show', () => {
-    if (!SMOKE) mainWindow.show();
+    if (!SMOKE && !mainWindow.hiddenAtStart) mainWindow.show();
+  });
+  // With the tray, closing the window hides it: Clew stays as it was, and the tools keep running.
+  mainWindow.on('close', (event) => {
+    if (tools && !quitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -141,10 +165,32 @@ app.on('web-contents-created', (_event, contents) => {
   policy.apply(contents, sites, childWindowOptions, isPopup);
 });
 
-app.on('second-instance', () => {
-  if (!mainWindow) return;
+function showMainWindow() {
+  if (!mainWindow) createMainWindow();
+  mainWindow.hiddenAtStart = false;
   if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.webContents.isLoading()) mainWindow.show();
+  else mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.focus();
+}
+
+function quitApp() {
+  quitting = true;
+  app.quit();
+}
+
+app.on('second-instance', () => showMainWindow());
+
+// The audio server is asked to stop before the app goes (it would end with its stdin anyway).
+let toolsStopped = false;
+app.on('before-quit', (event) => {
+  quitting = true;
+  if (!tools || toolsStopped) return;
+  event.preventDefault();
+  tools.stop().finally(() => {
+    toolsStopped = true;
+    app.quit();
+  });
 });
 
 app.whenReady().then(async () => {
@@ -152,11 +198,16 @@ app.whenReady().then(async () => {
   const server = await network.install(appSession, sites);
   permissions.install(appSession, sites);
   screenPicker.install(appSession, sites, () => BrowserWindow.getFocusedWindow() ?? mainWindow);
+  if (WITH_TOOLS) {
+    tools = new Tools({ openApp: showMainWindow, quitApp, firstRunLoginItem: app.isPackaged && !SMOKE });
+    tools.start();
+  }
   buildMenu();
   const win = createMainWindow();
+  win.hiddenAtStart = HIDDEN;
   if (SMOKE) {
     require('./smoke')
-      .run(win, appSession, server)
+      .run(win, appSession, server, tools)
       .catch((err) => {
         console.error(err);
         app.exit(1);
@@ -165,9 +216,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // With the tray the app keeps running; without it (the smoke run), closing ends it.
+  if (!tools && process.platform !== 'darwin') app.quit();
 });
 
 app.on('activate', () => {
-  if (!mainWindow && app.isReady()) createMainWindow();
+  if (app.isReady()) showMainWindow();
 });

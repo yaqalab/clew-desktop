@@ -35,3 +35,8 @@ Thumbs.db
 .vscode/
 .idea/
 clew-desktop-prompt.md
+
+# Clew tools built by npm run build:tools (shipped as resources/tools)
+tools-dist/
+# Dictation packages made by npm run package:dictation, for the clew-tools release
+release-dictation/

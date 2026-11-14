@@ -53,7 +53,7 @@ async function finalUrl(ses, url) {
   }
 }
 
-async function run(win, ses, server) {
+async function run(win, ses, server, tools) {
   const { stats } = server;
   setTimeout(() => {
     console.error('smoke: timed out');
@@ -204,6 +204,43 @@ async function run(win, ses, server) {
       const origin = await js('location.origin');
       return `${state}, controlling ${origin}`;
     });
+
+    if (tools) {
+      await check('the audio server runs as a hidden child, driven over --control', async () => {
+        for (let i = 0; i < 40 && tools.engine.state !== 'running'; i++) await wait(250);
+        assert(tools.engine.state === 'running', `${tools.engine.state} ${tools.engine.problem}`);
+        const st = await tools.engine.call('status');
+        const where = st.server.running ? `on ${st.server.port}` : `stopped (${st.server.problem})`;
+        return `version ${tools.engine.info.version}, server ${where}`;
+      });
+
+      await check('the tray icon is there', async () => {
+        assert(tools.tray && !tools.tray.isDestroyed(), 'no tray');
+        return tools.tooltip();
+      });
+
+      await check('the settings window renders the server state, without errors', async () => {
+        tools.openSettings();
+        const sw = tools.settingsWin;
+        const errors = [];
+        sw.webContents.on('console-message', (event, level, message) => {
+          const lvl = event?.level ?? level;
+          if (lvl === 'error' || lvl === 3) errors.push(String(event?.message ?? message));
+        });
+        await new Promise((r) => (sw.webContents.isLoading() ? sw.webContents.once('did-finish-load', r) : r()));
+        let text = '';
+        for (let i = 0; i < 20 && !text; i++) {
+          text = await sw.webContents.executeJavaScript("document.getElementById('server-state').textContent");
+          if (!text) await wait(250);
+        }
+        const tabs = await sw.webContents.executeJavaScript("document.querySelectorAll('[role=tab]').length");
+        assert(text, 'no server state shown');
+        assert(errors.length === 0, errors.join(' | '));
+        sw.destroy();
+        return `"${text}", ${tabs} tabs`;
+      });
+    }
+
     await check('no uncaught errors in any page or frame during the run', async () => {
       await wait(1500);
       const uncaught = pageErrors.filter((m) => /Uncaught|Invalid hook call/i.test(m));
