@@ -77,7 +77,7 @@ class Tools {
    * @param {() => object[]} [opts.appItems]  menu items of the app's own (e.g. "Restart to
    *        update"), shown in the tray above Quit
    * @param {{ snapshot: () => object, check: () => Promise<object>, restart: () => void }} [opts.updates]
-   *        the site updates (src/site-updates.js) that Settings › General shows and checks
+   *        the site updates (src/site-updates.js) that Settings › General shows and checks
    * @param {() => BrowserWindow | null} [opts.parentWindow]  the window Settings opens as a modal
    *        over, when there is one on screen (from the tray with Clew hidden, it opens on its own)
    */
