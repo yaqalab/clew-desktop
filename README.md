@@ -73,7 +73,7 @@ cp ../yaqatw/.env  env/yaqatw.env
 | `npm start` | Run the app against the already-built `sites/` |
 | `npm run dev` | Each app's dev server with hot reload, behind the real origins, then Electron |
 | `npm run build:tools` | Builds Clew's local tools (audio server, analysis) from the Clew source into `tools-dist/` |
-| `npm test` | Unit tests (resolver, local server, certificate, tools engine, dictation install) |
+| `npm test` | Unit tests (resolver, local server, certificate, tools engine, dictation install, site updates) |
 | `npm run smoke` | Opens the app hidden and checks origin, local serving, iframe, network passthrough, CORS, redirects, permissions, service worker (`CLEW_SMOKE_TOOLS=1`: the tools, tray and settings window too) |
 | `npm run dist` | `sources` → `build:sites` → `build:tools` → electron-builder: the installer for this OS in `release/` |
 | `npm run package:dictation` | Packs a built dictation server for the clew-tools release (see below) |
@@ -103,8 +103,43 @@ ref (e.g. `YAQATW_REF=v3.0 npm run sources`).
 
 ### Traceability
 
-Every build writes `sites/<name>/.build-info.json` (repo, ref, commit, local changes, time).
-**Help → About** shows it for each app, and so does `window.alefaDesktop.buildInfo()`.
+Every build writes `sites/<name>/.build-info.json` (repo, ref, commit, its date, local changes,
+time). **Help → About** shows it for each app (and whether it came with the installer or as an
+update), and so does `window.alefaDesktop.buildInfo()`.
+
+## Site updates (between installers)
+
+Clew and yaqatw change far more often than the app around them, so the installed app also picks
+up their newer builds by itself, **straight from the live sites** ([src/site-updates.js](src/site-updates.js)):
+
+1. **Cloudflare Pages builds each site on every push to `main`**, as before. The build now ends
+   with `scripts/desktop-package.mjs` in each app's repo (npm's `postbuild:hub` in Clew,
+   `postbuild` in yaqatw). On Cloudflare (`CF_PAGES=1`), for `main` only, it adds to the
+   deployed site:
+   - `/desktop/<name>-site-<commit12>.part1…N`: the whole output, with its `.build-info.json`,
+     as one `.tar.gz` cut in parts of at most 20 MiB (Cloudflare Pages refuses files over
+     25 MiB; today each site is one part, 17–20 MB);
+   - `/desktop/version.json`: commit, commit date, size, SHA-256, the parts, `minDesktop`.
+
+   Local builds, this repo's included, are unchanged.
+2. **The app** reads `https://<host>/desktop/version.json` 15 s after start, then every 4 hours
+   (`siteUpdates` in [desktop.config.json](desktop.config.json)), through the default session,
+   which is not diverted to the bundled files. It takes a build only if it names that site, is
+   newer than what the app has (commit date) and allows this app version; the part addresses are
+   built from the site and commit, and every part and the whole must match their size and
+   SHA-256. It unpacks into `userData/site-updates/<name>/`.
+3. **It switches at the next start** (a running page never has its files swapped underneath it);
+   **Restart to update** appears in the tray and the Help menu meanwhile. A downloaded build is
+   used only while it is newer than the installer's own, so a newer installer wins.
+
+The trust is the site's own: the app runs what `clew.alefa.net` serves, as a browser does. No
+token, secret or CI is involved. `DESKTOP_MIN_VERSION`, set in a Cloudflare project's
+environment variables, marks builds that need a newer app (for a site that starts using
+something new in `window.alefaDesktop`).
+
+Updates are off in development and smoke runs; `CLEW_SITE_UPDATES=1` turns them on in a
+development run, and `CLEW_SITE_UPDATES_BASE=<url>` reads `<url>/<name>/desktop/` instead of
+the live sites.
 
 ## Dev mode
 

@@ -1,7 +1,9 @@
 'use strict';
 const path = require('node:path');
-const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, session } = require('electron');
+const desktopConfig = require('../desktop.config.json');
 const sites = require('./sites');
+const siteUpdates = require('./site-updates');
 const network = require('./network');
 const policy = require('./policy');
 const permissions = require('./permissions');
@@ -15,6 +17,10 @@ const HIDDEN = process.argv.includes('--hidden');
 // The tools (tray, audio server) stay out of the smoke run unless asked for: it would bind the
 // audio server's port, which a running Clew or the standalone tools may hold.
 const WITH_TOOLS = !SMOKE || process.env.CLEW_SMOKE_TOOLS === '1';
+// Newer builds of the sites (src/site-updates.js): the installed app only, never dev or smoke
+// runs, unless CLEW_SITE_UPDATES=1 asks for them.
+const SITE_UPDATES =
+  !SMOKE && !sites.DEV && !process.env.CLEW_DESKTOP_SITES && (app.isPackaged || process.env.CLEW_SITE_UPDATES === '1');
 
 if (!SMOKE && !app.requestSingleInstanceLock()) {
   app.quit();
@@ -49,6 +55,75 @@ function childWindowOptions() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Site updates
+
+const siteUpdatesDir = () => path.join(app.getPath('userData'), 'site-updates');
+/** name → build info of a newer build, downloaded and used from the next start. */
+const waiting = new Map();
+
+/** At start, before anything is served: a newer downloaded build replaces the installer's. */
+function activateSiteUpdates() {
+  for (const site of sites.list) {
+    try {
+      const active = siteUpdates.activate(siteUpdatesDir(), site.name, sites.buildInfo(site), app.getVersion());
+      if (active) {
+        site.root = active.root;
+        console.log(`[updates] ${site.name}: using ${active.id} (downloaded update)`);
+      }
+    } catch (err) {
+      console.warn(`[updates] ${site.name}: ${err.message}`);
+    }
+  }
+}
+
+async function checkSiteUpdates() {
+  // The live sites, through the default session: it is not diverted to the bundled files.
+  const base = process.env.CLEW_SITE_UPDATES_BASE;
+  let found = false;
+  for (const site of sites.list) {
+    try {
+      const current = waiting.get(site.name) ?? sites.buildInfo(site);
+      const r = await siteUpdates.check(siteUpdatesDir(), site.name, {
+        at: base ? `${base}/${site.name}/desktop` : `${site.origin}/desktop`,
+        appVersion: app.getVersion(),
+        current,
+        fetchImpl: (url, opts) => net.fetch(url, opts),
+      });
+      if (r.status === 'ready') {
+        waiting.set(site.name, r.info);
+        found = true;
+        console.log(`[updates] ${site.name}: ${r.build.id} downloaded, used from the next start`);
+      } else if (r.status === 'needs-app') {
+        console.log(`[updates] ${site.name}: ${r.build.id} needs Clew Desktop ${r.build.minDesktop}`);
+      }
+    } catch (err) {
+      console.warn(`[updates] ${site.name}: ${err.message}`);
+    }
+  }
+  if (found) {
+    buildMenu();
+    tools?.updateTray();
+  }
+}
+
+function startSiteUpdates() {
+  const hours = desktopConfig.siteUpdates.intervalHours || 4;
+  setTimeout(checkSiteUpdates, 15000);
+  setInterval(checkSiteUpdates, hours * 3600 * 1000);
+}
+
+/** "Restart to update", in the Help menu and the tray, once an update is waiting. */
+function restartItems() {
+  if (!waiting.size) return [];
+  return [{ label: 'Restart to update', click: () => restartApp() }, { type: 'separator' }];
+}
+
+function restartApp() {
+  app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--hidden') });
+  quitApp();
+}
+
+// ---------------------------------------------------------------------------------------------
 // About
 
 function aboutText() {
@@ -65,9 +140,11 @@ function aboutText() {
       lines.push(
         `${site.name} (${site.host})`,
         `  ${info.ref} @ ${info.commit.slice(0, 12)}${info.dirty ? ' (local changes)' : ''}`,
-        `  built ${info.builtAt}`,
+        `  built ${info.builtAt}${site.root.startsWith(siteUpdatesDir()) ? ' (update)' : ' (installer)'}`,
       );
     }
+    const next = waiting.get(site.name);
+    if (next) lines.push(`  update ready: ${next.commit.slice(0, 12)}, used from the next start`);
   }
   return lines.join('\n');
 }
@@ -126,7 +203,7 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
-    { role: 'help', submenu: isMac ? [] : [about] },
+    { role: 'help', submenu: [...restartItems(), ...(isMac ? [] : [about])] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -195,14 +272,21 @@ app.on('before-quit', (event) => {
 
 app.whenReady().then(async () => {
   appSession = session.fromPartition(PARTITION);
+  if (SITE_UPDATES) activateSiteUpdates();
   const server = await network.install(appSession, sites);
   permissions.install(appSession, sites);
   screenPicker.install(appSession, sites, () => BrowserWindow.getFocusedWindow() ?? mainWindow);
   if (WITH_TOOLS) {
-    tools = new Tools({ openApp: showMainWindow, quitApp, firstRunLoginItem: app.isPackaged && !SMOKE });
+    tools = new Tools({
+      openApp: showMainWindow,
+      quitApp,
+      firstRunLoginItem: app.isPackaged && !SMOKE,
+      appItems: restartItems,
+    });
     tools.start();
   }
   buildMenu();
+  if (SITE_UPDATES) startSiteUpdates();
   const win = createMainWindow();
   win.hiddenAtStart = HIDDEN;
   if (SMOKE) {

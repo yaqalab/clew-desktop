@@ -74,10 +74,12 @@ class Tools {
    * @param {() => void} opts.quitApp   quits everything
    * @param {boolean} [opts.firstRunLoginItem]  on the first run, start at login (the installed
    *        app only: a development or test run must never register itself with the system)
+   * - `appItems()`: menu items of the app's own (e.g. "Restart to update"), shown above Quit
    */
-  constructor({ openApp, quitApp, firstRunLoginItem = false }) {
+  constructor({ openApp, quitApp, firstRunLoginItem = false, appItems = () => [] }) {
     this.openApp = openApp;
     this.quitApp = quitApp;
+    this.appItems = appItems;
     this.firstRunLoginItem = firstRunLoginItem;
     this.tray = null;
     this.settingsWin = null;
@@ -277,6 +279,7 @@ class Tools {
           this.send('tools:status', this.snapshot());
         },
       },
+      ...this.appItems(),
       { label: 'Quit Clew', click: () => this.quitApp() },
     ];
     this.tray.setContextMenu(Menu.buildFromTemplate(template));

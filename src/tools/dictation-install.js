@@ -15,11 +15,9 @@
  *
  * Plain Node: no Electron here.
  */
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
-const { Readable } = require('node:stream');
+const { download, untar } = require('../fetch-package');
 
 const RELEASES = 'https://github.com/yaqalab/clew-tools/releases';
 const MAX_BYTES = 1024 * 1024 * 1024;
@@ -57,20 +55,6 @@ function pick(manifest, base = RELEASES, key = platformKey()) {
   return { version, file: pkg.file, sha256: pkg.sha256, size: pkg.size, url: `${base}/download/v${version}/${pkg.file}` };
 }
 
-// Windows' own tar (bsdtar, Windows 10+): a GNU tar found first on PATH reads "C:" as a host name.
-const TAR =
-  process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
-
-function untar(archive, into) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(TAR, ['-xzf', archive, '-C', into], { windowsHide: true });
-    let err = '';
-    child.stderr.on('data', (d) => (err += d));
-    child.on('error', reject);
-    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`could not unpack (${err.trim() || code})`))));
-  });
-}
-
 /**
  * Fetches and installs the latest package into `dir`. `onProgress({ phase, received, size })`.
  * Resolves with `{ version, program }`. `base` and `fetchImpl` are for the tests.
@@ -86,23 +70,14 @@ async function install(dir, { onProgress = () => {}, signal, base = RELEASES, fe
 
   fs.mkdirSync(dir, { recursive: true });
   const archive = path.join(dir, `${pkg.file}.part`);
-  const download = await fetchImpl(pkg.url, { signal, redirect: 'follow' });
-  if (!download.ok || !download.body) throw new Error(`could not download ${pkg.file} (${download.status})`);
-  const hash = crypto.createHash('sha256');
-  let received = 0;
-  const out = fs.createWriteStream(archive);
   try {
-    for await (const chunk of Readable.fromWeb(download.body)) {
-      received += chunk.length;
-      if (received > pkg.size) throw new Error('the download is larger than announced');
-      hash.update(chunk);
-      if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
-      onProgress({ phase: 'downloading', received, size: pkg.size });
-    }
-    await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
-    if (received !== pkg.size) throw new Error('the download is incomplete');
-    if (hash.digest('hex') !== pkg.sha256) throw new Error('the download does not match its SHA-256');
-
+    await download(pkg.url, archive, {
+      size: pkg.size,
+      sha256: pkg.sha256,
+      signal,
+      fetchImpl,
+      onProgress: (p) => onProgress({ phase: 'downloading', ...p }),
+    });
     onProgress({ phase: 'unpacking' });
     const staging = path.join(dir, `${pkg.version}.new`);
     const target = path.join(dir, pkg.version);
@@ -115,9 +90,6 @@ async function install(dir, { onProgress = () => {}, signal, base = RELEASES, fe
     fs.rmSync(target, { recursive: true, force: true });
     fs.renameSync(staging, target);
     fs.writeFileSync(path.join(dir, 'current.json'), `${JSON.stringify({ version: pkg.version }, null, 2)}\n`);
-  } catch (err) {
-    out.destroy();
-    throw err;
   } finally {
     fs.rmSync(archive, { force: true });
   }

@@ -16,5 +16,8 @@
     "storage-access",
     "persistent-storage",
     "pointerLock"
-  ]
+  ],
+  "siteUpdates": {
+    "intervalHours": 4
+  }
 }

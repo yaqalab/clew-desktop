@@ -90,6 +90,8 @@ async function build(site) {
     repo: site.repo,
     ref: site.local ? git(['rev-parse', '--abbrev-ref', 'HEAD'], site.dir) : site.ref,
     commit: git(['rev-parse', 'HEAD'], site.dir),
+    // What src/site-updates.js compares with the builds published between installers.
+    committedAt: git(['log', '-1', '--format=%cI'], site.dir),
     dirty: site.local ? git(['status', '--porcelain'], site.dir) !== '' : false,
     source: site.local ? 'local checkout' : 'clone',
     builtAt: new Date().toISOString(),
