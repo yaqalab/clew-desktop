@@ -122,3 +122,33 @@ test('the package address is built from the version, never read from the manifes
   assert.equal(picked.url, `https://github.com/yaqalab/clew-tools/releases/download/v1.2.3/${pkg.file}`);
   assert.throws(() => dictation.pick({ version: '1.2', packages: {} }), /valid version/);
 });
+
+test('says when the latest release has a newer dictation than the one installed', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dict-'));
+  const v1 = makePackage('1.3.0');
+  const v2 = makePackage('1.4.0');
+  const routes = {
+    '/latest/download/dictation.json': manifest('1.3.0', v1),
+    [`/download/v1.3.0/${v1.file}`]: v1.bytes,
+  };
+  const { server, base } = await releases(routes);
+  try {
+    // Nothing installed: nothing to update.
+    assert.equal(await dictation.updateAvailable(dir, { base }), null);
+    await dictation.install(dir, { base });
+    assert.equal(await dictation.updateAvailable(dir, { base }), null);
+    routes['/latest/download/dictation.json'] = manifest('1.4.0', v2);
+    assert.equal(await dictation.updateAvailable(dir, { base }), '1.4.0');
+    // A release that cannot be read says nothing.
+    routes['/latest/download/dictation.json'] = 'not json';
+    assert.equal(await dictation.updateAvailable(dir, { base }), null);
+  } finally {
+    server.close();
+  }
+});
+
+test('compares versions by their numbers', () => {
+  assert.equal(dictation.newer('1.10.0', '1.9.3'), true);
+  assert.equal(dictation.newer('1.4.0', '1.4.0'), false);
+  assert.equal(dictation.newer('1.3.9', '1.4.0'), false);
+});

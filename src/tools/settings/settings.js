@@ -161,6 +161,11 @@ function renderStatus() {
   $('dict-installing').hidden = !snap.installing;
   $('dict-missing').hidden = installed || Boolean(snap.installing);
   $('dict-ready').hidden = !installed || Boolean(snap.installing);
+  // A newer speech server in the latest clew-tools release (checked when this window opens).
+  $('dict-update').hidden = !snap.dictationUpdate || Boolean(snap.installing);
+  if (snap.dictationUpdate) {
+    $('dict-update-text').textContent = `Version ${snap.dictationUpdate} is available (one download, about 200 MB).`;
+  }
   if (snap.installing) {
     const p = snap.installing;
     $('dict-install-text').textContent =
@@ -364,6 +369,9 @@ $('ffmpeg-pick').addEventListener('click', async () => {
 $('ffmpeg-clear').addEventListener('click', () => apply({ ffmpeg: '' }));
 
 $('dict-install').addEventListener('click', () => run(() => window.tools.installDictation()));
+$('dict-update-button').addEventListener('click', () => run(() => window.tools.installDictation()));
+// Quietly: nothing is said when the release cannot be read.
+void window.tools.checkDictationUpdate().catch(() => {});
 $('dict-uninstall').addEventListener('click', async () => {
   if (!confirm('Remove the speech server? Downloaded models stay; installing it again takes one download.')) return;
   await run(() => window.tools.uninstallDictation());

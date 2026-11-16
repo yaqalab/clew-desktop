@@ -55,6 +55,34 @@ function pick(manifest, base = RELEASES, key = platformKey()) {
   return { version, file: pkg.file, sha256: pkg.sha256, size: pkg.size, url: `${base}/download/v${version}/${pkg.file}` };
 }
 
+/** `a` is a later version than `b` (both `x.y.z`). */
+function newer(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+}
+
+/**
+ * The newer version the latest release offers for an installed dictation, or null: none is
+ * installed, it is already the latest, or the release could not be read (said nowhere, as with
+ * the standalone tools' quiet check). `base` and `fetchImpl` are for the tests.
+ */
+async function updateAvailable(dir, { signal, base = RELEASES, fetchImpl = fetch } = {}) {
+  const have = installed(dir);
+  if (!have) return null;
+  try {
+    const res = await fetchImpl(manifestUrl(base), { signal, redirect: 'follow' });
+    if (!res.ok) return null;
+    const pkg = pick(await res.json(), base);
+    return newer(pkg.version, have.version) ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Fetches and installs the latest package into `dir`. `onProgress({ phase, received, size })`.
  * Resolves with `{ version, program }`. `base` and `fetchImpl` are for the tests.
@@ -109,4 +137,4 @@ function uninstall(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-module.exports = { install, installed, uninstall, pick, platformKey, manifestUrl, PROGRAM };
+module.exports = { install, installed, uninstall, updateAvailable, newer, pick, platformKey, manifestUrl, PROGRAM };

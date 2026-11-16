@@ -93,6 +93,8 @@ class Tools {
     this.logLines = [];
     this.dictationDir = path.join(app.getPath('userData'), 'dictation');
     this.installing = null;
+    /** A newer dictation the latest release offers, or null (`checkDictationUpdate`). */
+    this.dictationUpdate = null;
     this.prefsFile = path.join(app.getPath('userData'), 'tools.json');
   }
 
@@ -162,6 +164,7 @@ class Tools {
       version: this.engine?.info?.version ?? toolsInfo()?.version ?? '',
       settingsFile: this.engine?.info?.settingsFile ?? '',
       dictationProgram: this.sttProgram(),
+      dictationUpdate: this.dictationUpdate ?? null,
       installing: this.installing,
     };
   }
@@ -374,6 +377,7 @@ class Tools {
     });
     handle('tools:open-app', () => this.openApp());
     handle('tools:install-dictation', () => this.installDictation());
+    handle('tools:check-dictation-update', () => this.checkDictationUpdate());
     handle('tools:uninstall-dictation', async () => {
       await this.engine.call('dictation.stop').catch(() => {});
       dictation.uninstall(this.dictationDir);
@@ -385,7 +389,12 @@ class Tools {
     if (this.installing) return;
     this.installing = { phase: 'checking' };
     this.send('tools:status', this.snapshot());
+    // An update replaces the program that may be running: stopped first (Windows keeps a running
+    // program's folder), started again after if it was on.
+    const updating = Boolean(dictation.installed(this.dictationDir));
+    const wasOn = updating && Boolean(this.engine?.status?.dictation?.wanted);
     try {
+      if (updating) await this.engine.call('dictation.stop').catch(() => {});
       const got = await dictation.install(this.dictationDir, {
         onProgress: (p) => {
           this.installing = p;
@@ -393,15 +402,30 @@ class Tools {
         },
       });
       this.log(`dictation ${got.version} installed`);
+      this.dictationUpdate = null;
       await this.engine.call('dictation.setProgram', { path: got.program });
+      if (wasOn) await this.engine.call('dictation.start').catch(() => {});
     } catch (err) {
       this.log(`dictation could not be installed: ${err.message}`);
+      if (wasOn) await this.engine.call('dictation.start').catch(() => {});
       throw err;
     } finally {
       this.installing = null;
       this.send('tools:status', this.snapshot());
       this.updateTray();
     }
+  }
+
+  /**
+   * Whether the latest clew-tools release has a newer dictation than the one installed (Clew
+   * docs/32 §3: clew-tools 1.4 added the words a training cut is placed by). Quiet when it
+   * cannot tell; asked when the settings window opens.
+   */
+  async checkDictationUpdate() {
+    this.dictationUpdate = await dictation.updateAvailable(this.dictationDir);
+    if (this.dictationUpdate) this.log(`dictation ${this.dictationUpdate} is available`);
+    this.send('tools:status', this.snapshot());
+    return this.dictationUpdate;
   }
 }
 
