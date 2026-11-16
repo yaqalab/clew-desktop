@@ -258,9 +258,12 @@ async function run(win, ses, server, tools, folder) {
           if (!text) await wait(250);
         }
         const tabs = await sw.webContents.executeJavaScript("document.querySelectorAll('[role=tab]').length");
-        // Settings › General lists each bundled site under Updates.
+        // Settings › General lists the app and each bundled site under Updates.
         const updateCells = await sw.webContents.executeJavaScript("document.getElementById('update-sites').children.length");
-        assert(updateCells === 4, `updates section: ${updateCells} cells`);
+        const updateText = await sw.webContents.executeJavaScript("document.getElementById('update-sites').textContent");
+        // The app itself first, then each bundled site: a label and a cell each.
+        assert(updateCells === 6, `updates section: ${updateCells} cells`);
+        assert(updateText.startsWith('Clew DesktopVersion '), `updates section: ${updateText.slice(0, 60)}`);
         assert(text, 'no server state shown');
         assert(errors.length === 0, errors.join(' | '));
         sw.destroy();

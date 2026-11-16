@@ -45,6 +45,7 @@ function createAppUpdater({ enabled, onChange, updater }) {
     au.autoDownload = true;
     au.autoInstallOnAppQuit = true;
     au.allowPrerelease = false;
+    au.disableWebInstaller = true;
     au.logger = {
       info: (m) => console.log(`[app-update] ${m}`),
       warn: (m) => console.warn(`[app-update] ${m}`),
