@@ -239,6 +239,20 @@ ipcMain.handle('alefa:about', (event) => {
   return showAbout().then(() => undefined);
 });
 
+/**
+ * Ctrl+wheel and a trackpad's pinch, from the preload (`src/preload.js`) once the page let the
+ * wheel go: one menu step (0.5 of Chromium's zoom level, about 10 %), inside Chrome's own range.
+ * Not Electron's `zoom-changed`: that is raised even for a wheel the page took for itself (over
+ * Clew's editor text, which zooms only the text), and twice for one notch elsewhere (measured
+ * on Electron 45.3.2).
+ */
+ipcMain.on('alefa:wheel-zoom', (event, direction) => {
+  if (!fromBundledFrame(event) || (direction !== 1 && direction !== -1)) return;
+  const contents = event.sender;
+  const level = contents.getZoomLevel() + direction * 0.5;
+  contents.setZoomLevel(Math.min(5, Math.max(-3, level)));
+});
+
 ipcMain.handle('alefa:build-info', (event) => {
   if (!fromBundledFrame(event)) throw new Error('not allowed');
   return Object.fromEntries(sites.list.map((s) => [s.name, sites.buildInfo(s)]));
@@ -246,6 +260,17 @@ ipcMain.handle('alefa:build-info', (event) => {
 
 // ---------------------------------------------------------------------------------------------
 // Menu and window
+
+/** The same three zooms on the keys the shown rows cannot list: Shift's +, the keypad's. */
+function hiddenZoomKeys() {
+  const hidden = { visible: false, acceleratorWorksWhenHidden: true };
+  return [
+    { role: 'zoomIn', accelerator: 'CommandOrControl+Plus', ...hidden },
+    { role: 'zoomIn', accelerator: 'CommandOrControl+numadd', ...hidden },
+    { role: 'zoomOut', accelerator: 'CommandOrControl+numsub', ...hidden },
+    { role: 'resetZoom', accelerator: 'CommandOrControl+num0', ...hidden },
+  ];
+}
 
 function buildMenu() {
   const isMac = process.platform === 'darwin';
@@ -276,9 +301,13 @@ function buildMenu() {
         },
         { role: 'toggleDevTools' },
         { type: 'separator' },
+        // Electron's own Zoom In listens for Ctrl+Shift+= ("Plus") only. Ctrl+= first, as in
+        // Chrome; the other presses people use follow, unseen. A press the page took for itself
+        // (Clew's editors zoom their own text) never reaches these.
         { role: 'resetZoom' },
-        { role: 'zoomIn' },
+        { role: 'zoomIn', accelerator: 'CommandOrControl+=' },
         { role: 'zoomOut' },
+        ...hiddenZoomKeys(),
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
