@@ -60,4 +60,23 @@ if (info && info.origins.includes(location.origin)) {
       ...(location.origin === info.folderOrigin ? { folder } : {}),
     }),
   );
+
+  /*
+   * Ctrl+wheel zooms the page, as in a browser (Electron leaves it to the app). Heard last, on
+   * the window, so a wheel the page took for itself is left alone: over Clew's editor text it
+   * zooms only the text. A mouse sends about 100 per notch, a trackpad's pinch many small
+   * amounts, so they are added up and a step is asked for at each half notch.
+   */
+  let wheelSum = 0;
+  window.addEventListener(
+    'wheel',
+    (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.defaultPrevented) return;
+      wheelSum += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      if (Math.abs(wheelSum) < 50) return;
+      ipcRenderer.send('alefa:wheel-zoom', wheelSum < 0 ? 1 : -1);
+      wheelSum = 0;
+    },
+    { passive: true },
+  );
 }
