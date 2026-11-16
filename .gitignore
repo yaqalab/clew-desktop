@@ -36,6 +36,9 @@ Thumbs.db
 .idea/
 
 # AI assistants' development prompts, notes and handovers: never in Git
+# Rule: everything AI-development related (prompts, notes, plans, handovers, scratch
+# scripts) goes in private/. Only files a tool must find at a fixed path stay outside it.
+private/
 clew-desktop-prompt.md
 *-prompt.md
 CLAUDE.md
