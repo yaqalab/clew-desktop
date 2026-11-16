@@ -184,7 +184,9 @@ tray icon, one settings window.**
   presses *Install dictation* in Settings ([src/tools/dictation-install.js](src/tools/dictation-install.js)):
   `dictation.json` from the latest public `yaqalab/clew-tools` release, the package address built
   from its version (never read from the file), size and SHA-256 checked, unpacked into
-  `userData/dictation/<version>/`.
+  `userData/dictation/<version>/`. When Settings opens, a newer version in the latest release is offered
+  (**Update dictation**): the running speech server stops, the new one replaces it, and it starts
+  again if it was on (2026-11-16; clew-tools 1.4 added the words Clew places training cuts by).
 - **Same settings as the standalone tools**: `clew-audio-server/settings.json` in the user's config
   folder, so folders, the secret Clew already knows and both keys carry over. Clew in the window
   talks to `http://127.0.0.1:47821`, `:47822` and `:47823` exactly as the website does.

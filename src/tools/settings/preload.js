@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('tools', {
   setLoginItem: (on) => ipcRenderer.invoke('tools:set-login-item', on),
   openApp: () => ipcRenderer.invoke('tools:open-app'),
   installDictation: () => ipcRenderer.invoke('tools:install-dictation'),
+  checkDictationUpdate: () => ipcRenderer.invoke('tools:check-dictation-update'),
   uninstallDictation: () => ipcRenderer.invoke('tools:uninstall-dictation'),
   updates: () => ipcRenderer.invoke('tools:updates'),
   checkUpdates: () => ipcRenderer.invoke('tools:check-updates'),
