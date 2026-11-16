@@ -595,6 +595,11 @@ bool Server::start(int port, std::string* error) {
 void Server::stop() {
     if (!running_) return;
     running_ = false;
+#ifndef _WIN32
+    // Closing a listening socket wakes a thread blocked in accept() on Windows, not on Linux or
+    // macOS: there the join below waited for ever (found by the first Linux build, A19).
+    shutdown_sock(sock_t(listener_));
+#endif
     close_sock(sock_t(listener_));
     if (accept_thread_.joinable()) accept_thread_.join();
     {
@@ -631,7 +636,7 @@ void Server::accept_loop() {
 
 void Server::serve(std::uintptr_t sock) {
     {
-        Connection conn{*this, sock_t(sock)};
+        Connection conn{*this, sock_t(sock), {}, {}};
         conn.run();
     }
     {

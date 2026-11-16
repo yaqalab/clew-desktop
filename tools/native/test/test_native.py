@@ -77,8 +77,12 @@ class Server:
         threading.Thread(target=self._read_log, daemon=True).start()
 
     def _read_log(self):
-        for raw in self.proc.stderr:
-            self.log.append(raw.decode("utf-8", "replace").rstrip())
+        try:
+            for raw in self.proc.stderr:
+                self.log.append(raw.decode("utf-8", "replace").rstrip())
+        except (ValueError, OSError):
+            # stop() closed the pipe while this read it (seen on Linux): the log is complete.
+            pass
 
     def stop(self):
         self.proc.kill()

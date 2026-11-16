@@ -202,8 +202,14 @@ static void folders(const fs::path& tmp) {
 
 // Several folders served as one (folders.h, docs/22 section 11).
 static void served_folders(const fs::path& tmp) {
+#ifdef _WIN32
     CHECK((folder_names({"D:\\Study A\\audio", "E:\\Study B\\Audio", "F:\\x\\audio\\", "G:\\", "D:\\pilot"}) ==
            std::vector<std::string>{"audio", "Audio 2", "audio 3", "G", "pilot"}));
+#else
+    // The same cases with this system's separator (a backslash is a character in a name here).
+    CHECK((folder_names({"/d/Study A/audio", "/e/Study B/Audio", "/f/x/audio/", "/d/pilot"}) ==
+           std::vector<std::string>{"audio", "Audio 2", "audio 3", "pilot"}));
+#endif
 
     fs::path a = tmp / "served" / "study-a", b = tmp / "served" / "study-b", c = tmp / "served" / "study-c";
     write(a / "p01.mp3", "1");

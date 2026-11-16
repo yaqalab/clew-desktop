@@ -108,7 +108,9 @@ bool ffmpeg_to_mp3(const fs::path& ffmpeg, const fs::path& in, const fs::path& o
         dup2(fd, 1);
         int devnull = ::open("/dev/null", O_RDWR);
         dup2(devnull, 0);
-        if (control.background) (void)nice(19);
+        // Lower priority for work done ahead; failing to lower it changes nothing else.
+        if (control.background && nice(19) == -1) {
+        }
         std::vector<std::string> args = {ffmpeg.string(), "-nostdin", "-hide_banner", "-loglevel", "error", "-i",
                                          in.string(), "-map", "0:a:0", "-map_metadata", "-1", "-c:a", "libmp3lame",
                                          "-b:a", "128k", "-write_xing", "0", "-id3v2_version", "0", "-f", "mp3",

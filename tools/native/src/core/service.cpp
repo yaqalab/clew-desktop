@@ -116,7 +116,12 @@ bool Service::convert(const std::filesystem::path& in, const std::filesystem::pa
     if (s.system_codecs && platform::can_convert() && platform::convert_to_mp3(in, out, control, &system_why))
         return true;
     if (control.cancelled()) return false;  // put back in the queue: not a failure
-    const std::string& ffmpeg = s.ffmpeg;
+    std::string ffmpeg = s.ffmpeg;
+#ifndef _WIN32
+    // macOS and Linux have no system codecs here yet: an ffmpeg beside the program or on PATH is
+    // used when none was chosen, as the Python server does there. Windows keeps it a choice.
+    if (ffmpeg.empty()) ffmpeg = path_to_utf8(platform::find_ffmpeg());
+#endif
     if (!ffmpeg.empty()) {
         std::string ffmpeg_why;
         if (platform::ffmpeg_to_mp3(path_from_utf8(ffmpeg), in, out, control, &ffmpeg_why)) return true;
