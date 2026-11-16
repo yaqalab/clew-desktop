@@ -43,6 +43,11 @@ struct ServerConfig {
     std::set<std::string> origins;
     int link_ttl_sec = 4 * 3600;
     std::string secret;
+    // The Python audio server's secret, as that server keeps it (A20, docs/22 §10.5): only its
+    // scrypt hash and salt, raw bytes, read from its config.json. Accepted besides `secret`, so
+    // whoever switches servers pastes nothing again. Both empty when there is none.
+    std::string python_salt;
+    std::string python_hash;
 };
 
 class Server {
@@ -67,6 +72,9 @@ public:
     std::string sign(const std::string& rel, long long exp) const;
     std::uint64_t requests() const { return requests_; }
 
+    // Whether `given` is the secret the Python server keeps in `config` (scrypt, its parameters).
+    bool python_secret_ok(const std::string& given, const ServerConfig& config);
+
     struct Connection;
 
 private:
@@ -81,6 +89,13 @@ private:
     std::shared_ptr<const ServerConfig> config_;
     std::set<std::uintptr_t> open_;
     int failures_ = 0;
+    // The Python server's secret once it has matched, as a SHA-256 of it, beside the hash it matched
+    // (memory only): scrypt costs 16 MiB and tens of milliseconds, too much for every request.
+    std::string python_ok_;
+    std::string python_ok_for_;
+    // One scrypt at a time: 64 connections each trying a wrong secret would otherwise take 1 GiB,
+    // and guessing gets no faster for being done in parallel.
+    std::mutex scrypt_lock_;
 
     std::uintptr_t listener_;
     std::atomic<bool> running_{false};

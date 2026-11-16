@@ -36,6 +36,7 @@ static const int kSendFlags = 0;
 #include "files.h"
 #include "json.h"
 #include "platform.h"
+#include "scrypt.h"
 #include "sha256.h"
 #include "text.h"
 #include "version.h"
@@ -294,10 +295,14 @@ struct Server::Connection {
     bool auth() {
         const std::string* h = req->header("authorization");
         bool ok = false;
-        if (h && starts_with(*h, "Bearer ") && cfg && !cfg->secret.empty()) {
+        if (h && starts_with(*h, "Bearer ") && cfg) {
             std::string given = trim(h->substr(7));
-            auto a = sha256(given), b = sha256(cfg->secret);
-            ok = equal_constant_time(std::string(a.begin(), a.end()), std::string(b.begin(), b.end()));
+            if (!cfg->secret.empty()) {
+                auto a = sha256(given), b = sha256(cfg->secret);
+                ok = equal_constant_time(std::string(a.begin(), a.end()), std::string(b.begin(), b.end()));
+            }
+            // The Python server's secret, when its config.json holds one (A20).
+            if (!ok && !given.empty() && !cfg->python_hash.empty()) ok = server.python_secret_ok(given, *cfg);
         }
         bool slow;
         {
@@ -542,6 +547,27 @@ void Server::configure(ServerConfig config) {
 std::shared_ptr<const ServerConfig> Server::config() const {
     std::lock_guard<std::mutex> g(lock_);
     return config_;
+}
+
+bool Server::python_secret_ok(const std::string& given, const ServerConfig& config) {
+    Digest d = sha256(given);
+    std::string seen(d.begin(), d.end());
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        if (!python_ok_.empty() && python_ok_for_ == config.python_hash && equal_constant_time(python_ok_, seen))
+            return true;
+    }
+    // The Python server's own parameters (clew_audio_server.py, hash_secret).
+    std::optional<std::string> derived;
+    {
+        std::lock_guard<std::mutex> one_at_a_time(scrypt_lock_);
+        derived = scrypt(given, config.python_salt, 1u << 14, 8, 1, 32);
+    }
+    if (!derived || !equal_constant_time(*derived, config.python_hash)) return false;
+    std::lock_guard<std::mutex> g(lock_);
+    python_ok_ = seen;
+    python_ok_for_ = config.python_hash;
+    return true;
 }
 
 std::string Server::sign(const std::string& rel, long long exp) const {

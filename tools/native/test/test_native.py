@@ -328,6 +328,61 @@ class SeveralFoldersConversion(unittest.TestCase):
                 time.sleep(0.5)
 
 
+@unittest.skipUnless(EXE.is_file(), "build the program first")
+class PythonServersSecret(unittest.TestCase):
+    """The Python server's secret works here too (A20): checked against the scrypt hash that server
+    keeps in its config.json, written here exactly as clew_audio_server.py writes it."""
+
+    PY_SECRET = "the-python-servers-secret-0123"
+
+    @classmethod
+    def setUpClass(cls):
+        import base64
+        import hashlib
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name)
+        (base / "audio").mkdir()
+        (base / "audio" / "a.wav").write_bytes(BYTES)
+        home = base / "home"
+        home.mkdir()
+        salt = os.urandom(16)
+        digest = hashlib.scrypt(cls.PY_SECRET.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
+        (home / "config.json").write_text(
+            json.dumps({"v": 1, "salt": base64.b64encode(salt).decode(), "hash": base64.b64encode(digest).decode()}),
+            encoding="utf-8",
+        )
+        cls.server = Server(base / "audio", home)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+        time.sleep(0.3)
+        cls.tmp.cleanup()
+
+    def files(self, secret):
+        return self.server.call("GET", "/api/files", self.server.auth(secret))[0]
+
+    def test_the_python_servers_secret_lists_the_files(self):
+        self.assertEqual(self.files(self.PY_SECRET), 200)
+        # Again, from what was remembered rather than scrypt.
+        self.assertEqual(self.files(self.PY_SECRET), 200)
+
+    def test_this_servers_own_secret_still_works(self):
+        self.assertEqual(self.files(self.server.secret), 200)
+
+    def test_anything_else_is_refused(self):
+        self.assertEqual(self.files("nope"), 401)
+        self.assertEqual(self.files(self.PY_SECRET + "x"), 401)
+
+    def test_the_log_says_so_without_the_secret(self):
+        self.files(self.PY_SECRET)
+        time.sleep(0.3)
+        log = "\n".join(self.server.log) + self.server.banner
+        self.assertIn("the Python server's secret is accepted too", log)
+        self.assertNotIn(self.PY_SECRET, log)
+
+
 class Credentials(Case):
     def test_no_secret_no_list(self):
         self.assertEqual(self.call("GET", "/api/files")[0], 401)

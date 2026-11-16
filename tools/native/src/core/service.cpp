@@ -318,6 +318,19 @@ ServerConfig Service::server_config(const Settings& s, std::string* problem) {
         std::lock_guard<std::mutex> g(lock_);
         c.secret = secret_;
     }
+    // The Python server's secret is accepted too, read again each time the server is configured
+    // (start, Save, a new secret), so a reset there is followed here (A20).
+    if (auto py = read_python_secret(python_config_file(settings_file_))) {
+        c.python_salt = py->salt;
+        c.python_hash = py->hash;
+    }
+    bool changed;
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        changed = python_hash_seen_ != c.python_hash;
+        python_hash_seen_ = c.python_hash;
+    }
+    if (changed && !c.python_hash.empty()) record("the Python server's secret is accepted too");
     c.folders = served_folders(s);
     if (s.folders.empty()) {
         *problem = "no folder chosen";

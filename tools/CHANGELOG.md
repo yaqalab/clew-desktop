@@ -4,6 +4,11 @@ Each section is the text of that version's release on GitHub.
 
 ## Unreleased
 
+**One secret is enough when you switch audio servers.** If you used the Python audio server and
+then install the Windows program, the secret Clew already has keeps working: the program checks it
+against the hash the Python server keeps, and never stores or shows it. Its own secret works as
+before.
+
 **The native audio server is built and tested on Linux and macOS on every change** (GitHub
 Actions in this repository). Building it on Linux for the first time found two faults, both fixed:
 stopping the server hung there, and with no ffmpeg chosen nothing was converted (on macOS and Linux

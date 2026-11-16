@@ -96,6 +96,8 @@ private:
     mutable std::mutex lock_;
     Settings settings_;
     std::string secret_;
+    // The Python server's hash last seen (A20), so the log says once that its secret is accepted.
+    std::string python_hash_seen_;
     std::string problem_;
     std::string converting_;
     std::deque<std::string> recent_;
