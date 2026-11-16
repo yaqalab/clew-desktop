@@ -17,10 +17,10 @@ calls working as they do there, plus:
 [Releases](https://github.com/yaqalab/clew-desktop/releases) page and run it. It installs for
 your account only and needs no administrator rights.
 
-The installer is not signed yet, so Windows may show *Windows protected your PC* the first time.
+The installer is not signed, so Windows may show *Windows protected your PC* the first time.
 Choose **More info → Run anyway**.
 
-macOS and Linux builds are not available yet.
+The app is for Windows only.
 
 The app starts with Windows from then on, in the system tray (turn this off with **Start at
 login** in the tray menu or in Settings › General).
@@ -55,7 +55,7 @@ starts and then every four hours, downloads it in the background and checks it. 
 next time the app starts; until then **Restart to update** appears in the tray menu and the Help
 menu. **Help › Check for updates…** and **Settings › General** look right away.
 
-**The app itself** (the window, the tray, the local tools) does not update by itself yet:
+**The app itself** (the window, the tray, the local tools) does not update by itself:
 install a newer `Clew Setup` over the old one. Your data stays.
 
 **Dictation**: when a newer speech server is out, Settings › Dictation offers **Update
