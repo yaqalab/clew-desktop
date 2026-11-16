@@ -2,6 +2,15 @@
 
 Each section is the text of that version's release on GitHub.
 
+## Unreleased
+
+**The native audio server is built and tested on Linux and macOS on every change** (GitHub
+Actions in this repository). Building it on Linux for the first time found two faults, both fixed:
+stopping the server hung there, and with no ffmpeg chosen nothing was converted (on macOS and Linux
+an ffmpeg beside the program or on PATH is now used, as the Python server does). Windows is
+unchanged. The Windows program is still the one to install; on macOS and Linux the Python server
+remains the one with a window.
+
 ## 1.4.0 — 2026-11-16
 
 **Probably the last release of Clew tools on their own.** The same audio server, analysis engine

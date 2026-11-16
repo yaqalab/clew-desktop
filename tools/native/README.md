@@ -131,7 +131,7 @@ window's list for that run). `CLEW_AUDIO_LANG=ja` or `en` forces the window's la
 |---|---|
 | `src/core/` | portable C++17: HTTP server, links, folder rules, mp3 tags, settings, conversion cache, headless mode |
 | `src/win/` | Windows: DPAPI, Media Foundation conversion, the sandbox, tray icon and window, en/ja strings |
-| `src/posix/` | macOS and Linux: headless only, ffmpeg-only conversion, secret in a 0600 file. **Not built or tested yet** |
+| `src/posix/` | macOS and Linux: headless only, ffmpeg-only conversion (the one chosen, else one beside the program or on PATH), secret in a 0600 file. Built and tested on Linux; macOS by CI only |
 | `res/` | dialog, manifest, icons (`make_icons.py` draws them) |
 | `test/` | `unit_tests.cpp` (SHA-256/HMAC vectors, paths, ranges, JSON, settings) and `test_native.py` |
 
@@ -156,7 +156,16 @@ certificate (the key cannot be copied), so its signatures carry a different thum
 
 ### Other systems
 
-The core compiles with standard C++17 and BSD sockets. To finish macOS or Linux: the secret in the
+The core compiles with standard C++17 and BSD sockets. On Linux it is built and tested (g++ 13, the
+unit tests and `test_native.py`); `.github/workflows/native-posix.yml` builds and tests it on Linux and
+macOS on every push to clew-tools. On macOS or Linux by hand:
+
+```
+cmake -S tools/native -B tools/native/build -DCMAKE_BUILD_TYPE=Release && cmake --build tools/native/build
+ctest --test-dir tools/native/build && python3 -m unittest discover -s tools/native/test -p test_native.py
+```
+
+To finish macOS or Linux: the secret in the
 Keychain / Secret Service (`seal_secret`), conversion with the system's codecs where there are some
 (macOS AudioToolbox decodes, but has no mp3 encoder: it would produce m4a), a sandbox for the
 converter, and a tray (NSStatusItem / AppIndicator). Until then the Python server is the one to use there.
