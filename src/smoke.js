@@ -258,7 +258,7 @@ async function run(win, ses, server, tools, folder) {
           if (!text) await wait(250);
         }
         const tabs = await sw.webContents.executeJavaScript("document.querySelectorAll('[role=tab]').length");
-        // Settings › General lists each bundled site under Updates.
+        // Settings › General lists each bundled site under Updates.
         const updateCells = await sw.webContents.executeJavaScript("document.getElementById('update-sites').children.length");
         assert(updateCells === 4, `updates section: ${updateCells} cells`);
         assert(text, 'no server state shown');
