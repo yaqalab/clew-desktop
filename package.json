@@ -4,7 +4,7 @@
   "version": "0.1.1",
   "private": true,
   "description": "Clew and yaqatw as an installable desktop app, served under their real origins.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "main": "src/main.js",
   "engines": {
     "node": ">=22"
