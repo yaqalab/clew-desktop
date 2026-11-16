@@ -55,6 +55,7 @@ add_library(clew_core STATIC
   src/core/headless.cpp
   src/core/json.cpp
   src/core/mp3.cpp
+  src/core/scrypt.cpp
   src/core/server.cpp
   src/core/service.cpp
   src/core/settings.cpp

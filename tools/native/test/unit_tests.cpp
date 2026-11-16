@@ -22,6 +22,7 @@
 #include "platform.h"
 #include "server.h"
 #include "service.h"
+#include "scrypt.h"
 #include "settings.h"
 #include "sha256.h"
 #include "text.h"
@@ -70,6 +71,65 @@ static void sha256_vectors() {
     CHECK(equal_constant_time("abc", "abc"));
     CHECK(!equal_constant_time("abc", "abd"));
     CHECK(!equal_constant_time("abc", "ab"));
+}
+
+static std::string hex_bytes(const std::string& s) {
+    static const char* h = "0123456789abcdef";
+    std::string out;
+    for (unsigned char b : s) {
+        out += h[b >> 4];
+        out += h[b & 15];
+    }
+    return out;
+}
+
+static void scrypt_vectors(const fs::path& tmp) {
+    // RFC 7914 §11 (PBKDF2-HMAC-SHA-256) and §12 (scrypt); the 2^20 case is left out for its 1 GiB.
+    CHECK(hex_bytes(pbkdf2_hmac_sha256("passwd", "salt", 1, 64)) ==
+          "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc"
+          "49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783");
+    CHECK(hex_bytes(pbkdf2_hmac_sha256("Password", "NaCl", 80000, 64)) ==
+          "4ddcd8f60b98be21830cee5ef22701f9641a4418d04c0414aeff08876b34ab56"
+          "a1d425a1225833549adb841b51c9b3176a272bdebba1d078478f62b397f33c8d");
+    auto a = scrypt("", "", 16, 1, 1, 64);
+    CHECK(a && hex_bytes(*a) ==
+                   "77d6576238657b203b19ca42c18a0497f16b4844e3074ae8dfdffa3fede214"
+                   "42fcd0069ded0948f8326a753a0fc81f17e8d3e0fb2e0d3628cf35e20c38d18906");
+    auto b = scrypt("password", "NaCl", 1024, 8, 16, 64);
+    CHECK(b && hex_bytes(*b) ==
+                   "fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b373162"
+                   "2eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640");
+    // The Python audio server's parameters.
+    auto c = scrypt("pleaseletmein", "SodiumChloride", 16384, 8, 1, 64);
+    CHECK(c && hex_bytes(*c) ==
+                   "7023bdcb3afd7348461c06cd81fd38ebfda8fbba904f8e3ea9b543f6545da1f2"
+                   "d5432955613f0fcf62d49705242a9af9e61e85dc0d651e40dfcf017b45575887");
+    // Parameters scrypt does not allow, or past the 64 MiB this server will spend.
+    CHECK(!scrypt("x", "y", 15, 8, 1, 32));
+    CHECK(!scrypt("x", "y", 1, 8, 1, 32));
+    CHECK(!scrypt("x", "y", 16, 0, 1, 32));
+    CHECK(!scrypt("x", "y", 1u << 20, 8, 1, 32));
+
+    // The Python server's config.json: its pair read, anything else not.
+    fs::path cfg = tmp / "py" / "config.json";
+    fs::create_directories(cfg.parent_path());
+    std::string salt(16, '\x07');
+    auto hash = scrypt("the secret", salt, 1u << 14, 8, 1, 32);
+    CHECK(hash.has_value());
+    auto write = [&](const std::string& text) { std::ofstream(cfg, std::ios::binary) << text; };
+    const std::string pair = "\"salt\": \"" + base64_encode(salt) + "\", \"hash\": \"";
+    write("{\"v\": 1, " + pair + base64_encode(*hash) + "\"}");
+    auto py = read_python_secret(cfg);
+    CHECK(py && py->salt == salt && py->hash == *hash);
+    write("{\"v\": 2, " + pair + base64_encode(*hash) + "\"}");
+    CHECK(!read_python_secret(cfg));
+    write("{\"v\": 1, " + pair + base64_encode("short") + "\"}");
+    CHECK(!read_python_secret(cfg));
+    write("{\"v\": 1}");
+    CHECK(!read_python_secret(cfg));
+    CHECK(!read_python_secret(tmp / "py" / "missing.json"));
+    // Beside a settings file given on the command line, its own config.json, never the user's.
+    CHECK(python_config_file(tmp / "home" / "settings.json") == tmp / "home" / "config.json");
 }
 
 static void text_helpers() {
@@ -627,6 +687,7 @@ int main() {
     fs::remove_all(tmp);
     fs::create_directories(tmp);
     sha256_vectors();
+    scrypt_vectors(tmp);
     text_helpers();
     json_round_trip();
     ranges();

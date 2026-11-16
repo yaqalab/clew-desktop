@@ -1,5 +1,6 @@
 #include "settings.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
@@ -21,6 +22,41 @@ int clamp_int(const json::Value& v, int lo, int hi, int fallback) {
 }  // namespace
 
 std::filesystem::path default_settings_file() { return platform::config_dir() / "settings.json"; }
+
+std::filesystem::path python_config_file(const std::filesystem::path& settings_file) {
+    if (settings_file != default_settings_file()) return settings_file.parent_path() / "config.json";
+#ifdef _WIN32
+    // %APPDATA%\clew-audio-server, which is config_dir() here.
+    return platform::config_dir() / "config.json";
+#else
+    // On macOS this server's own folder is in Library/Application Support; the Python server's is
+    // not, so it is worked out the way that server does.
+    const char* appdata = std::getenv("APPDATA");
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    const char* home = std::getenv("HOME");
+    std::filesystem::path base = appdata && *appdata ? std::filesystem::path(appdata)
+                                 : xdg && *xdg       ? std::filesystem::path(xdg)
+                                                     : std::filesystem::path(home ? home : ".") / ".config";
+    return base / "clew-audio-server" / "config.json";
+#endif
+}
+
+std::optional<PythonSecret> read_python_secret(const std::filesystem::path& config_file) {
+    std::ifstream in(config_file, std::ios::binary);
+    if (!in) return std::nullopt;
+    std::stringstream buf;
+    buf << in.rdbuf();
+    std::string text = buf.str();
+    if (starts_with(text, "\xEF\xBB\xBF")) text = text.substr(3);
+    auto v = json::parse(text);
+    if (!v || !v->is_object() || !(*v)["v"].is_number() || (*v)["v"].num() != 1) return std::nullopt;
+    if (!(*v)["salt"].is_string() || !(*v)["hash"].is_string()) return std::nullopt;
+    auto salt = base64_decode((*v)["salt"].str());
+    auto hash = base64_decode((*v)["hash"].str());
+    // The Python server writes a 16-byte salt and a 32-byte hash; anything else is not its pair.
+    if (!salt || !hash || salt->empty() || hash->size() != 32) return std::nullopt;
+    return PythonSecret{*salt, *hash};
+}
 
 Settings Settings::load(const std::filesystem::path& file) {
     Settings s;

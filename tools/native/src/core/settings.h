@@ -80,6 +80,22 @@ struct Settings {
 
 std::filesystem::path default_settings_file();
 
+// The Python audio server's config.json, which holds the scrypt hash of its secret (A20). Beside
+// the default settings file it is where that server keeps it by default (APPDATA, else
+// XDG_CONFIG_HOME, else ~/.config, as default_config_path() in clew_audio_server.py); beside any
+// other settings file (--config), the config.json next to it, so a test or a second setup reads
+// its own and never the user's.
+std::filesystem::path python_config_file(const std::filesystem::path& settings_file);
+
+// The Python server's secret as it keeps it: salt and scrypt hash, raw bytes. Nothing when the file
+// is missing, is not its version 1, or holds no well-formed pair. Never the secret itself: that
+// server does not store it there.
+struct PythonSecret {
+    std::string salt;
+    std::string hash;
+};
+std::optional<PythonSecret> read_python_secret(const std::filesystem::path& config_file);
+
 // "https://you.github.io/" -> "https://you.github.io"; nothing for what is not an origin.
 std::optional<std::string> normalize_origin(const std::string& text);
 
