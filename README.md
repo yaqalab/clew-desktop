@@ -101,6 +101,13 @@ Worth knowing before you rely on it:
 Uninstall **Clew** from Windows Settings › Apps. Your data stays (see above); delete
 `%APPDATA%\Clew` and `Documents\Clew` yourself if you want it gone.
 
+## Licence
+
+The code in this repository is under the [MIT licence](LICENSE). The installer also carries
+software under its own terms: Electron and Chromium (their notices ship beside `Clew.exe`),
+Clew (ISC), Clew's local tools (MIT, with the third-party notices in their folders) and yaqatw
+(proprietary, © its authors).
+
 ## For developers
 
 How the app works and how to build it:
