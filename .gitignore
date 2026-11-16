@@ -34,7 +34,24 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# AI assistants' development prompts, notes and handovers: never in Git
 clew-desktop-prompt.md
+*-prompt.md
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AGENTS.md
+GEMINI.md
+.gemini/
+.cursor/
+.cursorrules
+.windsurfrules
+.aider*
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+handover*.md
 
 # Clew tools built by npm run build:tools (shipped as resources/tools)
 tools-dist/
