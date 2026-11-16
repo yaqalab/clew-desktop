@@ -429,13 +429,31 @@ function textEl(tag, text, cls) {
   return e;
 }
 
+/** The app's own line: its version, and a newer release being fetched or ready. */
+function appUpdateText(a) {
+  if (a.status === 'downloading') return `Downloading ${a.version}${a.percent != null ? ` · ${a.percent}%` : ''}`;
+  if (a.status === 'ready') return `Ready: ${a.version}, installed when Clew restarts`;
+  if (a.status === 'error') return `Last check failed: ${a.error}`;
+  return '';
+}
+
 function renderUpdates(u) {
   if (!u) return;
-  $('updates-note').textContent = u.enabled
-    ? `Clew and yaqatw update themselves from their websites: checked when Clew starts and every ${u.intervalHours} hours, used from the next start.`
-    : 'Updates are off in this run (development or test).';
+  const appOn = Boolean(u.app?.enabled);
+  $('updates-note').textContent =
+    u.enabled || appOn
+      ? `Clew Desktop updates itself from its releases, Clew and yaqatw from their websites: checked when Clew starts and every ${u.intervalHours} hours.`
+      : 'Updates are off in this run (development or test).';
   const grid = $('update-sites');
   grid.replaceChildren();
+  if (u.app) {
+    grid.append(textEl('span', 'Clew Desktop'));
+    const cell = textEl('div');
+    cell.append(textEl('div', `Version ${u.app.current}`));
+    const more = appUpdateText(u.app);
+    if (more) cell.append(textEl('div', more, 'muted'));
+    grid.append(cell);
+  }
   for (const s of u.sites) {
     grid.append(textEl('span', SITE_NAMES[s.name] ?? s.name));
     const cell = textEl('div');
@@ -453,17 +471,20 @@ function renderUpdates(u) {
     }
     grid.append(cell);
   }
-  const ready = u.sites.some((s) => s.waiting);
-  const failed = u.sites.some((s) => s.last?.status === 'error');
+  const appReady = u.app?.status === 'ready';
+  const ready = appReady || u.sites.some((s) => s.waiting);
+  const failed = u.sites.some((s) => s.last?.status === 'error') || u.app?.status === 'error';
+  const busy = u.checking || u.app?.status === 'checking';
+  const checkedAt = [u.checkedAt, u.app?.checkedAt].filter(Boolean).sort().at(-1);
   $('restart-update').hidden = !ready;
-  $('check-updates').disabled = !u.enabled || u.checking;
-  $('update-state').textContent = u.checking
+  $('check-updates').disabled = !(u.enabled || appOn) || busy;
+  $('update-state').textContent = busy
     ? 'Checking…'
-    : !u.checkedAt
-      ? u.enabled
+    : !checkedAt
+      ? u.enabled || appOn
         ? 'Not checked yet'
         : ''
-      : `Checked ${when(u.checkedAt)}${ready ? ' · update ready' : failed ? '' : ' · up to date'}`;
+      : `Checked ${when(checkedAt)}${ready ? ' · update ready' : failed ? '' : ' · up to date'}`;
 }
 
 $('check-updates').addEventListener('click', async () => {

@@ -10,6 +10,7 @@ const permissions = require('./permissions');
 const screenPicker = require('./screen-picker');
 const { createSettler } = require('./settle');
 const { Tools } = require('./tools');
+const { createAppUpdater } = require('./app-update');
 
 const PARTITION = 'persist:alefa';
 const SMOKE = process.argv.includes('--smoke');
@@ -22,6 +23,9 @@ const WITH_TOOLS = !SMOKE || process.env.CLEW_SMOKE_TOOLS === '1';
 // runs, unless CLEW_SITE_UPDATES=1 asks for them.
 const SITE_UPDATES =
   !SMOKE && !sites.DEV && !process.env.CLEW_DESKTOP_SITES && (app.isPackaged || process.env.CLEW_SITE_UPDATES === '1');
+
+// Updates of the app itself (src/app-update.js): the installed app only.
+const APP_UPDATES = app.isPackaged && !SMOKE && process.env.CLEW_APP_UPDATES !== '0';
 
 if (!SMOKE && !app.requestSingleInstanceLock()) {
   app.quit();
@@ -104,10 +108,13 @@ function activateSiteUpdates() {
 const lastCheck = { at: null, results: {} };
 let checking = null;
 
+const appUpdater = createAppUpdater({ enabled: APP_UPDATES, onChange: () => updatesChanged() });
+
 /** What Settings › General shows. */
 function updatesSnapshot() {
   return {
     enabled: SITE_UPDATES,
+    app: { current: app.getVersion(), ...appUpdater.snapshot() },
     checking: Boolean(checking),
     checkedAt: lastCheck.at,
     intervalHours: desktopConfig.siteUpdates.intervalHours || 4,
@@ -176,27 +183,55 @@ async function runSiteUpdateCheck() {
   lastCheck.at = new Date().toISOString();
 }
 
-function startSiteUpdates() {
+/** The sites and the app itself, side by side. */
+function checkAllUpdates() {
+  return Promise.all([checkSiteUpdates(), appUpdater.check()]).then(updatesSnapshot);
+}
+
+function startUpdates() {
   const hours = desktopConfig.siteUpdates.intervalHours || 4;
-  setTimeout(checkSiteUpdates, 15000);
-  setInterval(checkSiteUpdates, hours * 3600 * 1000);
+  if (SITE_UPDATES) setTimeout(checkSiteUpdates, 15000);
+  if (APP_UPDATES) setTimeout(() => appUpdater.check(), 30000);
+  setInterval(checkAllUpdates, hours * 3600 * 1000);
 }
 
 /** "Restart to update", in the Help menu and the tray, once an update is waiting. */
 function restartItems() {
-  if (!waiting.size) return [];
+  if (!waiting.size && !appUpdater.ready()) return [];
   return [{ label: 'Restart to update', click: () => restartApp() }, { type: 'separator' }];
 }
 
 /** Help › Check for updates: Settings › General shows the check and its result. */
 function checkFromMenu() {
   tools?.openSettings('general');
-  checkSiteUpdates();
+  checkAllUpdates();
 }
 
 function restartApp() {
+  if (appUpdater.ready()) {
+    installAppUpdate();
+    return;
+  }
   app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--hidden') });
   quitApp();
+}
+
+/**
+ * A downloaded release of the app: the pages write out what they hold and the tools stop, as on
+ * any quit, and only then does the installer run (it closes whatever is still open). The new
+ * version starts by itself and picks up the site updates already downloaded.
+ */
+function installAppUpdate() {
+  if (leaving) return;
+  leaving = true;
+  quitting = true;
+  settle(appContents())
+    .then(() => (tools ? tools.stop() : undefined))
+    .catch(() => undefined)
+    .finally(() => {
+      readyToQuit = true;
+      if (!appUpdater.install()) app.quit();
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -317,7 +352,7 @@ function buildMenu() {
       role: 'help',
       submenu: [
         ...restartItems(),
-        ...(SITE_UPDATES ? [{ label: 'Check for updates…', click: () => checkFromMenu() }] : []),
+        ...(SITE_UPDATES || APP_UPDATES ? [{ label: 'Check for updates…', click: () => checkFromMenu() }] : []),
         ...(isMac ? [] : [about]),
       ],
     },
@@ -419,14 +454,14 @@ app.whenReady().then(async () => {
       parentWindow: () => (mainWindow?.isVisible() && !mainWindow.isMinimized() ? mainWindow : null),
       updates: {
         snapshot: updatesSnapshot,
-        check: () => checkSiteUpdates().then(updatesSnapshot),
+        check: checkAllUpdates,
         restart: restartApp,
       },
     });
     tools.start();
   }
   buildMenu();
-  if (SITE_UPDATES) startSiteUpdates();
+  startUpdates();
   const win = createMainWindow();
   win.hiddenAtStart = HIDDEN;
   if (SMOKE) {

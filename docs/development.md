@@ -162,6 +162,32 @@ Updates are off in development and smoke runs; `CLEW_SITE_UPDATES=1` turns them 
 development run, and `CLEW_SITE_UPDATES_BASE=<url>` reads `<url>/<name>/desktop/` instead of
 the live sites.
 
+## App updates and releases
+
+The app updates itself from this repository's GitHub releases ([src/app-update.js](../src/app-update.js),
+`electron-updater`). `build.publish` in `package.json` names the repository; electron-builder
+writes it into the installed app (`resources/app-update.yml`) and writes `latest.yml` beside the
+installer.
+
+- The installed app checks 30 s after start, then with the site updates (every 4 hours), and on
+  **Check for updates**. A newer release is downloaded in the background (only the changed
+  blocks, from the old installer's `.blockmap`) and checked against the SHA-512 in `latest.yml`.
+- **Restart to update** settles the pages and stops the tools first, as Quit does, then runs the
+  installer silently and starts the new version. Quitting installs it without starting again.
+- Off in development and smoke runs; `CLEW_APP_UPDATES=0` turns it off in an installed app,
+  `CLEW_APP_UPDATES_URL=<url>` reads `<url>/latest.yml` instead of GitHub (a local test).
+- The installer is unsigned, so the updater checks the SHA-512 only, not a publisher.
+- A private repository's releases cannot be read without a token: the check then fails quietly
+  (Settings shows "no release found").
+
+**Releasing** (Windows):
+
+1. Bump `version` in `package.json` and merge to `main`.
+2. `npm run dist`: `release/Clew-Setup-<version>.exe`, its `.blockmap` and `latest.yml`.
+3. `gh release create v<version> --title "Clew <version>" --notes-file <notes>` with the three
+   files. All three are needed: `latest.yml` is what installed apps read, the `.blockmap` makes
+   the next update a partial download.
+
 ## Dev mode
 
 `npm run dev` starts, for each app, its own dev server from its source folder, without editing

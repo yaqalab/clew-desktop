@@ -13,7 +13,7 @@ calls working as they do there, plus:
 
 ## Install
 
-**Windows 10 and 11.** Download `Clew Setup <version>.exe` from the
+**Windows 10 and 11.** Download `Clew-Setup-<version>.exe` from the
 [Releases](https://github.com/yaqalab/clew-desktop/releases) page and run it. It installs for
 your account only and needs no administrator rights.
 
@@ -28,7 +28,7 @@ login** in the tray menu or in Settings › General).
 ## Using it
 
 - **Clew** opens in the window. yaqatw opens inside Clew, as it does on the web.
-- **Signing in** to Dropbox or Microsoft opens a small sign-in window inside the app. Links to
+- **Signing in** to Google, Dropbox or Microsoft opens a small sign-in window inside the app. Links to
   other sites open in your usual browser.
 - **The tray icon**: click it to open Clew. Its menu starts and stops the audio server,
   dictation and analysis, copies the secret and keys Clew asks for, opens the audio folders, and
@@ -41,7 +41,7 @@ login** in the tray menu or in Settings › General).
   - *Dictation*: **Install dictation** downloads the speech server (about 200 MB) the first
     time; then the model, the language and the key;
   - *Analysis*: the statistics program and your own R scripts;
-  - *General*: start at login, and which version of Clew and yaqatw is running.
+  - *General*: start at login, and which version of the app, Clew and yaqatw is running.
 - **Zoom**: Ctrl+= / Ctrl+− / Ctrl+0, or Ctrl + mouse wheel.
 - **Help › About** shows the app's version and the build of Clew and yaqatw inside it.
 
@@ -50,13 +50,16 @@ secret, same keys. Uninstall the standalone tools: both use the same ports, so o
 
 ## Updates
 
-**Clew and yaqatw** update by themselves. The app looks for a newer build a few seconds after it
-starts and then every four hours, downloads it in the background and checks it. It is used the
-next time the app starts; until then **Restart to update** appears in the tray menu and the Help
-menu. **Help › Check for updates…** and **Settings › General** look right away.
+Everything updates by itself. The app looks for newer versions a few seconds after it starts and
+then every four hours, downloads them in the background and checks them. **Restart to update**
+then appears in the tray menu and the Help menu. **Help › Check for updates…** and
+**Settings › General** look right away.
 
-**The app itself** (the window, the tray, the local tools) does not update by itself:
-install a newer `Clew Setup` over the old one. Your data stays.
+- **Clew and yaqatw** come from their websites. A new build is used the next time the app starts.
+- **The app itself** (the window, the tray, the local tools) comes from this project's
+  [Releases](https://github.com/yaqalab/clew-desktop/releases). It is installed when you choose
+  **Restart to update**, after Clew has saved what you were typing, or else when you quit. Your
+  data stays.
 
 **Dictation**: when a newer speech server is out, Settings › Dictation offers **Update
 dictation**.
@@ -90,8 +93,9 @@ Worth knowing before you rely on it:
 ## Privacy and security
 
 - The app talks to the same services as Clew and yaqatw in the browser, and nothing else of its
-  own, apart from looking for updates on `clew.alefa.net`, `yaqatw.alefa.net` and, for
-  dictation, the [clew-tools releases](https://github.com/yaqalab/clew-tools/releases) on GitHub.
+  own, apart from looking for updates on `clew.alefa.net`, `yaqatw.alefa.net`, this project's
+  releases on GitHub and, for dictation, the
+  [clew-tools releases](https://github.com/yaqalab/clew-tools/releases).
 - Camera, microphone, screen sharing and notifications are allowed to Clew and yaqatw only.
 - The app makes its own certificate for `clew.alefa.net` and `yaqatw.alefa.net` and trusts it
   only inside its own window. Nothing is added to your computer's certificate store.
