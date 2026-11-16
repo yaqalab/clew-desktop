@@ -229,6 +229,11 @@ def create_app(settings: Settings, engine=None) -> FastAPI:
             raise ApiError(403, str(exc)) from exc
         except FormatError as exc:
             raise ApiError(400, f"could not read the audio: {exc}") from exc
+        except ApiError:
+            raise
+        except Exception as exc:  # PyAV's own errors: an unreadable file, a link that failed
+            log.warning("words: the audio could not be read (%s)", exc)
+            raise ApiError(400, "could not read the audio") from exc
         heard = await engine.words(audio, language=language)
         if heard is None:
             raise ApiError(501, "this server's engine does not time words")
