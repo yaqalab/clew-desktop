@@ -1,7 +1,7 @@
 {
   "name": "clew-desktop",
   "productName": "Clew",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Clew and yaqatw as an installable desktop app, served under their real origins.",
   "license": "MIT",
@@ -59,7 +59,8 @@
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": false
+      "perMachine": false,
+      "artifactName": "Clew-Setup-${version}.${ext}"
     },
     "mac": {
       "target": [
@@ -78,9 +79,18 @@
     "linux": {
       "target": "AppImage",
       "category": "Education"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yaqalab",
+        "repo": "clew-desktop",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
+    "electron-updater": "6.8.11",
     "selfsigned": "5.5.0"
   }
 }
