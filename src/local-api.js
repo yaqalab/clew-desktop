@@ -17,7 +17,8 @@
  *   Only a SHA-256 of each token is kept (`clients.json`).
  *
  * Routes (JSON in and out, errors as `{ error: code }`):
- * - `GET /v1/hello` → `{ app: 'clew-desktop', api: 1 }`
+ * - `GET /v1/hello` → `{ app: 'clew-desktop', api: 1, pid }`: `pid` is the app's process, which a client
+ *   in front can allow to come forward (Windows: AllowSetForegroundWindow) before it pairs
  * - `POST /v1/pair` `{ name }` → `{ id, token }` once the user allows it; 403 `refused`,
  *   408 `timeout` (two minutes), 409 `busy` while another pairing waits for an answer.
  * - `GET /v1/me` → `{ id, name, pairedAt }`
@@ -44,8 +45,9 @@ class ApiError extends Error {
 const hash = (token) => crypto.createHash('sha256').update(token, 'utf8').digest();
 
 /**
- * The paired clients, kept in one JSON file: `{ clients: [{ id, name, hash, pairedAt }] }`, the
- * hash in base64url. An unreadable file counts as no clients: they pair again.
+ * The paired clients, kept in one JSON file: `{ clients: [{ id, name, kind?, hash, pairedAt }] }`,
+ * the hash in base64url. `kind` marks a client the app set up itself (the Word template), so it
+ * can replace or remove it. An unreadable file counts as no clients: they pair again.
  */
 function createClients(file) {
   let clients = [];
@@ -63,16 +65,17 @@ function createClients(file) {
     fs.renameSync(tmp, file);
   }
 
-  const pub = ({ id, name, pairedAt }) => ({ id, name, pairedAt });
+  const pub = ({ id, name, kind, pairedAt }) => (kind ? { id, name, kind, pairedAt } : { id, name, pairedAt });
 
   return {
     file,
     /** A new client; the token is returned here and never kept. */
-    add(name) {
+    add(name, { kind } = {}) {
       const token = crypto.randomBytes(32).toString('base64url');
       const client = {
         id: crypto.randomBytes(8).toString('hex'),
         name,
+        ...(kind ? { kind } : {}),
         hash: hash(token).toString('base64url'),
         pairedAt: new Date().toISOString(),
       };
@@ -96,6 +99,13 @@ function createClients(file) {
       clients = clients.filter((c) => c.id !== id);
       if (clients.length !== before) save();
       return clients.length !== before;
+    },
+    /** Removes every client of this kind; how many there were. */
+    removeKind(kind) {
+      const before = clients.length;
+      clients = clients.filter((c) => c.kind !== kind);
+      if (clients.length !== before) save();
+      return before - clients.length;
     },
     list: () => clients.map(pub),
   };
@@ -223,7 +233,7 @@ function createLocalApi({ port = DEFAULT_PORT, clients, approve, allowedOrigins 
   }
 
   const ROUTES = {
-    '/v1/hello': { GET: () => ({ app: 'clew-desktop', api: API }) },
+    '/v1/hello': { GET: () => ({ app: 'clew-desktop', api: API, pid: process.pid }) },
     '/v1/me': { GET: (req) => authenticate(req) },
     '/v1/pair': { POST: pair },
   };
