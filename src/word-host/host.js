@@ -52,7 +52,8 @@
   // ─── Highlights ────────────────────────────────────────────────────────────────────────────
 
   // Word's highlight colours: a copy of yaqatw's wordColor (src/service/wordColors.ts), which
-  // yaqatw applies wherever a code colour is shown or painted. A palette colour is itself; any
+  // yaqatw applies where a highlight is painted (only highlights are limited to Word's 16
+  // colours; everything else keeps the code's own colour). A palette colour is itself; any
   // other is the Word colour of its hue, bright or dark by its lightness, or a grey when it has
   // little colour. Word gets palette colours only (Highlights.bas maps those 16 exactly).
   const WORD_LABELS = {
