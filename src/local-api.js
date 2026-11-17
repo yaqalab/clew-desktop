@@ -17,7 +17,7 @@
  *   Only a SHA-256 of each token is kept (`clients.json`).
  *
  * Routes (JSON in and out, errors as `{ error: code }`):
- * - `GET /v1/hello` → `{ app: 'clew-desktop', api: 1, pid }`: `pid` is the app's process, which a client
+ * - `GET /v1/hello` → `{ app: 'clew-desktop', api: 1, pid }`: `pid` is the app's process, which a client
  *   in front can allow to come forward (Windows: AllowSetForegroundWindow) before it pairs
  * - `POST /v1/pair` `{ name }` → `{ id, token }` once the user allows it; 403 `refused`,
  *   408 `timeout` (two minutes), 409 `busy` while another pairing waits for an answer.
@@ -119,13 +119,13 @@ function cleanName(value) {
   return name;
 }
 
-function readJson(req) {
+function readJson(req, maxBody = MAX_BODY) {
   return new Promise((resolve, reject) => {
     if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) {
       reject(new ApiError(415, 'json-only'));
       return;
     }
-    if (Number(req.headers['content-length']) > MAX_BODY) {
+    if (Number(req.headers['content-length']) > maxBody) {
       reject(new ApiError(413, 'too-large'));
       return;
     }
@@ -134,7 +134,7 @@ function readJson(req) {
     req.on('data', (c) => {
       size += c.length;
       // Past the limit: answered at once, the rest drained unread.
-      if (size > MAX_BODY) reject(new ApiError(413, 'too-large'));
+      if (size > maxBody) reject(new ApiError(413, 'too-large'));
       else chunks.push(c);
     });
     req.on('end', () => {
@@ -156,8 +156,21 @@ function readJson(req) {
  *        asks the user; the signal fires when the client gave up or the wait timed out
  * @param {string[]} [opts.allowedOrigins]  web origins allowed to call (CORS); none by default
  * @param {number} [opts.pairTimeoutMs]
+ * @param {Record<string, { kind: string, maxBody?: number,
+ *          handler: (call: { body: any, client: object, req: object, res: object }) => any }>} [opts.routes]
+ *        more routes, all `POST` with a JSON body, each only for clients of one kind (the app's
+ *        own, e.g. the Word template): path → `{ kind, maxBody, handler }`. A handler returns
+ *        the answer or throws an `ApiError`.
  */
-function createLocalApi({ port = DEFAULT_PORT, clients, approve, allowedOrigins = [], pairTimeoutMs = PAIR_TIMEOUT_MS, log = console }) {
+function createLocalApi({
+  port = DEFAULT_PORT,
+  clients,
+  approve,
+  allowedOrigins = [],
+  pairTimeoutMs = PAIR_TIMEOUT_MS,
+  routes = {},
+  log = console,
+}) {
   const allowed = new Set(allowedOrigins);
   let listening = 0;
   let pairing = null;
@@ -225,6 +238,16 @@ function createLocalApi({ port = DEFAULT_PORT, clients, approve, allowedOrigins 
       return;
     }
 
+    const extra = Object.hasOwn(routes, pathname) ? routes[pathname] : null;
+    if (extra) {
+      if (req.method !== 'POST') throw new ApiError(405, 'method-not-allowed');
+      const client = authenticate(req);
+      if (client.kind !== extra.kind) throw new ApiError(403, 'wrong-client');
+      const body = await readJson(req, extra.maxBody ?? MAX_BODY);
+      const answer = await extra.handler({ body, client, req, res });
+      send(req, res, 200, answer);
+      return;
+    }
     const route = ROUTES[pathname];
     if (!route) throw new ApiError(404, 'not-found');
     const fn = route[req.method];
@@ -298,4 +321,4 @@ function createLocalApi({ port = DEFAULT_PORT, clients, approve, allowedOrigins 
   };
 }
 
-module.exports = { createLocalApi, createClients, DEFAULT_PORT, API };
+module.exports = { createLocalApi, createClients, ApiError, DEFAULT_PORT, API };

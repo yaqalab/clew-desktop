@@ -284,30 +284,58 @@ GPL parts; Clew docs/32, section 2).
 ## The Word template (`word-plugin/`)
 
 Yaqatw for Word, `yaqatw.dotm`: a Word template that talks to the app through the local API. A
-**Yaqatw** tab with **Connection** (says whether it is connected to the app) and **Mark
-selection** (puts a mark around the selected text, in the form the yaqatw add-in uses: a
-rich-text content control tagged `yaqatw:id=<uuid>`). Windows only.
+**Yaqatw** tab with **Open Yaqatw** (yaqatw in an app window, working on this document) and
+**Connection** (says whether it is connected to the app). Windows only.
 
-- **Installed by the app**: File › Install Yaqatw for Word… ([src/word-plugin.js](../src/word-plugin.js))
+- **Installed by the app**: File › Install Yaqatw for Word… ([src/word-plugin.js](../src/word-plugin.js))
   copies it to Word's Startup folder (`%APPDATA%\Microsoft\Word\STARTUP`, where Word loads it
   at its next start, macros enabled: a trusted location), registers it with the local API as a
   client of kind `word-template` and writes its token to
   `HKCU\Software\VB and VBA Program Settings\yaqatw\Clew` (`Token`, and `Port` when not 47830).
   Installing is the consent: no pairing question. At each start the app replaces an installed
   template older than its own (unless Word holds it) and reconnects one whose client is gone.
-  File › Remove Yaqatw for Word… takes away the file, the key and the client.
+  File › Remove Yaqatw for Word… takes away the file, the key and the client. Settings › General
+  shows the same (Word: install / remove) and lists the programs connected to the local API,
+  each but the template's own with Disconnect.
   `CLEW_WORD_STARTUP_DIR` points it at another folder.
 - **When the token is lost**, Connection offers to pair (the app asks the user). The template
   first allows the app to come to the front (`AllowSetForegroundWindow` with the `pid` from
   `/v1/hello`), and the app shows the question over a small always-on-top window: otherwise
   Windows keeps it behind Word.
-- Sources: VBA modules in `word-plugin/src/*.bas` (ASCII only; project name `Yaqatw`), the
-  ribbon in `word-plugin/customUI/customUI14.xml`. No VBScript components (Windows is retiring
-  VBScript).
+- **Word windows** (Open Yaqatw): one app window per document, yaqatw's own `/embed` in a
+  frame, unchanged, as Clew and Euro-Office embed it. The frame's host page
+  ([src/word-host/](../src/word-host/), on its own origin `clew-word://bridge/`, the only page
+  with `window.clewWord`) answers yaqatw's host calls (its `WebAdapter`): document operations go
+  to Word, the rest (key/value storage, sync) stays in the page. What is not there yet
+  (citations, figures, tables at the cursor) answers "not supported in Word yet".
+  - The app cannot call into Word, so Word asks for work ([src/word-bridge.js](../src/word-bridge.js),
+    local API routes `/v1/word/open|next|event|close`, for the template's client only): while a
+    session is open a tick runs once a second (`Application.OnTime`), and a burst of operations
+    runs back to back. Work that waits while Word is in a dialog fails after 5 s ("Word is
+    busy"), work taken and not answered after 60 s.
+  - Operations ([WordOps.bas](../word-plugin/src/WordOps.bas), [Highlights.bas](../word-plugin/src/Highlights.bas)):
+    custom XML parts (yaqatw's entities, the same parts as the web add-in), text, paragraphs
+    (a table cell is a paragraph), selection, document variables (per-document settings),
+    highlights as the web add-in makes them (content control, `yaqatw:id=<uuid>`, the overlap
+    rules of its `WordDocumentHost`), Word's search (≤ 255 characters, as Office.js), the first
+    table as metadata, comments. Each edit is one undo step, "Yaqatw".
+  - Colours: Word highlights come in 16 colours, which are yaqatw's swatch colours. A code's
+    colour reaches Word as one of them, by yaqatw's own rule (its `wordColor`, copied in the host
+    page; the template maps the 16 exactly): a palette colour is itself, any other the Word
+    colour of its hue.
+  - The highlight under the cursor goes to yaqatw (`selectionchange`) through Word's
+    `WindowSelectionChange` event, sent right after it, never from inside it.
+  - The bridge's quick exchanges wait without `DoEvents`: letting Word do its background work
+    there made each one take over a second in large documents.
+- Sources: VBA modules in `word-plugin/src/*.bas` and `*.cls` (ASCII only; project name
+  `Yaqatw`), the ribbon in `word-plugin/customUI/customUI14.xml`. No VBScript components
+  (Windows is retiring VBScript). Module-level declarations go at the top of a module (VBA
+  refuses them anywhere else).
 - Build, on Windows with Word: `npm run build:word` (part of `npm run dist`; skipped on other
-  systems), or `word-plugin\build.ps1` itself → `word-plugin/dist/yaqatw.dotm`, which the Windows
+  systems), or `word-plugin\build.ps1` itself → `word-plugin/dist/yaqatw.dotm`, which the Windows
   installer ships as `resources/word-plugin/yaqatw.dotm`; `build.ps1 -Install` also copies it to
   the Startup folder. The build runs a hidden Word of its own, which needs "Trust access to the
   VBA project object model" (`AccessVBOM`): the script turns it on for the build only and puts
-  the old value back once that Word has exited, also when the build fails or hangs (two
-  minutes).
+  the old value back once that Word has exited, also when the build fails or hangs (90 s). It
+  compiles the VBA there: a compile error fails the build with Word's message (read off the
+  dialog), and leaves no template behind.

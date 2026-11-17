@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-  Builds yaqatw.dotm, the Word template that talks to Clew Desktop, from src\*.bas and
-  customUI\customUI14.xml. Windows, with Word installed.
+  Builds yaqatw.dotm, the Word template that talks to Clew Desktop, from src\*.bas,
+  src\*.cls and customUI\customUI14.xml. Windows, with Word installed.
 
 .DESCRIPTION
   A hidden Word of its own imports the VBA modules into a new document and saves it as a
@@ -27,14 +27,46 @@ $work = Join-Path $dist 'work'
 
 New-Item -ItemType Directory -Force $work | Out-Null
 Remove-Item (Join-Path $work '*') -Force -ErrorAction SilentlyContinue
+# A failed build leaves no template behind, not even the previous one.
+Remove-Item $out -Force -ErrorAction SilentlyContinue
 
 # VBA imports text in the system's ANSI code page with CRLF line ends: the sources are ASCII,
 # and their line ends are made CRLF here whatever Git checked out.
-foreach ($bas in Get-ChildItem (Join-Path $root 'src\*.bas')) {
+foreach ($bas in Get-ChildItem (Join-Path $root 'src\*') -Include *.bas, *.cls) {
   $text = [IO.File]::ReadAllText($bas.FullName)
   if ($text -match '[^\x00-\x7F]') { throw "$($bas.Name): only ASCII in VBA sources" }
   [IO.File]::WriteAllText((Join-Path $work $bas.Name), ($text -replace "`r?`n", "`r`n"), [Text.Encoding]::ASCII)
 }
+
+# The texts of the dialogs a process shows (a hidden Word's VBA compile error, for one).
+Add-Type @'
+using System; using System.Text; using System.Collections.Generic; using System.Runtime.InteropServices;
+public static class WordDialogs {
+  delegate bool Each(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(Each f, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr p, Each f, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  public static string[] Texts(uint process) {
+    var found = new List<string>();
+    EnumWindows((h, l) => {
+      uint pid; GetWindowThreadProcessId(h, out pid);
+      var cls = new StringBuilder(64); GetClassName(h, cls, 64);
+      if (pid == process && cls.ToString() == "#32770") {
+        EnumChildWindows(h, (c, l2) => {
+          var t = new StringBuilder(2048); GetWindowText(c, t, 2048);
+          var s = t.ToString().Trim();
+          if (s.Length > 0 && s != "OK" && s != "Help") found.Add(s.Replace("\r", " ").Replace("\n", " "));
+          return true;
+        }, IntPtr.Zero);
+      }
+      return true;
+    }, IntPtr.Zero);
+    return found.ToArray();
+  }
+}
+'@
 
 # --- VBA into a new template, through a hidden Word ---------------------------------------
 # In a job with a time limit: a Word that hangs (it can, on a cold first start) is stopped, and
@@ -59,7 +91,12 @@ try {
       # Its own project name: macros can be called as Yaqatw.Module.Macro, apart from any other
       # template's (all are "Project" otherwise).
       $doc.VBProject.Name = 'Yaqatw'
-      foreach ($m in Get-ChildItem (Join-Path $work '*.bas')) { [void]$doc.VBProject.VBComponents.Import($m.FullName) }
+      foreach ($m in Get-ChildItem (Join-Path $work '*') -Include *.bas, *.cls) { [void]$doc.VBProject.VBComponents.Import($m.FullName) }
+      # Compiled here, so a mistake fails the build instead of showing in the user's Word. A
+      # compile error is a dialog in this hidden Word: the time limit below catches it, and its
+      # text is read off the dialog.
+      $word.VBE.ActiveVBProject = $doc.VBProject
+      $word.VBE.CommandBars.FindControl(1, 578).Execute() # Debug > Compile
       $doc.SaveAs2($plain, 15) # wdFormatXMLTemplateMacroEnabled
       $doc.Close(0)
     }
@@ -68,15 +105,36 @@ try {
       if ($word.Documents.Count -eq 0) { $word.Quit() }
     }
   }
-  if (-not (Wait-Job $job -Timeout 120)) { throw 'Word did not finish within two minutes' }
+  if (-not (Wait-Job $job -Timeout 90)) {
+    $said = @()
+    foreach ($p in Get-Process WINWORD -ErrorAction SilentlyContinue | Where-Object { $wordsBefore -notcontains $_.Id }) {
+      $said += [WordDialogs]::Texts([uint32]$p.Id)
+    }
+    if ($said) { throw "Word stopped on a dialog: $($said -join ' | ')" }
+    throw 'Word did not finish within 90 seconds'
+  }
   Receive-Job $job -ErrorAction Stop
+  # The compile runs as Word gets to it, after the save has returned: a compile error is a
+  # dialog in the Word this build started. Look for one before calling the build good.
+  for ($i = 0; $i -lt 6; $i++) {
+    Start-Sleep -Milliseconds 500
+    $said = @()
+    foreach ($p in Get-Process WINWORD -ErrorAction SilentlyContinue | Where-Object { $wordsBefore -notcontains $_.Id }) {
+      $said += [WordDialogs]::Texts([uint32]$p.Id)
+    }
+    if ($said) { throw "The VBA did not compile: $($said -join ' | ')" }
+  }
   $done = $true
 }
 finally {
   if ($job) { Remove-Job $job -Force }
   # Word writes its security settings back as it exits, so AccessVBOM is restored only once the
   # Word this build started is gone: given 30 s after a good build, stopped at once otherwise.
-  $ours = { Get-Process WINWORD -ErrorAction SilentlyContinue | Where-Object { $wordsBefore -notcontains $_.Id -and -not $_.MainWindowTitle } }
+  # Ours: started by this build, with no document window (a VBA dialog's title at most).
+  $ours = {
+    Get-Process WINWORD -ErrorAction SilentlyContinue |
+      Where-Object { $wordsBefore -notcontains $_.Id -and (-not $_.MainWindowTitle -or $_.MainWindowTitle -like 'Microsoft Visual Basic*') }
+  }
   if ($done) {
     for ($i = 0; $i -lt 60 -and (& $ours); $i++) { Start-Sleep -Milliseconds 500 }
   }

@@ -32,9 +32,13 @@ Private Function Token() As String
 End Function
 
 ' One request. Returns the response body; status is 0 when Clew could not be reached.
-' Asynchronous with a DoEvents loop, so Word stays responsive while Clew asks the user.
+' With `pump`, Word's messages are handled while waiting (DoEvents), so Word stays responsive
+' through a long wait (Clew asking the user). Without it Word waits still: DoEvents also hands
+' Word its background work (layout, proofing), which in a large document took over a second per
+' request, charged to the bridge's quick exchanges (Bridge.bas).
 Private Function HttpCall(ByVal method As String, ByVal path As String, ByRef status As Long, _
-                      Optional ByVal body As String = "", Optional ByVal waitSeconds As Long = 5) As String
+                      Optional ByVal body As String = "", Optional ByVal waitSeconds As Long = 5, _
+                      Optional ByVal pump As Boolean = True) As String
     Dim http As Object
     Dim started As Single
     status = 0
@@ -45,14 +49,15 @@ Private Function HttpCall(ByVal method As String, ByVal path As String, ByRef st
     http.Open method, BaseUrl() & path, True
     If Len(Token()) > 0 Then http.SetRequestHeader "Authorization", "Bearer " & Token()
     If Len(body) > 0 Then
-        http.SetRequestHeader "Content-Type", "application/json"
+        ' UTF-8 on the wire: WinHttp converts the string with the charset named here.
+        http.SetRequestHeader "Content-Type", "application/json; charset=utf-8"
         http.Send body
     Else
         http.Send
     End If
     started = Timer
     Do Until http.WaitForResponse(0.1)
-        DoEvents
+        If pump Then DoEvents
         ' Timer wraps at midnight.
         If Timer < started Then started = started - 86400
         If Timer - started > waitSeconds + 5 Then Exit Function
@@ -102,13 +107,10 @@ Public Function ClewPair() As String
     Dim status As Long
     Dim body As String
     Dim newToken As String
-    Dim pid As String
     ' A token Clew no longer knows would be sent along; it is not needed to pair.
     ClewForget
-    body = HttpCall("GET", "/v1/hello", status)
-    pid = JsonDigits(body, "pid")
-    If status = 200 And Len(pid) > 0 And Len(pid) < 10 Then AllowSetForegroundWindow CLng(pid)
-    body = HttpCall("POST", "/v1/pair", status, "{""name"":""" & JsonEscape(CLIENT_NAME) & """}", PAIR_WAIT_SECONDS)
+    ClewAllowForeground
+    body = HttpCall("POST", "/v1/pair", status, "{""name"":" & JsonStr(CLIENT_NAME) & "}", PAIR_WAIT_SECONDS)
     If status = 0 Then
         ClewPair = "not-running"
     ElseIf status = 200 Then
@@ -131,87 +133,18 @@ Public Sub ClewForget()
     DeleteSetting APP_KEY, SECTION, "Token"
 End Sub
 
-' ----------------------------------------------------------------------------------------------
-' JSON, just enough for Clew's flat answers: one string field of an object.
-' Arguments of public functions are Variants: Application.Run passes them so (from a test, or
-' from another template), and a String parameter would refuse them.
+' Lets Clew Desktop bring its window or question to the front: Word is in front, and Windows
+' only lets a program behind come forward if the one in front allows it.
+Public Sub ClewAllowForeground()
+    Dim status As Long
+    Dim pid As String
+    pid = JsonDigits(HttpCall("GET", "/v1/hello", status), "pid")
+    If status = 200 And Len(pid) > 0 Then AllowSetForegroundWindow CLng(pid)
+End Sub
 
-Public Function JsonEscape(ByVal value As Variant) As String
-    Dim s As String
-    Dim i As Long
-    Dim c As String
-    Dim out As String
-    s = CStr(value)
-    For i = 1 To Len(s)
-        c = Mid$(s, i, 1)
-        Select Case AscW(c)
-            Case 34: out = out & "\"""
-            Case 92: out = out & "\\"
-            Case 0 To 31: out = out & "\u" & Right$("000" & Hex$(AscW(c)), 4)
-            Case Else: out = out & c
-        End Select
-    Next i
-    JsonEscape = out
-End Function
-
-' The string value of "key" in a flat JSON object, or "" when it is absent or not a string.
-Public Function JsonString(ByVal jsonText As Variant, ByVal fieldName As Variant) As String
-    Dim json As String
-    Dim key As String
-    Dim p As Long
-    Dim c As String
-    Dim out As String
-    json = CStr(jsonText)
-    key = CStr(fieldName)
-    p = InStr(1, json, """" & key & """")
-    If p = 0 Then Exit Function
-    p = p + Len(key) + 2
-    Do While p <= Len(json) And Mid$(json, p, 1) Like "[ :" & vbTab & vbCr & vbLf & "]"
-        p = p + 1
-    Loop
-    If Mid$(json, p, 1) <> """" Then Exit Function
-    p = p + 1
-    Do While p <= Len(json)
-        c = Mid$(json, p, 1)
-        If c = """" Then
-            JsonString = out
-            Exit Function
-        ElseIf c = "\" Then
-            p = p + 1
-            c = Mid$(json, p, 1)
-            Select Case c
-                Case "n": out = out & vbLf
-                Case "r": out = out & vbCr
-                Case "t": out = out & vbTab
-                Case "b": out = out & Chr$(8)
-                Case "f": out = out & Chr$(12)
-                Case "u"
-                    out = out & ChrW$(CLng("&H" & Mid$(json, p + 1, 4)))
-                    p = p + 4
-                Case Else: out = out & c
-            End Select
-        Else
-            out = out & c
-        End If
-        p = p + 1
-    Loop
-End Function
-
-' The digits of a non-negative integer "key" in a flat JSON object, or "" when it is not one.
-Public Function JsonDigits(ByVal jsonText As Variant, ByVal fieldName As Variant) As String
-    Dim json As String
-    Dim p As Long
-    Dim out As String
-    json = CStr(jsonText)
-    p = InStr(1, json, """" & CStr(fieldName) & """")
-    If p = 0 Then Exit Function
-    p = p + Len(CStr(fieldName)) + 2
-    Do While p <= Len(json) And Mid$(json, p, 1) Like "[ :" & vbTab & vbCr & vbLf & "]"
-        p = p + 1
-    Loop
-    Do While p <= Len(json) And Mid$(json, p, 1) Like "[0-9]"
-        out = out & Mid$(json, p, 1)
-        p = p + 1
-    Loop
-    JsonDigits = out
+' A POST with a JSON body, with this template's token. Returns the body; status 0 when Clew
+' could not be reached.
+Public Function ClewPost(ByVal path As String, ByVal body As String, ByRef status As Long, _
+                         Optional ByVal waitSeconds As Long = 5, Optional ByVal pump As Boolean = True) As String
+    ClewPost = HttpCall("POST", path, status, body, waitSeconds, pump)
 End Function

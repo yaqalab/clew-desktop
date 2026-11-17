@@ -498,6 +498,81 @@ $('restart-update').addEventListener('click', () => window.tools.restartToUpdate
 window.tools.onUpdates(renderUpdates);
 window.tools.updates().then(renderUpdates);
 
+// ---------------------------------------------------------------------------------------------
+// Word and the programs connected to Clew (main.js: Yaqatw for Word, the local API's clients)
+
+const WORD_KIND = 'word-template';
+
+function renderWord(w) {
+  if (!w) return;
+  const { plugin, clients } = w;
+  $('word-section').hidden = !(plugin.available || plugin.installed);
+  const grid = $('word-plugin');
+  grid.replaceChildren();
+  grid.append(textEl('span', 'Yaqatw for Word'));
+  const cell = textEl('div', '', 'row');
+  cell.append(
+    textEl(
+      'span',
+      plugin.installed
+        ? plugin.connected
+          ? 'Installed and connected: Word shows the Yaqatw tab.'
+          : 'Installed, not connected yet.'
+        : 'Not installed.',
+    ),
+  );
+  const button = el(
+    'button',
+    {
+      on: {
+        click: async () => {
+          button.disabled = true;
+          const next = await run(() => (plugin.installed ? window.tools.removeWord() : window.tools.installWord()));
+          renderWord(next ?? (await window.tools.word()));
+        },
+      },
+    },
+    plugin.installed ? 'Remove…' : 'Install',
+  );
+  if (!plugin.available && !plugin.installed) button.disabled = true;
+  cell.append(button);
+  grid.append(cell);
+
+  const list = $('clients');
+  list.replaceChildren();
+  if (!clients.length) {
+    list.append(textEl('span', 'None.', 'muted'));
+    return;
+  }
+  for (const c of clients) {
+    list.append(textEl('span', c.name));
+    const row = textEl('div', '', 'row');
+    row.append(textEl('span', `Connected ${when(c.pairedAt)}`, 'muted'));
+    if (c.kind === WORD_KIND) {
+      row.append(textEl('span', '· installed with Clew: Remove above takes it away', 'muted'));
+    } else {
+      const forget = el(
+        'button',
+        {
+          on: {
+            click: async () => {
+              forget.disabled = true;
+              const next = await run(() => window.tools.forgetClient(c.id));
+              renderWord(next ?? (await window.tools.word()));
+            },
+          },
+        },
+        'Disconnect',
+      );
+      row.append(forget);
+    }
+    list.append(row);
+  }
+}
+
+window.tools.onWord(renderWord);
+window.tools.word().then(renderWord);
+
 // Tabs
 function showTab(name) {
   for (const b of document.querySelectorAll('[role=tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
