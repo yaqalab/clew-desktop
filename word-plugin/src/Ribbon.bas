@@ -3,9 +3,10 @@ Attribute VB_Name = "Ribbon"
 ' `control` is an IRibbonControl and `ribbon` an IRibbonUI, typed Object so no extra library
 ' reference is needed.
 '
-' The Coding group shows for analysis documents (and for documents without a type yet): the type
-' is the document variable "yaqatw.fileType", which the Yaqatw window keeps in step with yaqatw.
-' Its buttons are actions of the document's Yaqatw in Clew Desktop (Bridge.BridgeAction).
+' The Coding group shows for analysis documents, the Writing group for writing documents (both
+' for documents without a type yet): the type is the document variable "yaqatw.fileType", which
+' the Yaqatw window keeps in step with yaqatw. Their buttons are actions of the document's Yaqatw
+' in Clew Desktop (Bridge.BridgeAction).
 Option Explicit
 
 Private Const TITLE As String = "Yaqatw"
@@ -107,9 +108,10 @@ End Function
 
 ' Runs an action of the document's Yaqatw; on failure says why. The answer's value (JSON), or ""
 ' after a failure.
-Private Function Act(ByVal action As String, Optional ByVal argsJson As String = "{}") As String
+Private Function Act(ByVal action As String, Optional ByVal argsJson As String = "{}", _
+                     Optional ByVal waitSeconds As Long = 120) As String
     Dim r As String
-    r = BridgeAction(action, argsJson)
+    r = BridgeAction(action, argsJson, waitSeconds)
     BridgeKeepTicking
     If Left$(r, 3) = "ok:" Then
         Act = Mid$(r, 4)
@@ -163,8 +165,8 @@ Public Sub Ribbon_CodesMenu(ByVal control As Object, ByRef content As Variant)
         End If
     End If
     items = items & "<menuSeparator id=""ycSep""/>" & _
-        "<button id=""ycFind"" label=""Find code" & ellipsis & """ imageMso=""FindDialog"" onAction=""Ribbon_PickCode""/>" & _
-        "<button id=""ycNew"" label=""New code" & ellipsis & """ imageMso=""FileNew"" onAction=""Ribbon_NewCode""/>"
+        "<button id=""ycFind"" label=""Find code" & ellipsis & """ imageMso=""ResearchPane"" onAction=""Ribbon_PickCode""/>" & _
+        "<button id=""ycNew"" label=""New code" & ellipsis & """ imageMso=""NameDefine"" onAction=""Ribbon_NewCode""/>"
     content = "<menu xmlns=""http://schemas.microsoft.com/office/2009/07/customui"">" & items & "</menu>"
 End Sub
 
@@ -246,6 +248,31 @@ End Sub
 ' In vivo: a code named after the selected text, applied to it.
 Public Sub Ribbon_InVivo(ByVal control As Object)
     Act "inVivo"
+End Sub
+
+' ----------------------------------------------------------------------------------------------
+' Writing group: Writing > Cite of the document's Yaqatw
+
+' Insert quote / Insert artifact / Find and insert: Clew's insert window (type to find, Enter
+' inserts at the cursor), searching first what the button's tag says.
+Public Sub Ribbon_Insert(ByVal control As Object)
+    ClewAllowForeground
+    Act "openPicker", "{""mode"":""insert"",""source"":" & JsonStr(control.Tag) & "}"
+End Sub
+
+' Refresh: every linked quote, figure and table in the document from its source, as now.
+Public Sub Ribbon_RefreshCitations(ByVal control As Object)
+    If Len(Act("refreshCitations", "{}", 300)) > 0 Then
+        MsgBox "The quotes, figures and tables are up to date.", vbInformation, TITLE
+    End If
+End Sub
+
+' Unlink all: keeps the text, figures and tables, without their links to the sources.
+Public Sub Ribbon_UnlinkCitations(ByVal control As Object)
+    If MsgBox("Unlink every quote, figure and table in this document?" & vbCr & vbCr & _
+              "They stay in the document as they are, but Refresh will no longer update them.", _
+              vbQuestion + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
+    Act "unlinkCitations", "{}", 300
 End Sub
 
 ' ----------------------------------------------------------------------------------------------

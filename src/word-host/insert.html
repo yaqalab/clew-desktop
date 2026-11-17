@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Insert</title>
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body class="insert">
+    <section id="find">
+      <div class="row">
+        <input id="q" type="search" placeholder="Find a quote, an artifact, a note…" autocomplete="off" spellcheck="false" aria-label="Find" />
+        <select id="source" aria-label="Where to look">
+          <option value="all">All</option>
+          <option value="highlights">Quotes</option>
+          <option value="artifacts">Artifacts</option>
+          <option value="notes">Notes</option>
+          <option value="tables">Tables</option>
+          <option value="figures">Figures</option>
+        </select>
+      </div>
+      <ul id="list" role="listbox" aria-label="Results"></ul>
+    </section>
+    <p id="msg" role="status" hidden></p>
+    <footer>
+      <button id="full" class="link">Open Yaqatw (the whole library)</button>
+      <span class="muted">Enter inserts · → more ways · Esc closes</span>
+    </footer>
+    <script src="colors.js"></script>
+    <script src="insert.js"></script>
+  </body>
+</html>
