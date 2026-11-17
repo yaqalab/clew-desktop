@@ -6,8 +6,12 @@
  * The template opens a session for its document and then keeps asking for work: the app cannot
  * call into Word, so Word calls out. Through the local API, for the template's client only:
  *
- * - `POST /v1/word/open { title, path, session? }` → `{ session }`. With the `session` of an
- *   open one (the same document again), that session is shown again instead.
+ * - `POST /v1/word/open { title, path, session?, show? }` → `{ session }`. With the `session`
+ *   of an open one (the same document again), that session is shown again instead. `show: false`
+ *   opens it without showing its window (for the ribbon's actions).
+ * - `POST /v1/word/action { session, action, args }` → `{ ok, value }` or `{ ok: false, error }`:
+ *   something the ribbon asks of yaqatw in that document's window (`onAction`). Its answer can
+ *   take operations in Word first: the template carries them out while it waits.
  * - `POST /v1/word/next { session, waitMs?, result? }` → `{ op }`, `{ op: null }` or
  *   `{ closed: true }`. `result` answers the operation handed out before
  *   (`{ id, ok, value }` or `{ id, ok: false, error }`); then the next one comes back at once,
@@ -52,8 +56,19 @@ const text = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
  *        (or asked to be shown again)
  * @param {(s: { id, title, path }, by: 'word' | 'app') => void} [opts.onClose]
  * @param {(id: string, event: string, payload: unknown) => void} [opts.onEvent]
+ * @param {(s: { id, title, path }, action: string, args: object) => Promise<unknown>} [opts.onAction]
+ *        carries out a ribbon action; what it resolves with goes back to Word
  */
-function createWordBridge({ onOpen = () => {}, onClose = () => {}, onEvent = () => {}, busyMs = BUSY_MS, runMs = RUN_MS } = {}) {
+function createWordBridge({
+  onOpen = () => {},
+  onClose = () => {},
+  onEvent = () => {},
+  onAction = async () => {
+    throw new Error('No actions here.');
+  },
+  busyMs = BUSY_MS,
+  runMs = RUN_MS,
+} = {}) {
   const sessions = new Map();
   let nextOp = 1;
 
@@ -125,7 +140,7 @@ function createWordBridge({ onOpen = () => {}, onClose = () => {}, onEvent = () 
       handler({ body, client }) {
         const again = own(body, client);
         if (again) {
-          onOpen(pub(again), true);
+          onOpen(pub(again), true, { show: body?.show !== false });
           return { session: again.id };
         }
         if (sessions.size >= MAX_SESSIONS) throw new ApiError(429, 'too-many-sessions');
@@ -141,7 +156,7 @@ function createWordBridge({ onOpen = () => {}, onClose = () => {}, onEvent = () 
           watch: null,
         };
         sessions.set(s.id, s);
-        onOpen(pub(s), false);
+        onOpen(pub(s), false, { show: body?.show !== false });
         return { session: s.id };
       },
     },
@@ -182,6 +197,23 @@ function createWordBridge({ onOpen = () => {}, onClose = () => {}, onEvent = () 
           });
           deliver(s);
         });
+      },
+    },
+
+    '/v1/word/action': {
+      kind: KIND,
+      maxBody: 256 * 1024,
+      async handler({ body, client }) {
+        const s = own(body, client);
+        if (!s) return { ok: false, error: MESSAGES.closed };
+        const action = text(body?.action, 40);
+        if (!/^[A-Za-z]{1,40}$/.test(action)) throw new ApiError(400, 'bad-action');
+        const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
+        try {
+          return { ok: true, value: (await onAction(pub(s), action, args)) ?? null };
+        } catch (err) {
+          return { ok: false, error: String(err?.message || err).slice(0, 500) };
+        }
       },
     },
 

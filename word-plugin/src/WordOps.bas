@@ -53,6 +53,7 @@ Public Function WordOp(ByVal d As Document, ByVal name As String, args As Varian
         Case "getVariable": WordOp = GetVariable(d, Arg(args, "key"))
         Case "setVariable": SetVariable d, Arg(args, "key"), JsonGet(args, "value"): WordOp = "null"
 
+        Case "refreshRibbon": RibbonRefresh: WordOp = "null"
         Case "ping": WordOp = JsonStr("pong")
         Case Else: Err.Raise ERR_OP, "WordOps", name & " is not supported in Word yet."
     End Select

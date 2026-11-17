@@ -148,3 +148,33 @@ Public Function ClewPost(ByVal path As String, ByVal body As String, ByRef statu
                          Optional ByVal waitSeconds As Long = 5, Optional ByVal pump As Boolean = True) As String
     ClewPost = HttpCall("POST", path, status, body, waitSeconds, pump)
 End Function
+
+' Starts a POST with a JSON body and returns the request without waiting for it (Nothing when it
+' could not start). The caller waits with ClewDone, doing other work meanwhile (Bridge.BridgeAction
+' carries out Word operations while yaqatw answers).
+Public Function ClewStart(ByVal path As String, ByVal body As String, ByVal waitSeconds As Long) As Object
+    Dim http As Object
+    On Error GoTo Failed
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    http.SetProxy 1
+    http.SetTimeouts 2000, 2000, 5000, waitSeconds * 1000
+    http.Open "POST", BaseUrl() & path, True
+    If Len(Token()) > 0 Then http.SetRequestHeader "Authorization", "Bearer " & Token()
+    http.SetRequestHeader "Content-Type", "application/json; charset=utf-8"
+    http.Send body
+    Set ClewStart = http
+    Exit Function
+Failed:
+    Set ClewStart = Nothing
+End Function
+
+' Whether a started request has its answer (waiting up to `seconds`); `failed` when it ended
+' without one (Clew gone).
+Public Function ClewDone(ByVal http As Object, ByVal seconds As Single, ByRef failed As Boolean) As Boolean
+    On Error GoTo Failed
+    ClewDone = http.WaitForResponse(seconds)
+    Exit Function
+Failed:
+    failed = True
+    ClewDone = True
+End Function

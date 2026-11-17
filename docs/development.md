@@ -284,7 +284,8 @@ GPL parts; Clew docs/32, section 2).
 ## The Word template (`word-plugin/`)
 
 Yaqatw for Word, `yaqatw.dotm`: a Word template that talks to the app through the local API. A
-**Yaqatw** tab with **Open Yaqatw** (yaqatw in an app window, working on this document) and
+**Yaqatw** tab with a **Coding** group (**Apply code ▾**, **Find code**, **New code**, **In
+vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) and
 **Connection** (says whether it is connected to the app). Windows only.
 
 - **Installed by the app**: File › Install Yaqatw for Word… ([src/word-plugin.js](../src/word-plugin.js))
@@ -327,6 +328,28 @@ Yaqatw for Word, `yaqatw.dotm`: a Word template that talks to the app through th
     `WindowSelectionChange` event, sent right after it, never from inside it.
   - The bridge's quick exchanges wait without `DoEvents`: letting Word do its background work
     there made each one take over a second in large documents.
+- **The ribbon's actions** ([Ribbon.bas](../word-plugin/src/Ribbon.bas)) are carried out by the
+  document's yaqatw, through its host channel (`HostRpcServer`, as Euro-Office's menu uses it):
+  `POST /v1/word/action { session, action, args }` → the app → the window's host page → yaqatw.
+  A document without a session gets one with a hidden window (`show: false`); Open Yaqatw shows
+  it. While an action waits, the template carries out the Word operations it needs
+  (`Bridge.BridgeAction`), so the two never wait on each other. Actions: `codes`, `applyCode`,
+  `newCode`, `inVivo` (host page, after yaqatw is ready and the document's type known), and
+  `showWindow`, `openPicker` (the app).
+  - **Per document type**: the host page asks yaqatw for the document's type (`getFileType`, then
+    its `fileType` events) and copies it into the document variable `yaqatw.fileType`; the
+    Coding group shows for `analyze` and for documents without a type, and the ribbon refreshes
+    when another document comes to the front. Coding in a writing document, or one without a
+    type, says so instead of failing silently.
+  - **Apply code ▾** is filled when it opens: recently applied codes first, at most 25, each with a
+    square of its Word colour ([CodeImages.bas](../word-plugin/src/CodeImages.bas), bitmaps in
+    `%TEMP%\yaqatw-colors`), then Find code and New code.
+  - **Find code / New code**: the code picker, a small always-on-top app window
+    ([picker.html](../src/word-host/picker.html)): type to find, Enter applies, Esc closes; New code
+    with Word's 16 colours; Open Yaqatw for everything else. It only asks the document's own
+    yaqatw (`word:picker-action`: codes, applyCode, newCode, showWindow).
+  - `CLEW_WORD_DEBUG=1` copies a Word window's console (yaqatw's included) to the app's log.
+    `CLEW_TOOLS=0` keeps the tools out of a run (a second Clew for tests beside the one in use).
 - Sources: VBA modules in `word-plugin/src/*.bas` and `*.cls` (ASCII only; project name
   `Yaqatw`), the ribbon in `word-plugin/customUI/customUI14.xml`. No VBScript components
   (Windows is retiring VBScript). Module-level declarations go at the top of a module (VBA

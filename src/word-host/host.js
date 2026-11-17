@@ -51,46 +51,8 @@
 
   // ─── Highlights ────────────────────────────────────────────────────────────────────────────
 
-  // Word's highlight colours: a copy of yaqatw's wordColor (src/service/wordColors.ts), which
-  // yaqatw applies where a highlight is painted (only highlights are limited to Word's 16
-  // colours; everything else keeps the code's own colour). A palette colour is itself; any
-  // other is the Word colour of its hue, bright or dark by its lightness, or a grey when it has
-  // little colour. Word gets palette colours only (Highlights.bas maps those 16 exactly).
-  const WORD_LABELS = {
-    white: '#FFFFFF', yellow: '#FFFF00', lime: '#00FF00', turquoise: '#00FFFF', pink: '#FF00FF',
-    blue: '#0000FF', red: '#FF0000', darkblue: '#000080', teal: '#008080', green: '#008000',
-    purple: '#800080', darkred: '#800000', olive: '#808000', gray: '#808080', lightgray: '#C0C0C0',
-    black: '#000000',
-  };
-  const WORD_BRIGHT = ['#FF0000', '#FFFF00', '#00FF00', '#00FFFF', '#0000FF', '#FF00FF'];
-  const WORD_DARK = ['#800000', '#808000', '#008000', '#008080', '#000080', '#800080'];
-
-  function wordColor(color) {
-    if (typeof color !== 'string') return '';
-    const s = color.trim();
-    const hex = WORD_LABELS[s.toLowerCase()] || s;
-    let m = /^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(hex);
-    if (m) m = [m[0], m[1] + m[1], m[2] + m[2], m[3] + m[3]];
-    else m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-    if (!m) return '';
-    const [r, g, b] = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    if (max < 48) return '#000000';
-    if ((max - min) / max < 0.2) {
-      if (max >= 224) return '#FFFFFF';
-      if (max >= 160) return '#C0C0C0';
-      if (max >= 64) return '#808080';
-      return '#000000';
-    }
-    let hue;
-    if (max === r) hue = (60 * (g - b)) / (max - min);
-    else if (max === g) hue = (60 * (b - r)) / (max - min) + 120;
-    else hue = (60 * (r - g)) / (max - min) + 240;
-    if (hue < 0) hue += 360;
-    const slot = Math.floor((hue + 30) / 60) % 6;
-    return max >= 160 ? WORD_BRIGHT[slot] : WORD_DARK[slot];
-  }
+  // Word's highlight colours (colors.js): Word gets palette colours only.
+  const wordColor = window.ClewWordColors.wordColor;
 
   /**
    * Title and colour from the highlight's codes, as WordDocumentHost.applyHighlightUpdate works
@@ -349,7 +311,15 @@
 
   const handlers = {
     // Handshake: yaqatw announces itself; Word is there already.
-    pluginConnected: () => emit('ready'),
+    pluginConnected: () => {
+      emit('ready');
+      if (markReady) {
+        const ready = markReady;
+        markReady = null;
+        // Ready for actions once the document's type is known (coding actions depend on it).
+        syncFileType().then(ready, ready);
+      }
+    },
 
     // Custom XML parts: where yaqatw keeps its entities, inside the document.
     readXmlPart: (ns, root) => op('readXmlPart', { ns, root }),
@@ -491,7 +461,133 @@
   window.addEventListener('message', (e) => {
     if (e.source !== frame.contentWindow || e.origin !== YAQATW) return;
     const m = e.data;
-    if (m && typeof m === 'object' && m.type === 'yaqatw-rpc') answer(m);
+    if (!m || typeof m !== 'object') return;
+    if (m.type === 'yaqatw-rpc') answer(m);
+    else if (m.type === 'yaqatw-host-rpc-response') settlePlugin(m);
+    else if (m.type === 'yaqatw-host-rpc-event') pluginEvent(m.event, m.payload);
+  });
+
+  // ─── The other way: asking yaqatw (its HostRpcServer, as Euro-Office's menu does) ──────────
+  //
+  //   host → yaqatw   { type: "yaqatw-host-rpc",          id, method, args }
+  //   yaqatw → host   { type: "yaqatw-host-rpc-response", id, result | error }
+  //   yaqatw → host   { type: "yaqatw-host-rpc-event",    event, payload }
+
+  const pluginCalls = new Map();
+  let nextPluginCall = 1;
+
+  function callPlugin(method, ...args) {
+    const id = nextPluginCall++;
+    return new Promise((resolve, reject) => {
+      pluginCalls.set(id, { resolve, reject });
+      post({ type: 'yaqatw-host-rpc', id, method, args });
+    });
+  }
+
+  function settlePlugin(m) {
+    const p = pluginCalls.get(m.id);
+    if (!p) return;
+    pluginCalls.delete(m.id);
+    if (m.error) p.reject(new Error(m.error));
+    else p.resolve(m.result);
+  }
+
+  // yaqatw is there once it has said pluginConnected.
+  let markReady;
+  const yaqatwReady = new Promise((resolve) => (markReady = resolve));
+  const READY_WAIT_MS = 30000;
+
+  function whenReady() {
+    return Promise.race([
+      yaqatwReady,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Yaqatw is not ready in this document yet: open it with Yaqatw › Open Yaqatw.')),
+          READY_WAIT_MS,
+        ),
+      ),
+    ]);
+  }
+
+  // ─── The document's type, for Word's ribbon ────────────────────────────────────────────────
+  //
+  // yaqatw keeps it in its settings inside the document, possibly encrypted: Word's ribbon could
+  // not read it there. A plain copy goes into a document variable the template reads to show its
+  // groups for the type, kept in step with yaqatw ("fileType" events).
+
+  const TYPE_VARIABLE = 'yaqatw.fileType';
+  let fileType = null;
+
+  /** Takes the type, then copies it into Word in the background (actions never wait on that). */
+  function mirrorFileType(type) {
+    fileType = type === 'analyze' || type === 'write' ? type : null;
+    const wanted = fileType;
+    (async () => {
+      const current = await op('getVariable', { key: TYPE_VARIABLE });
+      if ((current || null) !== wanted) await op('setVariable', { key: TYPE_VARIABLE, value: wanted });
+      await op('refreshRibbon');
+    })().catch(() => {
+      /* the document closed meanwhile */
+    });
+  }
+
+  async function syncFileType() {
+    let type = null;
+    try {
+      type = await callPlugin('getFileType');
+    } catch {
+      /* an older yaqatw: no type, the ribbon shows everything */
+    }
+    mirrorFileType(type);
+  }
+
+  function pluginEvent(event, payload) {
+    if (event === 'fileType') mirrorFileType(payload && payload.fileType);
+  }
+
+  // ─── Actions: what Word's ribbon (and the code picker) ask of yaqatw ───────────────────────
+
+  function requireAnalysis() {
+    if (fileType === 'analyze') return;
+    throw new Error(
+      fileType === 'write'
+        ? 'This is a writing document: codes are applied in analysis documents.'
+        : "Choose this document's type first: Yaqatw › Open Yaqatw, then Settings › Document type: Analysis.",
+    );
+  }
+
+  const actions = {
+    /** The state the ribbon needs: is yaqatw there, and the document's type. */
+    state: async () => ({ ready: true, fileType }),
+    /** The project's codes, colours as Word shows them. */
+    codes: async () => ({
+      fileType,
+      codes: ((await callPlugin('getCodeMenuItems')) || []).map((c) => ({
+        id: String(c.id),
+        name: String(c.name || ''),
+        description: c.description ? String(c.description) : '',
+        color: wordColor(c.color),
+      })),
+    }),
+    applyCode: async ({ codeId }) => {
+      requireAnalysis();
+      await callPlugin('applyCodeToSelection', String(codeId));
+    },
+    newCode: async ({ name, description, color }) => {
+      requireAnalysis();
+      if (!name || !String(name).trim()) throw new Error('A code needs a name.');
+      await callPlugin('createCodeAndApply', String(name).trim(), String(description || ''), color ? String(color) : undefined);
+    },
+    inVivo: async () => {
+      requireAnalysis();
+      await callPlugin('createInVivoCodeAndApply');
+    },
+  };
+
+  word.onAction(async (name, args) => {
+    if (!Object.prototype.hasOwnProperty.call(actions, name)) throw new Error(`Unknown action: ${name}`);
+    await whenReady();
+    return actions[name](args || {});
   });
 
   // ─── Word's side ───────────────────────────────────────────────────────────────────────────

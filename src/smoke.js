@@ -322,13 +322,38 @@ async function run(win, ses, server, tools, folder, db, api) {
       for (let i = 0; i < 80 && !ops.includes('readXmlPart'); i++) await wait(250);
       const frame = wordWin.webContents.mainFrame.framesInSubtree.find((f) => f.origin === 'https://yaqatw.alefa.net');
       const status = await wordWin.webContents.executeJavaScript("document.getElementById('status').textContent");
+
+      // A ribbon action: yaqatw's codes (the fake document has none), then the code picker.
+      const codes = await programPost(`${base}/v1/word/action`, { session, action: 'codes' }, auth);
+      const picker = await programPost(`${base}/v1/word/action`, { session, action: 'openPicker', args: { mode: 'find' } }, auth);
+      let pickerWin = null;
+      for (let i = 0; i < 40 && !pickerWin; i++) {
+        pickerWin = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('clew-word://bridge/picker.html'));
+        if (!pickerWin) await wait(250);
+      }
+      const pickerErrors = [];
+      pickerWin?.webContents.on('console-message', (event) => {
+        if (event.level === 'error') pickerErrors.push(event.message);
+      });
+      let list = '';
+      for (let i = 0; i < 40 && pickerWin && !/New code/.test(list); i++) {
+        await wait(250);
+        list = await pickerWin.webContents.executeJavaScript("document.getElementById('list').textContent");
+      }
+      pickerWin?.destroy();
+
       wordWin.destroy();
       for (let i = 0; i < 20 && !closed; i++) await wait(250);
       closed = true;
       await pump.catch(() => {});
       assert(frame, 'no yaqatw frame in the Word window');
       assert(ops.includes('readXmlPart'), `yaqatw did not read its parts; ops: ${ops.join(', ') || 'none'}`);
-      return `ops from yaqatw: ${[...new Set(ops)].join(', ')}${status ? `; status "${status}"` : ''}`;
+      assert(codes.body?.ok === true && Array.isArray(codes.body.value?.codes), `codes action: ${JSON.stringify(codes.body)}`);
+      assert(picker.body?.ok === true, `openPicker: ${JSON.stringify(picker.body)}`);
+      assert(pickerWin, 'no code picker window');
+      assert(/New code/.test(list), `picker list: "${list}"`);
+      assert(pickerErrors.length === 0, `picker errors: ${pickerErrors.join(' | ')}`);
+      return `ops from yaqatw: ${[...new Set(ops)].join(', ')}; codes action ok (${codes.body.value.codes.length}); picker "${list}"${status ? `; status "${status}"` : ''}`;
     });
 
     await check('external requests reach the network with Origin/Referer as a browser sends them', async () => {

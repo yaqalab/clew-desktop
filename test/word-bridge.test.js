@@ -18,7 +18,7 @@ async function fresh(t, bridgeOpts = {}) {
   const clients = createClients(path.join(dir, 'clients.json'));
   const seen = { opened: [], closed: [], events: [] };
   const bridge = createWordBridge({
-    onOpen: (s, again) => seen.opened.push({ ...s, again }),
+    onOpen: (s, again, opts) => seen.opened.push({ ...s, again, ...(opts && opts.show === false ? { hidden: true } : {}) }),
     onClose: (s, by) => seen.closed.push({ ...s, by }),
     onEvent: (id, event, payload) => seen.events.push({ id, event, payload }),
     ...bridgeOpts,
@@ -206,4 +206,38 @@ test('large answers (XML parts) are accepted on next', async (t) => {
   assert.equal((await call).length, xml.length);
   // Elsewhere the limit stays small.
   assert.equal((await post('/v1/word/event', { session, event: 'x', payload: 'y'.repeat(20000) })).status, 413);
+});
+
+test('open without showing: onOpen hears show: false', async (t) => {
+  const { post, seen } = await fresh(t);
+  const r = await post('/v1/word/open', { title: 'Quiet.docx', path: 'C:\Quiet.docx', show: false });
+  assert.equal(r.status, 200);
+  assert.equal(seen.opened[0].hidden, true);
+  await post('/v1/word/open', { session: r.body.session });
+  assert.equal(seen.opened[1].hidden, undefined, 'shown when asked again without show: false');
+});
+
+test('actions: carried out by onAction for that session, answered as ok/value or ok/error', async (t) => {
+  const asked = [];
+  const { post, open } = await fresh(t, {
+    onAction: async (s, action, args) => {
+      asked.push({ session: s.id, action, args });
+      if (action === 'fail') throw new Error('Not an analysis document.');
+      return action === 'codes' ? [{ id: 'c1', name: 'Calm' }] : undefined;
+    },
+  });
+  const session = await open();
+  const codes = await post('/v1/word/action', { session, action: 'codes', args: { recent: ['c1'] } });
+  assert.deepEqual(codes.body, { ok: true, value: [{ id: 'c1', name: 'Calm' }] });
+  assert.deepEqual(asked[0], { session, action: 'codes', args: { recent: ['c1'] } });
+  assert.deepEqual((await post('/v1/word/action', { session, action: 'apply' })).body, { ok: true, value: null });
+  assert.deepEqual((await post('/v1/word/action', { session, action: 'fail' })).body, { ok: false, error: 'Not an analysis document.' });
+  assert.equal((await post('/v1/word/action', { session, action: 'bad name!' })).status, 400);
+  assert.deepEqual((await post('/v1/word/action', { session: 'nope', action: 'codes' })).body.ok, false);
+});
+
+test('actions need the Word template client', async (t) => {
+  const { post, open, other } = await fresh(t, { onAction: async () => 'x' });
+  const session = await open();
+  assert.equal((await post('/v1/word/action', { session, action: 'codes' }, other)).status, 403);
 });
