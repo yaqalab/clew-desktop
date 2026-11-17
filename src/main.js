@@ -1,6 +1,7 @@
 'use strict';
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFile } = require('node:child_process');
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, session, shell } = require('electron');
 const desktopConfig = require('../desktop.config.json');
 const sites = require('./sites');
@@ -436,7 +437,29 @@ const wordBridge = createWordBridge({
   },
   onEvent: (id, event, payload) => wordWindows.get(id)?.webContents.send('word:event', event, payload),
   onAction: (s, action, args) => wordAction(s, action, args),
+  onStall: () => restartWordTick(),
 });
+
+// Word's tick restarted from here, as a click in Word would (Bridge.BridgeKeepTicking): Word keeps
+// one OnTime timer and something can take it, and with nobody clicking in Word nothing there sets
+// it again. Through COM, in the running Word; a Word in a dialog does not answer, and the attempt
+// gives up. Windows only, never in a smoke run (it would reach a Word the user has open).
+const WORD_TICK_SCRIPT =
+  "$w = [Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application'); [void]$w.Run('BridgeKeepTicking')";
+let restartingTick = false;
+function restartWordTick() {
+  if (process.platform !== 'win32' || SMOKE || restartingTick) return;
+  restartingTick = true;
+  execFile(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', WORD_TICK_SCRIPT],
+    { timeout: 15000, windowsHide: true },
+    (err) => {
+      restartingTick = false;
+      console.log(`[word] Word had stopped asking for work: tick ${err ? `not restarted (${String(err.message).split('\n')[0]})` : 'restarted'}`);
+    },
+  );
+}
 
 /**
  * A ribbon action (Yaqatw for Word): shown here (the window, the code picker), or carried out by

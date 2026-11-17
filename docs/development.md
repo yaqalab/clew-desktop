@@ -337,6 +337,11 @@ vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) 
     `WindowSelectionChange` event, sent right after it, never from inside it.
   - The bridge's quick exchanges wait without `DoEvents`: letting Word do its background work
     there made each one take over a second in large documents.
+  - Word keeps one `OnTime` timer, and the tick can be lost (seen once with nothing else setting
+    one); a click in Word sets it again, but with nobody in Word nothing would. So when work has
+    waited 4 s without Word asking (`onStall` in word-bridge.js), the app sets it again itself,
+    as the click would: `Run("BridgeKeepTicking")` in the running Word through COM (PowerShell;
+    never in a smoke run). Again at 8, 16 s… until Word asks or the work fails as busy (30 s).
 - **The ribbon's actions** ([Ribbon.bas](../word-plugin/src/Ribbon.bas)) are carried out by the
   document's yaqatw, through its host channel (`HostRpcServer`, as Euro-Office's menu uses it):
   `POST /v1/word/action { session, action, args }` → the app → the window's host page → yaqatw.
@@ -348,10 +353,10 @@ vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) 
   (the app). Refresh and unlink of a whole document may take up to 5 minutes, the others 60 s.
   - **Per document type**: the host page asks yaqatw for the document's type (`getFileType`, then
     its `fileType` events) and copies it into the document variable `yaqatw.fileType`; the
-    Coding group shows for `analyze`, the Writing group for `write`, both for documents without
-    a type, and the ribbon refreshes when another document comes to the front. Coding in a
-    writing document, inserting in an analysis one, or either without a type, says so instead of
-    failing silently.
+    Coding group shows for `analyze`, the Writing group for `write`, neither for a document
+    without a type (Clew Desktop alone, until the type is chosen in Yaqatw), and the ribbon
+    refreshes when another document comes to the front. Coding in a writing document, inserting
+    in an analysis one, or either without a type, says so instead of failing silently.
   - **Writing**: Insert quote, Insert artifact and Find and insert open the insert window
     ([insert.html](../src/word-host/insert.html)), searching highlights, artifacts or everything
     first: type to find (yaqatw's Writing › Cite search, `searchCiteSources`), Enter or a click

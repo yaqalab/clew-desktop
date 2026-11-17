@@ -241,3 +241,30 @@ test('actions need the Word template client', async (t) => {
   const session = await open();
   assert.equal((await post('/v1/word/action', { session, action: 'codes' }, other)).status, 403);
 });
+
+test("work waiting while Word does not ask: onStall, again later, never while Word asks", async (t) => {
+  const stalls = [];
+  const { bridge, post, open } = await fresh(t, { stallMs: 60, busyMs: 2000, onStall: (s) => stalls.push(s.id) });
+  const session = await open();
+  // Word asks every 30 ms and takes the work: no stall.
+  const call = bridge.call(session, 'ping');
+  const asked = await post('/v1/word/next', { session });
+  assert.equal(asked.body.op.op, 'ping');
+  await post('/v1/word/next', { session, result: { id: asked.body.op.id, ok: true, value: 'pong' } });
+  assert.equal(await call, 'pong');
+  await sleep(150);
+  assert.deepEqual(stalls, []);
+
+  // Word stops asking: a stall at 60 ms, another at 60 + 120 ms.
+  const waiting = bridge.call(session, 'ping');
+  await sleep(100);
+  assert.deepEqual(stalls, [session]);
+  await sleep(120);
+  assert.deepEqual(stalls, [session, session]);
+  // Word asks again: the work goes, and the stalls stop.
+  const next = await post('/v1/word/next', { session });
+  await post('/v1/word/next', { session, result: { id: next.body.op.id, ok: true, value: 'pong' } });
+  assert.equal(await waiting, 'pong');
+  await sleep(300);
+  assert.equal(stalls.length, 2);
+});

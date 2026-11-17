@@ -5,7 +5,7 @@
       <tab id="yaqatwTab" label="Yaqatw">
         <!-- Icons are Office's own (imageMso), grey with one accent colour like Word's. A name
              Office does not have shows an empty space and no error: check new ones in Word. -->
-        <!-- Shown for analysis documents, and for documents without a type yet (Ribbon.bas). -->
+        <!-- Shown for analysis documents only (Ribbon.bas): a document without a type has Clew Desktop alone. -->
         <group id="yaqatwCoding" label="Coding" tag="analyze" getVisible="Ribbon_GetVisible">
           <dynamicMenu id="yaqatwApply" label="Apply code" size="large" imageMso="Highlight"
                        screentip="Apply a code"
@@ -24,7 +24,7 @@
                   supertip="Creates a code named after the selected text and applies it."
                   onAction="Ribbon_InVivo"/>
         </group>
-        <!-- Shown for writing documents, and for documents without a type yet. The tag of each
+        <!-- Shown for writing documents only. The tag of each
              Insert button is what the insert window searches first. -->
         <group id="yaqatwWriting" label="Writing" tag="write" getVisible="Ribbon_GetVisible">
           <button id="yaqatwInsertQuote" label="Insert quote" size="large" imageMso="CitationInsert" tag="highlights"

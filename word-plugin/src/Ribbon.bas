@@ -3,8 +3,8 @@ Attribute VB_Name = "Ribbon"
 ' `control` is an IRibbonControl and `ribbon` an IRibbonUI, typed Object so no extra library
 ' reference is needed.
 '
-' The Coding group shows for analysis documents, the Writing group for writing documents (both
-' for documents without a type yet): the type is the document variable "yaqatw.fileType", which
+' The Coding group shows for analysis documents, the Writing group for writing documents, neither
+' for a document without a type yet: the type is the document variable "yaqatw.fileType", which
 ' the Yaqatw window keeps in step with yaqatw. Their buttons are actions of the document's Yaqatw
 ' in Clew Desktop (Bridge.BridgeAction).
 Option Explicit
@@ -47,11 +47,10 @@ Private Function DocType() As String
 None:
 End Function
 
-' A group whose tag is a document type shows for that type, and for a document without one.
+' A group whose tag is a document type shows for that type only: a document without a type has
+' the common group alone (Clew Desktop) until its type is chosen in Yaqatw.
 Public Sub Ribbon_GetVisible(ByVal control As Object, ByRef visible As Variant)
-    Dim t As String
-    t = DocType()
-    visible = (Len(t) = 0 Or t = control.Tag)
+    visible = (DocType() = control.Tag)
 End Sub
 
 ' ----------------------------------------------------------------------------------------------
