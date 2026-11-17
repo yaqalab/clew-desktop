@@ -13,6 +13,7 @@ const vm = require('node:vm');
 const DIR = path.join(__dirname, '..', 'src', 'word-host');
 const SOURCE = fs.readFileSync(path.join(DIR, 'host.js'), 'utf8');
 const COLORS = fs.readFileSync(path.join(DIR, 'colors.js'), 'utf8');
+const FIGURES = fs.readFileSync(path.join(DIR, 'figures.js'), 'utf8');
 const YAQATW = 'https://yaqatw.alefa.net';
 
 /** The page with `word(op, args)` answering operations; rpc(method, ...args) → yaqatw's reply. */
@@ -62,6 +63,7 @@ function page(word, { open = true, plugin = {} } = {}) {
     setTimeout,
     clearTimeout,
     URL,
+    atob,
     document: { getElementById: (id) => (id === 'status' ? status : frame) },
     localStorage: {
       getItem: (k) => (store.has(k) ? store.get(k) : null),
@@ -89,6 +91,7 @@ function page(word, { open = true, plugin = {} } = {}) {
   ctx.window = ctx;
   vm.createContext(ctx);
   vm.runInContext(COLORS, ctx);
+  vm.runInContext(FIGURES, ctx);
   vm.runInContext(SOURCE, ctx);
   let next = 1;
   const rpc = (method, ...args) =>
@@ -268,8 +271,7 @@ test('restoreHighlight: already there; one free match restored; duplicates told 
 test('unknown methods and things not done yet answer "not supported", without asking Word', async () => {
   const p = page(() => null);
   assert.match((await p.rpc('somethingNew', 1)).error, /Not supported in Word yet: somethingNew/);
-  assert.match((await p.rpc('insertCitationAtCursor', {})).error, /not supported in Word yet/);
-  assert.deepEqual((await p.rpc('getAllCitationControlIds')).result, []);
+  assert.match((await p.rpc('openDocument', 'C:\\Other.docx')).error, /not supported in Word yet/);
   assert.equal(p.calls.length, 0);
 });
 
@@ -447,4 +449,107 @@ test('saving the settings part carries the new type at once', async () => {
   assert.equal(vars.get('yaqatw.fileType'), 'analyze');
   await p.rpc('saveXmlPart', 'http://yaqat.alefa.net/xml/settings', '<settings xmlns="http://yaqat.alefa.net/xml/settings"><setting id="yaqatw-file-type" name="yaqatw-file-type" value="write"/></settings>');
   await assert.rejects(p.act('applyCode', { codeId: 'c1' }), /writing document/);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Quotes, notes, figures and tables (word-plugin/src/Citations.bas)
+
+/** The start of a picture file, enough for its type and size. */
+function pictureHead(kind, width, height) {
+  if (kind === 'png') {
+    const b = Buffer.alloc(33);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).copy(b);
+    b.write('IHDR', 12, 'latin1');
+    b.writeUInt32BE(width, 16);
+    b.writeUInt32BE(height, 20);
+    return b.toString('base64');
+  }
+  if (kind === 'jpeg') {
+    // SOI, an APP0 segment (16 bytes), then SOF0 with the size.
+    const app0 = Buffer.concat([Buffer.from([0xff, 0xe0, 0x00, 0x10]), Buffer.alloc(14)]);
+    const sof = Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 3, 0, 0, 0]);
+    return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, sof]).toString('base64');
+  }
+  const b = Buffer.alloc(13);
+  b.write('GIF89a', 0, 'latin1');
+  b.writeUInt16LE(width, 6);
+  b.writeUInt16LE(height, 8);
+  return b.toString('base64');
+}
+
+test('a quote goes to Word as text in a citation, block quotes in the Quote style', async () => {
+  const p = page((op) => (op === 'insertCitation' ? { controlId: '-955410093' } : null));
+  const r = await p.rpc('insertCitationAtCursor', { formattedText: '“Calm.” Participant #3', title: 'Quote: Calm.', style: 'block' });
+  assert.deepEqual(r.result, { controlId: '-955410093' });
+  assert.deepEqual(p.calls[0], { op: 'insertCitation', args: { title: 'Quote: Calm.', text: '“Calm.” Participant #3', block: true } });
+  await p.rpc('refreshCitationDisplay', '-955410093', '“Calm.”', false);
+  assert.deepEqual(p.calls[1], { op: 'refreshCitation', args: { id: '-955410093', text: '“Calm.”', block: false } });
+});
+
+test('citations are listed, deleted and unlinked in Word', async () => {
+  const p = page((op) => (op === 'citationIds' ? ['1', '-2'] : null));
+  assert.deepEqual((await p.rpc('getAllCitationControlIds')).result, ['1', '-2']);
+  await p.rpc('deleteCitationControl', 1);
+  await p.rpc('unlinkCitationControl', '-2');
+  await p.rpc('unlinkAllCitations');
+  assert.deepEqual(p.calls.slice(1), [
+    { op: 'deleteCitation', args: { id: '1' } },
+    { op: 'unlinkCitation', args: { id: '-2' } },
+    { op: 'unlinkAllCitations', args: {} },
+  ]);
+});
+
+test('a figure is one Word XML package: caption, picture at its size, source, in the set order', async () => {
+  const p = page((op) => (op === 'insertCitationXml' ? { controlId: '7' } : null));
+  const caption = '<pkg:package><w:body><w:p><w:r><w:t>Figure 1. Rooms</w:t></w:r></w:p></w:body></pkg:package>';
+  const opts = {
+    title: 'Rooms', captionOoxml: caption, captionPosition: 'above', imageAlignment: 'center',
+    sourceAlignment: 'right', source: 'Source: field notes & photos', base64: pictureHead('png', 640, 480), createControl: true,
+  };
+  const r = await p.rpc('insertArtifactImageAtCursor', opts);
+  assert.deepEqual(r.result, { controlId: '7' });
+  const { args } = p.calls[0];
+  assert.equal(p.calls[0].op, 'insertCitationXml');
+  assert.equal(args.title, 'Artifact: Rooms');
+  assert.equal(args.link, true);
+  const xml = args.xml;
+  assert.match(xml, /<pkg:part pkg:name="\/word\/media\/figure\.png" pkg:contentType="image\/png"/);
+  assert.match(xml, new RegExp(`<pkg:binaryData>${opts.base64.replace(/[+/]/g, '\\$&')}</pkg:binaryData>`));
+  // 640 × 480 pixels at 96 an inch, in EMU.
+  assert.match(xml, /<wp:extent cx="6096000" cy="4572000"\/>/);
+  const at = (s) => xml.indexOf(s);
+  assert.ok(at('Figure 1. Rooms') > 0 && at('Figure 1. Rooms') < at('<w:drawing>'), 'caption above the picture');
+  assert.ok(at('<w:jc w:val="center"/></w:pPr><w:r><w:drawing>') > 0, 'picture centred');
+  assert.ok(at('<w:jc w:val="right"/></w:pPr><w:r><w:t xml:space="preserve">Source: field notes &amp; photos') > at('<w:drawing>'), 'source last');
+
+  // Below, unlinked, a JPEG, as a refresh too.
+  await p.rpc('insertArtifactImageAtCursor', { ...opts, captionPosition: 'below', createControl: false, base64: pictureHead('jpeg', 300, 200) });
+  const below = p.calls[1].args;
+  assert.equal(below.link, false);
+  assert.match(below.xml, /figure\.jpeg" pkg:contentType="image\/jpeg"/);
+  assert.match(below.xml, /<wp:extent cx="2857500" cy="1905000"\/>/);
+  assert.ok(below.xml.indexOf('<w:drawing>') < below.xml.indexOf('Figure 1. Rooms'), 'caption below the picture');
+  await p.rpc('refreshArtifactImageDisplay', '7', { ...opts, base64: `data:image/gif;base64,${pictureHead('gif', 10, 20)}` });
+  assert.equal(p.calls[2].op, 'refreshCitationXml');
+  assert.equal(p.calls[2].args.id, '7');
+  assert.match(p.calls[2].args.xml, /figure\.gif[\s\S]*<wp:extent cx="95250" cy="190500"\/>/);
+});
+
+test('a picture Word cannot take is refused before Word is asked', async () => {
+  const p = page(() => null);
+  const r = await p.rpc('insertArtifactImageAtCursor', { title: 'x', base64: Buffer.from('<svg/>').toString('base64'), createControl: true });
+  assert.match(r.error, /PNG, JPEG, GIF or BMP/);
+  assert.equal(p.calls.length, 0);
+});
+
+test("a table goes in as the Word XML yaqatw made; an older yaqatw that sends none is told so", async () => {
+  const p = page((op) => (op === 'insertCitationXml' ? { controlId: '9' } : null));
+  const doc = { title: 'Waiting times in the three clinics', blocks: [] };
+  const r = await p.rpc('insertTableAtCursor', doc, { link: true, ooxml: '<pkg:package/>' });
+  assert.deepEqual(r.result, { controlId: '9' });
+  assert.deepEqual(p.calls[0], { op: 'insertCitationXml', args: { title: 'Table: Waiting times in the three cli', xml: '<pkg:package/>', link: true } });
+  const old = await p.rpc('insertTableAtCursor', doc, { link: true });
+  assert.match(old.error, /newer Yaqatw/);
+  await p.rpc('refreshTableCitationDisplay', '9', '<pkg:package/>', doc);
+  assert.deepEqual(p.calls[1], { op: 'refreshCitationXml', args: { id: '9', xml: '<pkg:package/>' } });
 });

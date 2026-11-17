@@ -22,6 +22,7 @@
   const SETTING_PREFIX = 'yaqatw.setting.';
 
   const word = window.clewWord;
+  const figures = window.ClewWordFigures;
   const status = document.getElementById('status');
   const frame = document.getElementById('yaqatw');
   let info = { title: 'Word document' };
@@ -426,18 +427,43 @@
     readMetadataTable: () => op('readMetadataTable'),
     readMetadataFromDocument: none,
 
-    // Citations, figures, tables: not yet.
-    insertCitationAtCursor: notSupported('Inserting citations'),
-    refreshCitationDisplay: none,
+    // Quotes, notes, figures and tables in a writing document (word-plugin/src/Citations.bas).
+    // Each linked one is a content control whose id yaqatw keeps to refresh it.
+    insertCitationAtCursor: (o) =>
+      op('insertCitation', {
+        title: String((o && o.title) || ''),
+        text: String((o && o.formattedText) ?? ''),
+        block: Boolean(o && o.style === 'block'),
+      }),
+    refreshCitationDisplay: (id, text, isBlock) =>
+      op('refreshCitation', { id: String(id), text: String(text ?? ''), block: Boolean(isBlock) }).then(none),
+    // WebAdapter refreshes them all itself, one by one through the methods here.
     refreshAllCitations: none,
-    getAllCitationControlIds: empty,
-    deleteCitationControl: none,
-    unlinkCitationControl: none,
-    unlinkAllCitations: none,
-    insertArtifactImageAtCursor: notSupported('Inserting figures'),
-    refreshArtifactImageDisplay: none,
-    insertTableAtCursor: notSupported('Inserting tables'),
-    refreshTableCitationDisplay: none,
+    getAllCitationControlIds: () => op('citationIds'),
+    deleteCitationControl: (id) => op('deleteCitation', { id: String(id) }).then(none),
+    unlinkCitationControl: (id) => op('unlinkCitation', { id: String(id) }).then(none),
+    unlinkAllCitations: () => op('unlinkAllCitations').then(none),
+    insertArtifactImageAtCursor: (o) =>
+      op('insertCitationXml', {
+        title: `Artifact: ${(o && o.title) || ''}`.slice(0, 255),
+        xml: figures.figurePackage(o),
+        link: Boolean(o && o.createControl),
+      }),
+    refreshArtifactImageDisplay: (id, o) =>
+      op('refreshCitationXml', { id: String(id), xml: figures.figurePackage(o) }).then(none),
+    // The table's Word XML is made by yaqatw, which passes it as opts.ooxml.
+    insertTableAtCursor: (doc, opts) => {
+      if (!opts || typeof opts.ooxml !== 'string') {
+        throw new Error('Inserting tables in Word needs a newer Yaqatw: reload Yaqatw and try again.');
+      }
+      return op('insertCitationXml', {
+        title: `Table: ${String((doc && doc.title) || '').slice(0, 30)}`,
+        xml: opts.ooxml,
+        link: Boolean(opts.link),
+      });
+    },
+    refreshTableCitationDisplay: (id, ooxml) =>
+      op('refreshCitationXml', { id: String(id), xml: String(ooxml ?? '') }).then(none),
 
     // IDataStore: yaqatw keeps entities through the XML parts; these are unused (as in
     // Euro-Office), except the key/value settings.

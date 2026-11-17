@@ -39,6 +39,18 @@ Public Function WordOp(ByVal d As Document, ByVal name As String, args As Varian
         Case "currentHighlight": WordOp = CurrentHighlight(d)
         Case "setHighlightsVisible": WordOp = SetHighlightsVisible(d, BoolArg(args, "visible"))
 
+        ' Quotes, notes, figures and tables in a writing document (Citations.bas)
+        Case "insertCitation"
+            WordOp = InsertCitation(d, OptArg(args, "title"), Arg(args, "text"), BoolArg(args, "block"))
+        Case "refreshCitation": WordOp = RefreshCitation(d, Arg(args, "id"), Arg(args, "text"), BoolArg(args, "block"))
+        Case "insertCitationXml"
+            WordOp = InsertCitationXml(d, OptArg(args, "title"), Arg(args, "xml"), BoolArg(args, "link"))
+        Case "refreshCitationXml": WordOp = RefreshCitationXml(d, Arg(args, "id"), Arg(args, "xml"))
+        Case "citationIds": WordOp = CitationIds(d)
+        Case "deleteCitation": WordOp = RemoveCitation(d, Arg(args, "id"), False)
+        Case "unlinkCitation": WordOp = RemoveCitation(d, Arg(args, "id"), True)
+        Case "unlinkAllCitations": WordOp = UnlinkAllCitations(d)
+
         ' Finding and selecting text (the host page builds the search candidates and scores them)
         Case "findText": WordOp = FindText(d, Arg(args, "text"), NumArg(args, "max", 50), BoolArg(args, "context"))
         Case "selectRange": WordOp = SelectRange(d, NumArg(args, "start", -1), NumArg(args, "end", -1))
