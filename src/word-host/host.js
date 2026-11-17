@@ -51,6 +51,46 @@
 
   // ─── Highlights ────────────────────────────────────────────────────────────────────────────
 
+  // Word's highlight colours: a copy of yaqatw's wordColor (src/service/wordColors.ts), which
+  // yaqatw applies wherever a code colour is shown or painted. A palette colour is itself; any
+  // other is the Word colour of its hue, bright or dark by its lightness, or a grey when it has
+  // little colour. Word gets palette colours only (Highlights.bas maps those 16 exactly).
+  const WORD_LABELS = {
+    white: '#FFFFFF', yellow: '#FFFF00', lime: '#00FF00', turquoise: '#00FFFF', pink: '#FF00FF',
+    blue: '#0000FF', red: '#FF0000', darkblue: '#000080', teal: '#008080', green: '#008000',
+    purple: '#800080', darkred: '#800000', olive: '#808000', gray: '#808080', lightgray: '#C0C0C0',
+    black: '#000000',
+  };
+  const WORD_BRIGHT = ['#FF0000', '#FFFF00', '#00FF00', '#00FFFF', '#0000FF', '#FF00FF'];
+  const WORD_DARK = ['#800000', '#808000', '#008000', '#008080', '#000080', '#800080'];
+
+  function wordColor(color) {
+    if (typeof color !== 'string') return '';
+    const s = color.trim();
+    const hex = WORD_LABELS[s.toLowerCase()] || s;
+    let m = /^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(hex);
+    if (m) m = [m[0], m[1] + m[1], m[2] + m[2], m[3] + m[3]];
+    else m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return '';
+    const [r, g, b] = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max < 48) return '#000000';
+    if ((max - min) / max < 0.2) {
+      if (max >= 224) return '#FFFFFF';
+      if (max >= 160) return '#C0C0C0';
+      if (max >= 64) return '#808080';
+      return '#000000';
+    }
+    let hue;
+    if (max === r) hue = (60 * (g - b)) / (max - min);
+    else if (max === g) hue = (60 * (b - r)) / (max - min) + 120;
+    else hue = (60 * (r - g)) / (max - min) + 240;
+    if (hue < 0) hue += 360;
+    const slot = Math.floor((hue + 30) / 60) % 6;
+    return max >= 160 ? WORD_BRIGHT[slot] : WORD_DARK[slot];
+  }
+
   /**
    * Title and colour from the highlight's codes, as WordDocumentHost.applyHighlightUpdate works
    * them out: the resolved codes in `fullChildren.code`, each once; the title their names
@@ -69,7 +109,7 @@
       .filter(Boolean)
       .join(' | ');
     const last = codes[codes.length - 1];
-    const color = (last && last.attrs && last.attrs.color) || '';
+    const color = wordColor(last && last.attrs && last.attrs.color);
     return op('paintHighlight', { hid: String(h.id), title, color, remove: codes.length === 0 }).then(() => undefined);
   }
 
@@ -201,7 +241,7 @@
       if (result.hid) await op('goToHighlight', { hid: result.hid });
       result = await op('insertHighlightAtSelection', {
         title: (code && code.name) || '',
-        color: (code && code.color) || '',
+        color: wordColor(code && code.color),
       });
     }
     return result;
@@ -347,7 +387,7 @@
     insertHighlightAtSelection: (code, opts) =>
       op('insertHighlightAtSelection', {
         title: (code && code.name) || '',
-        color: (code && code.color) || '',
+        color: wordColor(code && code.color),
         expandToParagraphs: Boolean(opts && opts.expandToParagraphs),
         noOverlap: Boolean(opts && opts.allowOverlappingHighlights === false),
       }),

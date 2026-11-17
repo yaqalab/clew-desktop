@@ -319,7 +319,10 @@ Yaqatw for Word, `yaqatw.dotm`: a Word template that talks to the app through th
     highlights as the web add-in makes them (content control, `yaqatw:id=<uuid>`, the overlap
     rules of its `WordDocumentHost`), Word's search (≤ 255 characters, as Office.js), the first
     table as metadata, comments. Each edit is one undo step, "Yaqatw".
-  - A code's colour becomes the Word highlight colour of the same hue (Word has 16).
+  - Colours: Word highlights come in 16 colours, which are yaqatw's swatch colours. A code's
+    colour reaches Word as one of them, by yaqatw's own rule (its `wordColor`, copied in the host
+    page; the template maps the 16 exactly): a palette colour is itself, any other the Word
+    colour of its hue.
   - The highlight under the cursor goes to yaqatw (`selectionchange`) through Word's
     `WindowSelectionChange` event, sent right after it, never from inside it.
   - The bridge's quick exchanges wait without `DoEvents`: letting Word do its background work

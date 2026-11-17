@@ -106,16 +106,35 @@ test('applyHighlightUpdate: codes once each, names joined, last colour; none lef
   const p = page(() => true);
   const code = (id, name, color) => ({ id, attrs: { name, color } });
   await p.rpc('applyHighlightUpdate', { id: 'h1', fullChildren: { code: [code('a', 'Calm', '#FFEB3B'), code('b', 'Place', '#4CAF50'), code('a', 'Calm')] } });
-  assert.deepEqual(p.calls[0], { op: 'paintHighlight', args: { hid: 'h1', title: 'Calm | Place', color: '#4CAF50', remove: false } });
+  // #4CAF50, a soft green, reaches Word as Word's bright green.
+  assert.deepEqual(p.calls[0], { op: 'paintHighlight', args: { hid: 'h1', title: 'Calm | Place', color: '#00FF00', remove: false } });
   await p.rpc('setHighlightAppearanceForCodes', { id: 'h2', fullChildren: { code: [] } });
   assert.deepEqual(p.calls[1].args, { hid: 'h2', title: '', color: '', remove: true });
+});
+
+test("colours reach Word as Word's highlight colours, as yaqatw's wordColor gives them", async () => {
+  const p = page(() => true);
+  // The same cases as yaqatw's src/service/wordColors.test.ts.
+  const cases = {
+    '#FFFF00': '#FFFF00', '#ffff00': '#FFFF00', '#008080': '#008080', '#FFFFFF': '#FFFFFF', '#000000': '#000000',
+    yellow: '#FFFF00', Teal: '#008080', '#ff0': '#FFFF00', ' #00ff00 ': '#00FF00',
+    '#4CAF50': '#00FF00', '#FFEB3B': '#FFFF00', '#FF9800': '#FFFF00', '#F44336': '#FF0000',
+    '#3F51B5': '#0000FF', '#00BCD4': '#00FFFF', '#9C27B0': '#FF00FF', '#880E4F': '#800080',
+    '#4A148C': '#000080', '#1B5E20': '#008000', '#FE0101': '#FF0000', '#7F0000': '#800000',
+    '#FAFAFA': '#FFFFFF', '#BDBDBD': '#C0C0C0', '#9E9E9E': '#808080', '#212121': '#000000',
+    '#010203': '#000000', 'not a colour': '', '#12345': '',
+  };
+  for (const [color, expected] of Object.entries(cases)) {
+    await p.rpc('applyHighlightUpdate', { id: 'h', fullChildren: { code: [{ id: 'c', attrs: { name: 'C', color } }] } });
+    assert.equal(p.calls.at(-1).args.color, expected, color);
+  }
 });
 
 test('coding the selection: the code and the overlap rule reach Word', async () => {
   const p = page(() => ({ hid: 'h1', text: 'calm' }));
   const r = await p.rpc('insertHighlightAtSelection', { id: 'c', name: 'Calm', color: '#FFEB3B' }, { allowOverlappingHighlights: false });
   assert.deepEqual(r.result, { hid: 'h1', text: 'calm' });
-  assert.deepEqual(p.calls[0].args, { title: 'Calm', color: '#FFEB3B', expandToParagraphs: false, noOverlap: true });
+  assert.deepEqual(p.calls[0].args, { title: 'Calm', color: '#FFFF00', expandToParagraphs: false, noOverlap: true });
   await p.rpc('insertHighlightAtSelection', { id: 'c', name: 'Calm' }, {});
   assert.equal(p.calls[1].args.noOverlap, false);
 });
