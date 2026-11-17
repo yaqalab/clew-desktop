@@ -342,6 +342,27 @@ async function run(win, ses, server, tools, folder, db, api) {
       }
       pickerWin?.destroy();
 
+      // The insert window (Writing group): it loads, searches where it was asked, and says why
+      // there is nothing (the fake document has no type).
+      const insert = await programPost(`${base}/v1/word/action`, { session, action: 'openPicker', args: { mode: 'insert', source: 'highlights' } }, auth);
+      let insertWin = null;
+      for (let i = 0; i < 40 && !insertWin; i++) {
+        insertWin = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('clew-word://bridge/insert.html'));
+        if (!insertWin) await wait(250);
+      }
+      const insertErrors = [];
+      insertWin?.webContents.on('console-message', (event) => {
+        if (event.level === 'error') insertErrors.push(event.message);
+      });
+      let insertState = { msg: '' };
+      for (let i = 0; i < 40 && insertWin && (!insertState.msg || insertState.msg === 'Loading…'); i++) {
+        await wait(250);
+        insertState = await insertWin.webContents.executeJavaScript(
+          "({ msg: document.getElementById('msg').textContent, source: document.getElementById('source').value })",
+        );
+      }
+      insertWin?.destroy();
+
       wordWin.destroy();
       for (let i = 0; i < 20 && !closed; i++) await wait(250);
       closed = true;
@@ -353,7 +374,12 @@ async function run(win, ses, server, tools, folder, db, api) {
       assert(pickerWin, 'no code picker window');
       assert(/New code/.test(list), `picker list: "${list}"`);
       assert(pickerErrors.length === 0, `picker errors: ${pickerErrors.join(' | ')}`);
-      return `ops from yaqatw: ${[...new Set(ops)].join(', ')}; codes action ok (${codes.body.value.codes.length}); picker "${list}"${status ? `; status "${status}"` : ''}`;
+      assert(insert.body?.ok === true, `openPicker insert: ${JSON.stringify(insert.body)}`);
+      assert(insertWin, 'no insert window');
+      assert(insertState.source === 'highlights', `insert window searches ${insertState.source}`);
+      assert(/type first|writing|Nothing/.test(insertState.msg), `insert window says "${insertState.msg}"`);
+      assert(insertErrors.length === 0, `insert window errors: ${insertErrors.join(' | ')}`);
+      return `ops from yaqatw: ${[...new Set(ops)].join(', ')}; codes action ok (${codes.body.value.codes.length}); picker "${list}"; insert window "${insertState.msg}"${status ? `; status "${status}"` : ''}`;
     });
 
     await check('external requests reach the network with Origin/Referer as a browser sends them', async () => {

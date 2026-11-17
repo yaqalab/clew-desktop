@@ -664,7 +664,48 @@
       requireAnalysis();
       await callPlugin('createInVivoCodeAndApply');
     },
+
+    // Writing: what yaqatw's Writing › Cite does, from Word's ribbon and the insert window.
+    /** Quotes, artifacts, notes, tables, figures matching `query`, each with how it can go in. */
+    searchCites: async ({ query, source, limit }) => {
+      requireWriting();
+      const items = await callWriting('searchCiteSources', String(query || ''), String(source || 'all'), Number(limit) || 30);
+      return { items: Array.isArray(items) ? items : [] };
+    },
+    insertCite: async ({ source, id, option }) => {
+      requireWriting();
+      await callWriting('insertCiteSource', String(source), String(id), option ? String(option) : undefined);
+    },
+    refreshCitations: async () => {
+      requireWriting();
+      await callWriting('refreshAllCitations');
+    },
+    unlinkCitations: async () => {
+      requireWriting();
+      await callWriting('unlinkAllCitations');
+    },
   };
+
+  /** A yaqatw method for writing; one too old to have it says so plainly. */
+  async function callWriting(method, ...args) {
+    try {
+      return await callPlugin(method, ...args);
+    } catch (err) {
+      if (/Unknown method/.test(cleanError(err))) {
+        throw new Error('Inserting from Word needs a newer Yaqatw: update Clew Desktop, then try again.');
+      }
+      throw err;
+    }
+  }
+
+  function requireWriting() {
+    if (fileType === 'write') return;
+    throw new Error(
+      fileType === 'analyze'
+        ? 'This is an analysis document: quotes and figures are inserted in writing documents.'
+        : "Choose this document's type first: Yaqatw › Open Yaqatw, then Settings › Document type: Writing.",
+    );
+  }
 
   word.onAction(async (name, args) => {
     if (!Object.prototype.hasOwnProperty.call(actions, name)) throw new Error(`Unknown action: ${name}`);

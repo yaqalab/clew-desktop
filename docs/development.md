@@ -343,20 +343,29 @@ vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) 
   A document without a session gets one with a hidden window (`show: false`); Open Yaqatw shows
   it. While an action waits, the template carries out the Word operations it needs
   (`Bridge.BridgeAction`), so the two never wait on each other. Actions: `codes`, `applyCode`,
-  `newCode`, `inVivo` (host page, after yaqatw is ready and the document's type known), and
-  `showWindow`, `openPicker` (the app).
+  `newCode`, `inVivo`, `searchCites`, `insertCite`, `refreshCitations`, `unlinkCitations` (host
+  page, after yaqatw is ready and the document's type known), and `showWindow`, `openPicker`
+  (the app). Refresh and unlink of a whole document may take up to 5 minutes, the others 60 s.
   - **Per document type**: the host page asks yaqatw for the document's type (`getFileType`, then
     its `fileType` events) and copies it into the document variable `yaqatw.fileType`; the
-    Coding group shows for `analyze` and for documents without a type, and the ribbon refreshes
-    when another document comes to the front. Coding in a writing document, or one without a
-    type, says so instead of failing silently.
+    Coding group shows for `analyze`, the Writing group for `write`, both for documents without
+    a type, and the ribbon refreshes when another document comes to the front. Coding in a
+    writing document, inserting in an analysis one, or either without a type, says so instead of
+    failing silently.
+  - **Writing**: Insert quote, Insert artifact and Find and insert open the insert window
+    ([insert.html](../src/word-host/insert.html)), searching highlights, artifacts or everything
+    first: type to find (yaqatw's Writing › Cite search, `searchCiteSources`), Enter or a click
+    inserts the result its usual way, the arrow (or →) shows the others (block quote, translation,
+    a picture, not linked…; `insertCiteSource`). Refresh and Unlink all are Cite's own
+    (`refreshAllCitations`, `unlinkAllCitations`); Unlink all asks first.
   - **Apply code ▾** is filled when it opens: recently applied codes first, at most 25, each with a
     square of its Word colour ([CodeImages.bas](../word-plugin/src/CodeImages.bas), bitmaps in
     `%TEMP%\yaqatw-colors`), then Find code and New code.
   - **Find code / New code**: the code picker, a small always-on-top app window
     ([picker.html](../src/word-host/picker.html)): type to find, Enter applies, Esc closes; New code
     with Word's 16 colours; Open Yaqatw for everything else. It only asks the document's own
-    yaqatw (`word:picker-action`: codes, applyCode, newCode, showWindow).
+    yaqatw (`word:picker-action`: codes, applyCode, newCode, searchCites, insertCite, showWindow;
+    the insert window uses the same channel).
   - `CLEW_WORD_DEBUG=1` copies a Word window's console (yaqatw's included) to the app's log.
     `CLEW_TOOLS=0` keeps the tools out of a run (a second Clew for tests beside the one in use).
 - Sources: VBA modules in `word-plugin/src/*.bas` and `*.cls` (ASCII only; project name

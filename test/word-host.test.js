@@ -553,3 +553,47 @@ test("a table goes in as the Word XML yaqatw made; an older yaqatw that sends no
   await p.rpc('refreshTableCitationDisplay', '9', '<pkg:package/>', doc);
   assert.deepEqual(p.calls[1], { op: 'refreshCitationXml', args: { id: '9', xml: '<pkg:package/>' } });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Writing: the ribbon's Writing group and the insert window
+
+test('writing actions go to yaqatw in a writing document, and are refused elsewhere', async () => {
+  const items = [{ source: 'highlights', id: 'h1', title: 'Calm', text: 'calm', options: [{ key: 'quote', label: 'Quote' }] }];
+  const vars = new Map();
+  const p = page(
+    (op, args) => {
+      if (op === 'getVariable') return vars.has(args.key) ? vars.get(args.key) : null;
+      if (op === 'setVariable') vars.set(args.key, args.value);
+      return null;
+    },
+    {
+      plugin: {
+        getFileType: 'write',
+        searchCiteSources: (query, source, limit) => (query === 'calm' && source === 'highlights' && limit === 50 ? items : []),
+        insertCiteSource: null,
+        refreshAllCitations: null,
+        unlinkAllCitations: null,
+      },
+    },
+  );
+  await p.rpc('pluginConnected');
+  assert.deepEqual(await p.act('searchCites', { query: 'calm', source: 'highlights', limit: 50 }), { items });
+  await p.act('insertCite', { source: 'highlights', id: 'h1', option: 'block' });
+  await p.act('refreshCitations');
+  await p.act('unlinkCitations');
+  const sent = p.pluginCalls.filter((c) => c.method !== 'getFileType');
+  assert.deepEqual(sent.slice(1), [
+    { method: 'insertCiteSource', args: ['highlights', 'h1', 'block'] },
+    { method: 'refreshAllCitations', args: [] },
+    { method: 'unlinkAllCitations', args: [] },
+  ]);
+  // Coding is refused in a writing document; writing in an analysis one.
+  await assert.rejects(p.act('applyCode', { codeId: 'c1' }), /writing document/);
+  p.pluginEvent('fileType', { fileType: 'analyze' });
+  await assert.rejects(p.act('searchCites', { query: 'calm' }), /analysis document/);
+});
+test('a yaqatw without the writing methods: the insert window says it needs a newer one', async () => {
+  const p = page((op) => (op === 'getVariable' ? 'write' : null), { plugin: { getFileType: 'write' } });
+  await p.rpc('pluginConnected');
+  await assert.rejects(p.act('searchCites', { query: 'calm' }), /needs a newer Yaqatw/);
+});

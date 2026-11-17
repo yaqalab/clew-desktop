@@ -24,6 +24,30 @@
                   supertip="Creates a code named after the selected text and applies it."
                   onAction="Ribbon_InVivo"/>
         </group>
+        <!-- Shown for writing documents, and for documents without a type yet. The tag of each
+             Insert button is what the insert window searches first. -->
+        <group id="yaqatwWriting" label="Writing" tag="write" getVisible="Ribbon_GetVisible">
+          <button id="yaqatwInsertQuote" label="Insert quote" size="large" imageMso="CitationInsert" tag="highlights"
+                  screentip="Insert a quote"
+                  supertip="Type to find a coded passage; Enter inserts it at the cursor as a quote, linked to its source."
+                  onAction="Ribbon_Insert"/>
+          <button id="yaqatwInsertArtifact" label="Insert artifact" size="large" imageMso="PictureInsertMenu" tag="artifacts"
+                  screentip="Insert an artifact"
+                  supertip="Type to find an artifact; Enter inserts its picture or its interpretation at the cursor."
+                  onAction="Ribbon_Insert"/>
+          <button id="yaqatwInsertAny" label="Find and insert" size="large" imageMso="ResearchPane" tag="all"
+                  screentip="Find and insert"
+                  supertip="Type to find a quote, an artifact, a note, a table or a figure, and insert it at the cursor."
+                  onAction="Ribbon_Insert"/>
+          <button id="yaqatwRefresh" label="Refresh" size="large" imageMso="Refresh"
+                  screentip="Refresh quotes, figures and tables"
+                  supertip="Updates every linked quote, figure and table in the document from its source."
+                  onAction="Ribbon_RefreshCitations"/>
+          <button id="yaqatwUnlink" label="Unlink all" size="large" imageMso="HyperlinkRemove"
+                  screentip="Unlink all"
+                  supertip="Keeps the quotes, figures and tables as they are, without their links: Refresh no longer updates them."
+                  onAction="Ribbon_UnlinkCitations"/>
+        </group>
         <group id="yaqatwClew" label="Clew Desktop">
           <button id="yaqatwOpen" label="Open Yaqatw" size="large" imageMso="FileOpen"
                   screentip="Open Yaqatw for this document"

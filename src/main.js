@@ -410,6 +410,8 @@ const WORD_HOST_FILES = {
   'picker.html': 'text/html',
   'picker.js': 'text/javascript',
   'picker.css': 'text/css',
+  'insert.html': 'text/html',
+  'insert.js': 'text/javascript',
 };
 const WORD_HOST_URL = `${WORD_SCHEME}://bridge/index.html`;
 /** session id → its window; webContents id → session id. */
@@ -422,6 +424,9 @@ const pickerSessionByContents = new Map();
 const wordActions = new Map();
 let nextWordAction = 1;
 const WORD_ACTION_MS = 60000;
+// Refreshing or unlinking every citation of a long document takes longer.
+const WORD_LONG_ACTIONS = new Set(['refreshCitations', 'unlinkCitations']);
+const WORD_LONG_ACTION_MS = 300000;
 
 const wordBridge = createWordBridge({
   onOpen: (s, again, { show } = {}) => openWordWindow(s, show !== false),
@@ -443,7 +448,7 @@ function wordAction(s, action, args) {
     return null;
   }
   if (action === 'openPicker') {
-    openPicker(s, args.mode === 'new' ? 'new' : 'find');
+    openPicker(s, ['new', 'insert'].includes(args.mode) ? args.mode : 'find', args.source);
     return null;
   }
   return hostAction(s.id, action, args);
@@ -465,7 +470,7 @@ async function hostAction(sessionId, action, args) {
     const timer = setTimeout(() => {
       wordActions.delete(id);
       reject(new Error('Yaqatw did not answer in time.'));
-    }, WORD_ACTION_MS);
+    }, WORD_LONG_ACTIONS.has(action) ? WORD_LONG_ACTION_MS : WORD_ACTION_MS);
     wordActions.set(id, { resolve, reject, timer, contentsId: win.webContents.id });
     win.webContents.send('word:action', id, action, args);
   });
@@ -570,16 +575,23 @@ function openWordWindow(s, show = true) {
   if (show) win.focus();
 }
 
-/** The code picker of a session (Find code… / New code…): one per document, in front. */
-function openPicker(s, mode) {
+const PICKER_TITLES = { new: 'New code', find: 'Apply a code', insert: 'Insert' };
+const INSERT_SOURCES = new Set(['all', 'highlights', 'artifacts', 'notes', 'tables', 'figures']);
+
+/**
+ * The small window of a session, in front, one per document: the code picker (Find code… / New
+ * code…) or the insert window (a quote, an artifact… found and inserted, `source` what it
+ * searches first).
+ */
+function openPicker(s, mode, source) {
   const known = pickerWindows.get(s.id);
   if (known && !known.isDestroyed()) known.destroy();
   const win = new BrowserWindow({
-    width: 440,
+    width: mode === 'insert' ? 560 : 440,
     height: 520,
     minWidth: 320,
     minHeight: 300,
-    title: `${mode === 'new' ? 'New code' : 'Apply a code'} – ${s.title}`,
+    title: `${PICKER_TITLES[mode]} – ${s.title}`,
     autoHideMenuBar: true,
     alwaysOnTop: true,
     minimizable: false,
@@ -601,7 +613,11 @@ function openPicker(s, mode) {
     if (pickerWindows.get(s.id) === win) pickerWindows.delete(s.id);
     pickerSessionByContents.delete(contentsId);
   });
-  win.loadURL(`${WORD_SCHEME}://bridge/picker.html?mode=${mode}`);
+  win.loadURL(
+    mode === 'insert'
+      ? `${WORD_SCHEME}://bridge/insert.html?source=${INSERT_SOURCES.has(source) ? source : 'all'}`
+      : `${WORD_SCHEME}://bridge/picker.html?mode=${mode}`,
+  );
   win.focus();
 }
 
@@ -621,9 +637,10 @@ function wordSessionOf(event) {
   return isWordHostPage(event) ? wordSessionByContents.get(event.sender.id) : null;
 }
 
-/** The session of a code picker, or null for anyone else. */
+/** The session of a code picker or insert window, or null for anyone else. */
 function pickerSessionOf(event) {
-  return fromWordScheme(event, 'picker.html') ? (pickerSessionByContents.get(event.sender.id) ?? null) : null;
+  if (!fromWordScheme(event, 'picker.html') && !fromWordScheme(event, 'insert.html')) return null;
+  return pickerSessionByContents.get(event.sender.id) ?? null;
 }
 
 ipcMain.handle('word:info', (event) => {
@@ -640,8 +657,8 @@ ipcMain.handle('word:call', (event, op, args) => {
   return wordBridge.call(id, op, args && typeof args === 'object' && !Array.isArray(args) ? args : {});
 });
 
-/** The picker's few actions: the codes, apply one, a new one, the full window. */
-const PICKER_ACTIONS = new Set(['codes', 'applyCode', 'newCode', 'showWindow']);
+/** The small windows' few actions: the codes, apply one, a new one; find and insert; the full window. */
+const PICKER_ACTIONS = new Set(['codes', 'applyCode', 'newCode', 'searchCites', 'insertCite', 'showWindow']);
 
 ipcMain.handle('word:picker-action', async (event, action, args) => {
   const id = pickerSessionOf(event);
