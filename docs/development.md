@@ -87,6 +87,14 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
     bridge; `db.codeOf(err)` gives it.
   - The databases live in a utility process ([src/db/worker.js](../src/db/worker.js)); quitting
     closes them after the pages have settled. A smoke run uses a throwaway folder.
+- **The local API** ([src/local-api.js](../src/local-api.js)): plain HTTP on `127.0.0.1:47830`
+  (`CLEW_LOCAL_API_PORT`; a smoke run takes any free port) for programs on this computer, not
+  web pages. `Host` must be `127.0.0.1:<port>` or `localhost:<port>`; a request with an `Origin`
+  or a browser's `Sec-Fetch-Site` is refused. `GET /v1/hello` answers anyone; `POST /v1/pair
+  { name }` asks the user, in the app, whether to allow that program, and returns a token once;
+  every other route needs `Authorization: Bearer <token>` (`GET /v1/me`). Only a SHA-256 of each
+  token is kept, in `userData/local-api/clients.json`. If the port is taken, the app runs
+  without it and says so in its log.
 
 ## Data on the user's computer
 

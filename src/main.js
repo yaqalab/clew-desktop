@@ -12,6 +12,7 @@ const { createSettler } = require('./settle');
 const { Tools } = require('./tools');
 const { createAppUpdater } = require('./app-update');
 const databases = require('./db');
+const localApi = require('./local-api');
 
 const PARTITION = 'persist:alefa';
 const SMOKE = process.argv.includes('--smoke');
@@ -39,6 +40,8 @@ let quitting = false;
 /** The sites' encrypted databases (`src/db`), when they work here. */
 const DB = databases.probe();
 let db = null;
+/** The local API for programs on this computer (`src/local-api.js`). */
+let api = null;
 
 /** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
 const settle = createSettler(ipcMain);
@@ -230,6 +233,7 @@ function installAppUpdate() {
   leaving = true;
   quitting = true;
   settle(appContents())
+    .then(() => api?.close())
     .then(() => db?.stop())
     .then(() => (tools ? tools.stop() : undefined))
     .catch(() => undefined)
@@ -297,6 +301,55 @@ ipcMain.handle('alefa:build-info', (event) => {
   if (!fromBundledFrame(event)) throw new Error('not allowed');
   return Object.fromEntries(sites.list.map((s) => [s.name, sites.buildInfo(s)]));
 });
+
+// ---------------------------------------------------------------------------------------------
+// Local API
+
+/** `CLEW_LOCAL_API_PORT`, or the fixed port programs expect. */
+function localApiPort() {
+  const n = Number(process.env.CLEW_LOCAL_API_PORT);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : localApi.DEFAULT_PORT;
+}
+
+/**
+ * A program on this computer asks to pair. The question closes by itself when the program gives
+ * up or the wait times out (`signal`). The name is the program's own: shown, never trusted.
+ */
+async function approveLocalClient({ name, signal }) {
+  const parent = mainWindow?.isVisible() && !mainWindow.isMinimized() ? mainWindow : null;
+  const opts = {
+    type: 'question',
+    title: app.name,
+    message: `Allow “${name}” to connect to ${app.name}?`,
+    detail:
+      'A program on this computer is asking to connect. Allow it only if you have just set up ' +
+      'a program you trust and it told you to confirm here.',
+    buttons: ['Allow', 'Don’t allow'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    signal,
+  };
+  const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
+  return response === 0 && !signal.aborted;
+}
+
+async function startLocalApi() {
+  const dir = SMOKE
+    ? path.join(require('node:os').tmpdir(), `clew-smoke-local-api-${process.pid}`)
+    : path.join(app.getPath('userData'), 'local-api');
+  api = localApi.createLocalApi({
+    port: SMOKE ? 0 : localApiPort(),
+    clients: localApi.createClients(path.join(dir, 'clients.json')),
+    approve: approveLocalClient,
+  });
+  try {
+    const port = await api.listen();
+    console.log(`[local-api] on http://127.0.0.1:${port}`);
+  } catch {
+    console.warn(`[local-api] not started: ${api.status().error}`);
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Menu and window
@@ -452,6 +505,7 @@ app.on('before-quit', (event) => {
   if (leaving) return;
   leaving = true;
   settle(appContents())
+    .then(() => api?.close())
     .then(() => db?.stop())
     .then(() => (tools ? tools.stop() : undefined))
     .catch(() => undefined)
@@ -483,6 +537,7 @@ app.whenReady().then(async () => {
       origins: sites.origins,
     });
   }
+  await startLocalApi();
   if (WITH_TOOLS) {
     tools = new Tools({
       openApp: showMainWindow,
@@ -504,7 +559,7 @@ app.whenReady().then(async () => {
   win.hiddenAtStart = HIDDEN;
   if (SMOKE) {
     require('./smoke')
-      .run(win, appSession, server, tools, folder, db)
+      .run(win, appSession, server, tools, folder, db, api)
       .catch((err) => {
         console.error(err);
         app.exit(1);
