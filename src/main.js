@@ -432,7 +432,8 @@ function buildMenu() {
       role: 'help',
       submenu: [
         ...restartItems(),
-        ...(SITE_UPDATES || APP_UPDATES ? [{ label: 'Check for updates…', click: () => checkFromMenu() }] : []),
+        // Always there: in a run where updates are off, Settings › General says so.
+        { label: 'Check for updates…', enabled: Boolean(tools), click: () => checkFromMenu() },
         { label: 'Report a problem…', click: () => shell.openExternal(`${REPO_URL}/issues`) },
         // The profile: the pages' storage, settings, the tools' files, the logs.
         { label: 'Open the data folder', click: () => shell.openPath(app.getPath('userData')) },
