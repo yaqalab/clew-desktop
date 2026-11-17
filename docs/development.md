@@ -308,18 +308,27 @@ vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) 
   ([src/word-host/](../src/word-host/), on its own origin `clew-word://bridge/`, the only page
   with `window.clewWord`) answers yaqatw's host calls (its `WebAdapter`): document operations go
   to Word, the rest (key/value storage, sync) stays in the page. What is not there yet
-  (citations, figures, tables at the cursor) answers "not supported in Word yet".
+  (opening another document) answers "not supported in Word yet".
   - The app cannot call into Word, so Word asks for work ([src/word-bridge.js](../src/word-bridge.js),
     local API routes `/v1/word/open|next|event|close`, for the template's client only): while a
     session is open a tick runs once a second (`Application.OnTime`), and a burst of operations
-    runs back to back. Work that waits while Word is in a dialog fails after 5 s ("Word is
-    busy"), work taken and not answered after 60 s.
+    runs back to back. Work that waits while Word is in a dialog fails after 30 s ("Word did
+    not answer"), work taken and not answered after 60 s.
   - Operations ([WordOps.bas](../word-plugin/src/WordOps.bas), [Highlights.bas](../word-plugin/src/Highlights.bas)):
     custom XML parts (yaqatw's entities, the same parts as the web add-in), text, paragraphs
     (a table cell is a paragraph), selection, document variables (per-document settings),
     highlights as the web add-in makes them (content control, `yaqatw:id=<uuid>`, the overlap
     rules of its `WordDocumentHost`), Word's search (≤ 255 characters, as Office.js), the first
     table as metadata, comments. Each edit is one undo step, "Yaqatw".
+  - Quotes, notes, figures and tables in a writing document ([Citations.bas](../word-plugin/src/Citations.bas)),
+    as the web add-in inserts them: a linked one is a content control tagged `yaqat-cite-tag`
+    whose id yaqatw keeps to refresh it. Ids are given as the web add-in gives them (`w:id`,
+    signed); VBA's unsigned form is accepted too. A quote is text in the control (block quotes in
+    the Quote style). A figure or a table is Word XML (flat OPC) in a paragraph of its own: the
+    host page builds a figure's package (caption, picture at 96 pixels an inch, source;
+    [figures.js](../src/word-host/figures.js)), yaqatw renders a table's and passes it as
+    `ooxml`. Pictures wider than the text column are made to fit it; caption numbers (SEQ
+    fields) are updated after each insert.
   - Colours: Word highlights come in 16 colours, which are yaqatw's swatch colours. A code's
     colour reaches Word as one of them, by yaqatw's own rule (its `wordColor`, copied in the host
     page; the template maps the 16 exactly): a palette colour is itself, any other the Word

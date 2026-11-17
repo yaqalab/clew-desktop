@@ -375,7 +375,9 @@ End Function
 Private Function IsEdit(ByVal name As String) As Boolean
     Select Case name
         Case "insertHighlightAtSelection", "paintHighlight", "removeHighlights", "setHighlightTitle", _
-             "setHighlightsVisible", "insertTextAtSelection", "appendText"
+             "setHighlightsVisible", "insertTextAtSelection", "appendText", _
+             "insertCitation", "refreshCitation", "insertCitationXml", "refreshCitationXml", _
+             "deleteCitation", "unlinkCitation", "unlinkAllCitations"
             IsEdit = True
     End Select
 End Function

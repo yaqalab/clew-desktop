@@ -404,6 +404,7 @@ const WORD_HOST_DIR = path.join(__dirname, 'word-host');
 const WORD_HOST_FILES = {
   'index.html': 'text/html',
   'host.js': 'text/javascript',
+  'figures.js': 'text/javascript',
   'host.css': 'text/css',
   'colors.js': 'text/javascript',
   'picker.html': 'text/html',
