@@ -279,3 +279,22 @@ For development: `CLEW_STT_PROGRAM=<…/clew-stt-server.exe>` uses a dictation s
 `release-dictation/dictation.json`; attach both to the `v<version>` release of
 `yaqalab/clew-tools`. The package carries the dictation server's `THIRD-PARTY-NOTICES.txt` (its
 GPL parts; Clew docs/32, section 2).
+
+## The Word template (`word-plugin/`)
+
+`yaqatw.dotm`, a Word template that talks to the app through the local API: a **yaqatw** tab
+with **Connect** (pairs with the app; the app asks the user) and **Mark selection** (puts a mark
+around the selected text, in the form the yaqatw add-in uses: a rich-text content control
+tagged `yaqatw:id=<uuid>`). Windows only for now.
+
+- Sources: VBA modules in `word-plugin/src/*.bas` (ASCII only), the ribbon in
+  `word-plugin/customUI/customUI14.xml`. No VBScript components (Windows is retiring VBScript).
+- Build, on Windows with Word: `powershell -ExecutionPolicy Bypass -File word-plugin\build.ps1`
+  → `word-plugin/dist/yaqatw.dotm`; `-Install` also copies it to Word's Startup folder
+  (`%APPDATA%\Microsoft\Word\STARTUP`), from where Word loads it at its next start, macros
+  enabled (a trusted location). The build runs a hidden Word of its own, which needs "Trust
+  access to the VBA project object model" (`AccessVBOM`): the script turns it on for the build
+  only and puts the old value back once that Word has exited, also when the build fails or
+  hangs (two minutes).
+- The token from pairing is kept in `HKCU\Software\VB and VBA Program Settings\yaqatw\Clew`
+  (`Token`); a `Port` value there overrides 47830.

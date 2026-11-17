@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon>
+    <tabs>
+      <tab id="yaqatwTab" label="yaqatw">
+        <group id="yaqatwClew" label="Clew Desktop">
+          <button id="yaqatwConnect" label="Connect" size="large" imageMso="HyperlinkInsert"
+                  screentip="Connect to Clew Desktop"
+                  supertip="Checks that Clew Desktop is running and asks it to allow this template."
+                  onAction="Ribbon_Connect"/>
+          <button id="yaqatwMark" label="Mark selection" size="large" imageMso="ContentControlRichText"
+                  screentip="Mark the selection"
+                  supertip="Puts a yaqatw mark around the selected text."
+                  onAction="Ribbon_Mark"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>
