@@ -20,6 +20,7 @@ Private Sub App_WindowSelectionChange(ByVal Sel As Selection)
 End Sub
 
 Private Sub App_WindowActivate(ByVal Doc As Document, ByVal Wn As Window)
+    BridgeKeepTicking
     RibbonRefresh
 End Sub
 
