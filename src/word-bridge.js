@@ -36,6 +36,9 @@ const MAX_RESULT = 16 * 1024 * 1024;
 // proofing) or a dialog, can be late by several seconds: give it time before calling it busy.
 const BUSY_MS = 30000;
 const RUN_MS = 60000;
+// Work waiting this long while Word has not asked for any: Word's tick may have stopped (Word
+// keeps one OnTime timer, and something can take it); `onStall` can restart it.
+const STALL_MS = 4000;
 
 const MESSAGES = {
   'word-busy': 'Word did not answer for 30 seconds: if a dialog is open in Word, close it, then try again.',
@@ -60,6 +63,9 @@ const text = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
  * @param {(id: string, event: string, payload: unknown) => void} [opts.onEvent]
  * @param {(s: { id, title, path }, action: string, args: object) => Promise<unknown>} [opts.onAction]
  *        carries out a ribbon action; what it resolves with goes back to Word
+ * @param {(s: { id, title, path }) => void} [opts.onStall] work has waited `stallMs` and Word
+ *        has not asked for any meanwhile (again, at growing intervals, until Word asks or the
+ *        work fails as busy)
  */
 function createWordBridge({
   onOpen = () => {},
@@ -68,8 +74,10 @@ function createWordBridge({
   onAction = async () => {
     throw new Error('No actions here.');
   },
+  onStall = () => {},
   busyMs = BUSY_MS,
   runMs = RUN_MS,
+  stallMs = STALL_MS,
 } = {}) {
   const sessions = new Map();
   let nextOp = 1;
@@ -108,11 +116,22 @@ function createWordBridge({
    */
   function watch(s) {
     clearTimeout(s.watch);
+    clearTimeout(s.stall);
     if (!s.queue.length || s.running) return;
     s.watch = setTimeout(() => {
+      clearTimeout(s.stall);
       const queued = s.queue.splice(0);
       for (const item of queued) settle(s, item.id, (p) => p.reject(failure('word-busy')));
     }, busyMs);
+    // Word asks every second while its tick runs: silence with work waiting is a stopped tick.
+    const check = (delay) => {
+      s.stall = setTimeout(() => {
+        if (!sessions.has(s.id) || !s.queue.length || s.running) return;
+        if (Date.now() - s.lastAsk >= stallMs) onStall(pub(s));
+        check(delay * 2);
+      }, delay);
+    };
+    check(stallMs);
   }
 
   function close(id, by = 'app') {
@@ -120,6 +139,7 @@ function createWordBridge({
     if (!s) return false;
     sessions.delete(id);
     clearTimeout(s.watch);
+    clearTimeout(s.stall);
     if (s.running) clearTimeout(s.running.timer);
     if (s.waiter) {
       clearTimeout(s.waiter.timer);
@@ -156,6 +176,8 @@ function createWordBridge({
           running: null,
           waiter: null,
           watch: null,
+          stall: null,
+          lastAsk: Date.now(),
         };
         sessions.set(s.id, s);
         onOpen(pub(s), false, { show: body?.show !== false });
@@ -169,6 +191,7 @@ function createWordBridge({
       handler({ body, client, res }) {
         const s = own(body, client);
         if (!s) return { closed: true };
+        s.lastAsk = Date.now();
         const r = body.result;
         if (r && typeof r === 'object' && s.running && r.id === s.running.id) {
           clearTimeout(s.running.timer);
