@@ -27,6 +27,54 @@ const folder = Object.freeze({
 });
 
 /**
+ * The site's encrypted databases (SQLCipher), for any bundled site; there only when the
+ * database works. A site has its own folder of databases; the page names a database and brings
+ * its key (32 bytes) to open it.
+ *
+ * Errors start with their code, `wrong-key: wrong key`, because only an error's message
+ * reaches the page (the bridge drops other properties); `db.codeOf(err)` gives the code:
+ * `locked`, `wrong-key`, `bad-name`, `bad-key`, `bad-args`, `in-use`, `refused`, `sqlite`,
+ * `crashed`.
+ */
+async function dbCall(op, ...args) {
+  const answer = await ipcRenderer.invoke('db:call', op, ...args);
+  if (answer.ok) return answer.value;
+  throw new Error(`${answer.code}: ${answer.message}`);
+}
+
+/** The handle `open` gives: the database's statements, until `close()`. */
+function dbHandle(name) {
+  return Object.freeze({
+    name,
+    /** One statement that gives rows: `[{ column: value }]`. */
+    query: (sql, params) => dbCall('query', name, sql, params),
+    /** One statement that changes things: `{ changes, lastInsertRowid }`. */
+    run: (sql, params) => dbCall('run', name, sql, params),
+    /** `[{ sql, params }]` in one transaction, all or nothing: each gives `{ rows }` or `{ changes, lastInsertRowid }`. */
+    batch: (items) => dbCall('batch', name, items),
+    /** Re-encrypts the database with a new key. */
+    rekey: (key) => dbCall('rekey', name, key),
+    close: () => dbCall('close', name),
+  });
+}
+
+const db = Object.freeze({
+  /** `{ api, engine, sqlite, cipher }` */
+  info: () => dbCall('info'),
+  /** The site's databases: `[{ name, size, modified, open }]`. */
+  list: () => dbCall('list'),
+  /** Opens (or, the first time, creates) a database with its key; gives a handle. */
+  open: async (name, key) => {
+    await dbCall('open', name, key);
+    return dbHandle(name);
+  },
+  /** Deletes a database; it must be closed. */
+  remove: (name) => dbCall('remove', name),
+  /** The code an error from here starts with (`'wrong-key'`), or null for any other error. */
+  codeOf: (err) => /^([a-z-]+): /.exec(String(err?.message ?? ''))?.[1] ?? null,
+});
+
+/**
  * What the page asked to finish before the app quits, restarts or reloads it: Clew writes out
  * the edits it still holds (`src/settle.js`). The main process sends `alefa:settle`; the answer
  * goes back once every handler has finished, whatever it did. With no handler — yaqatw, a
@@ -58,6 +106,7 @@ if (info && info.origins.includes(location.origin)) {
         if (typeof fn === 'function') beforeQuit.add(fn);
       },
       ...(location.origin === info.folderOrigin ? { folder } : {}),
+      ...(info.db ? { db } : {}),
     }),
   );
 

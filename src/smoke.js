@@ -53,7 +53,7 @@ async function finalUrl(ses, url) {
   }
 }
 
-async function run(win, ses, server, tools, folder) {
+async function run(win, ses, server, tools, folder, db) {
   const { stats } = server;
   setTimeout(() => {
     console.error('smoke: timed out');
@@ -160,6 +160,68 @@ async function run(win, ses, server, tools, folder) {
       const inFrame = frame ? await frame.executeJavaScript('typeof window.alefaDesktop.folder') : 'no frame';
       assert(inFrame === 'undefined', `yaqatw sees folder: ${inFrame}`);
       return `round trip in ${r.root}; refused ../; yaqatw: none`;
+    });
+
+    await check('each site has its own encrypted databases (alefaDesktop.db)', async () => {
+      assert(db, 'the database did not load (probe failed)');
+      const r = await js(`(async () => {
+        const d = window.alefaDesktop.db;
+        const info = await d.info();
+        const key = crypto.getRandomValues(new Uint8Array(32));
+        let h = await d.open('smoke', key);
+        await h.batch([
+          { sql: 'create table notes (body text, data blob)' },
+          { sql: 'insert into notes values (?, ?)', params: ['smoke-secret', new Uint8Array([7, 250])] },
+        ]);
+        const rows = await h.query('select body, data from notes');
+        const refused = [];
+        for (const sql of ["attach 'x.db' as o", "pragma rekey = 'x'", 'begin']) {
+          try { await h.run(sql); refused.push('ran: ' + sql); } catch (e) { refused.push(window.alefaDesktop.db.codeOf(e)); }
+        }
+        await h.close();
+        let afterClose = 'ran';
+        try { await h.query('select 1'); } catch (e) { afterClose = window.alefaDesktop.db.codeOf(e); }
+        let wrong = 'opened';
+        try { await d.open('smoke', crypto.getRandomValues(new Uint8Array(32))); } catch (e) { wrong = window.alefaDesktop.db.codeOf(e); }
+        h = await d.open('smoke', key);
+        const again = (await h.query('select count(*) n from notes'))[0].n;
+        const listed = (await d.list()).map((x) => x.name + ':' + x.open);
+        return { info, body: rows[0].body, data: Array.from(rows[0].data), refused, afterClose, wrong, again, listed };
+      })()`);
+      assert(r.info.engine === 'sqlcipher', JSON.stringify(r.info));
+      assert(r.body === 'smoke-secret' && r.data.join() === '7,250', JSON.stringify(r));
+      assert(r.refused.join() === 'refused,refused,refused', r.refused.join());
+      assert(r.afterClose === 'locked', `after close: ${r.afterClose}`);
+      assert(r.wrong === 'wrong-key', `wrong key: ${r.wrong}`);
+      assert(r.again === 1 && r.listed.join() === 'smoke:true', JSON.stringify(r));
+      const fs = require('node:fs');
+      const file = require('node:path').join(db.root, 'clew.alefa.net', 'smoke.db');
+      assert(fs.existsSync(file), `no ${file}`);
+
+      // The yaqatw frame: its own folder; Clew's open database is not its to use.
+      const frame = win.webContents.mainFrame.framesInSubtree.find((f) => f.origin === 'https://yaqatw.alefa.net');
+      assert(frame, 'no yaqatw frame');
+      const y = await frame.executeJavaScript(`(async () => {
+        const d = window.alefaDesktop.db;
+        const before = (await d.list()).map((x) => x.name);
+        let borrowed = 'ran';
+        try { await window.alefaDesktop.db.open('smoke', new Uint8Array(32)).then((h) => h.query('select * from notes')); } catch (e) { borrowed = window.alefaDesktop.db.codeOf(e); }
+        const h = await d.open('smoke', new Uint8Array(32));
+        await h.close();
+        await d.remove('smoke');
+        return { before, borrowed, after: (await d.list()).map((x) => x.name) };
+      })()`);
+      assert(y.before.length === 0, `yaqatw sees ${y.before}`);
+      assert(y.borrowed === 'sqlite', `yaqatw reading Clew's notes: ${y.borrowed}`);
+      assert(y.after.length === 0, `left in yaqatw's folder: ${y.after}`);
+
+      // Still open in Clew: not removable.
+      const inUse = await js(`window.alefaDesktop.db.remove('smoke').then(() => 'removed', (e) => window.alefaDesktop.db.codeOf(e))`);
+      assert(inUse === 'in-use', `remove while open: ${inUse}`);
+      for (const f of [file, `${file}-wal`]) {
+        if (fs.existsSync(f)) assert(!fs.readFileSync(f).includes('smoke-secret'), `the text is readable in ${f}`);
+      }
+      return `${r.info.engine} ${r.info.cipher}, SQLite ${r.info.sqlite}; refused attach/rekey/begin; wrong key caught; yaqatw kept apart`;
     });
 
     await check('external requests reach the network with Origin/Referer as a browser sends them', async () => {
@@ -280,6 +342,10 @@ async function run(win, ses, server, tools, folder) {
   } finally {
     echoSrv.close();
     if (folder) require('node:fs').rmSync(folder.root, { recursive: true, force: true });
+    if (db) {
+      await db.stop();
+      require('node:fs').rmSync(db.root, { recursive: true, force: true });
+    }
   }
 
   let failed = 0;
