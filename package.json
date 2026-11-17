@@ -36,7 +36,9 @@
       "src/**/*",
       "package.json",
       "sites.config.json",
-      "desktop.config.json"
+      "desktop.config.json",
+      "!node_modules/better-sqlite3-multiple-ciphers/{deps,src}/**",
+      "!node_modules/better-sqlite3-multiple-ciphers/binding.gyp"
     ],
     "extraResources": [
       {
@@ -55,7 +57,10 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "files": [
+        "!node_modules/better-sqlite3-multiple-ciphers/prebuilds/{darwin,linux,linuxmusl}-*"
+      ]
     },
     "nsis": {
       "oneClick": true,
@@ -74,11 +79,17 @@
       "extendInfo": {
         "NSCameraUsageDescription": "Clew uses the camera when you scan a code or record an observation.",
         "NSMicrophoneUsageDescription": "Clew uses the microphone for dictation, recordings and calls."
-      }
+      },
+      "files": [
+        "!node_modules/better-sqlite3-multiple-ciphers/prebuilds/{win32,linux,linuxmusl}-*"
+      ]
     },
     "linux": {
       "target": "AppImage",
-      "category": "Education"
+      "category": "Education",
+      "files": [
+        "!node_modules/better-sqlite3-multiple-ciphers/prebuilds/{win32,darwin}-*"
+      ]
     },
     "publish": [
       {
@@ -87,9 +98,14 @@
         "repo": "clew-desktop",
         "releaseType": "release"
       }
+    ],
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/better-sqlite3-multiple-ciphers/prebuilds/*.node"
     ]
   },
   "dependencies": {
+    "better-sqlite3-multiple-ciphers": "13.2.0",
     "electron-updater": "6.8.11",
     "selfsigned": "5.5.0"
   }

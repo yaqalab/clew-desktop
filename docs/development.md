@@ -66,6 +66,27 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
   Paths are relative and `/`-separated; `..`, absolute paths, drives, backslashes and links
   leading out are refused ([src/folder.js](../src/folder.js)). `CLEW_FOLDER_ROOT` points it
   elsewhere; a smoke run uses a throwaway folder.
+- **`window.alefaDesktop.db`** (any bundled origin; absent when the database cannot load, so a
+  page checks for it and otherwise works as on the web): encrypted SQLite databases (SQLCipher 4
+  format, through `better-sqlite3-multiple-ciphers`). Each site has its own folder,
+  `userData/db/<host>/`, one file per database, `<name>.db` (`a-z`, `0-9`, `_`, `-`). The
+  calling frame's origin picks the folder, checked in the main process on every call, so a
+  yaqatw frame inside Clew gets yaqatw's databases. The page brings the key: 32 bytes, held only
+  while the database is open; the app stores none.
+  - `info()`, `list()`, `open(name, key)` (creates it the first time) gives a handle with
+    `query(sql, params)`, `run(sql, params)`, `batch([{ sql, params }])` (one transaction, all
+    or nothing), `rekey(key)` and `close()`; `remove(name)` deletes a closed database.
+  - Only the window that opened a database may use it, until it closes it, reloads or
+    navigates away; the last one to let go closes it. Opening an open database checks the key.
+  - Refused before SQLite sees them ([src/db/guard.js](../src/db/guard.js)): ATTACH, DETACH,
+    VACUUM, BEGIN/COMMIT/ROLLBACK/SAVEPOINT (`batch` is the transaction), and every PRAGMA but
+    a short read-only list plus `user_version` and `foreign_keys`. The cipher library acts on
+    `PRAGMA key`/`rekey` while preparing a statement, so the text is checked first; SQLite's
+    compiled program is checked second.
+  - Errors start with a code (`wrong-key: …`) because only an error's message crosses the
+    bridge; `db.codeOf(err)` gives it.
+  - The databases live in a utility process ([src/db/worker.js](../src/db/worker.js)); quitting
+    closes them after the pages have settled. A smoke run uses a throwaway folder.
 
 ## Data on the user's computer
 

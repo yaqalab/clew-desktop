@@ -11,6 +11,7 @@ const screenPicker = require('./screen-picker');
 const { createSettler } = require('./settle');
 const { Tools } = require('./tools');
 const { createAppUpdater } = require('./app-update');
+const databases = require('./db');
 
 const PARTITION = 'persist:alefa';
 const SMOKE = process.argv.includes('--smoke');
@@ -35,6 +36,9 @@ let mainWindow = null;
 let appSession = null;
 let tools = null;
 let quitting = false;
+/** The sites' encrypted databases (`src/db`), when they work here. */
+const DB = databases.probe();
+let db = null;
 
 /** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
 const settle = createSettler(ipcMain);
@@ -60,7 +64,7 @@ function reloadSettled(win, ignoreCache = false) {
 }
 
 const preloadArg = `--alefa-desktop=${encodeURIComponent(
-  JSON.stringify({ version: app.getVersion(), origins: sites.origins, folderOrigin: sites.main.origin }),
+  JSON.stringify({ version: app.getVersion(), origins: sites.origins, folderOrigin: sites.main.origin, db: DB }),
 )}`;
 
 /** The webPreferences every app window and in-app popup gets. */
@@ -226,6 +230,7 @@ function installAppUpdate() {
   leaving = true;
   quitting = true;
   settle(appContents())
+    .then(() => db?.stop())
     .then(() => (tools ? tools.stop() : undefined))
     .catch(() => undefined)
     .finally(() => {
@@ -447,6 +452,7 @@ app.on('before-quit', (event) => {
   if (leaving) return;
   leaving = true;
   settle(appContents())
+    .then(() => db?.stop())
     .then(() => (tools ? tools.stop() : undefined))
     .catch(() => undefined)
     .finally(() => {
@@ -470,6 +476,13 @@ app.whenReady().then(async () => {
         ? path.join(require('node:os').tmpdir(), `clew-smoke-folder-${process.pid}`)
         : path.join(app.getPath('documents'), 'Clew')),
   });
+  // <profile>/db, one folder per site; a throwaway one in a smoke run.
+  if (DB) {
+    db = databases.install({
+      root: SMOKE ? path.join(require('node:os').tmpdir(), `clew-smoke-db-${process.pid}`) : path.join(app.getPath('userData'), 'db'),
+      origins: sites.origins,
+    });
+  }
   if (WITH_TOOLS) {
     tools = new Tools({
       openApp: showMainWindow,
@@ -491,7 +504,7 @@ app.whenReady().then(async () => {
   win.hiddenAtStart = HIDDEN;
   if (SMOKE) {
     require('./smoke')
-      .run(win, appSession, server, tools, folder)
+      .run(win, appSession, server, tools, folder, db)
       .catch((err) => {
         console.error(err);
         app.exit(1);
