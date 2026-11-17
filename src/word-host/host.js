@@ -355,7 +355,11 @@
     // Custom XML parts: where yaqatw keeps its entities, inside the document.
     readXmlPart: (ns, root) => op('readXmlPart', { ns, root }),
     ensureXmlPart: (ns, root) => op('ensureXmlPart', { ns, root }),
-    saveXmlPart: (ns, xml) => op('saveXmlPart', { ns, xml }),
+    saveXmlPart: async (ns, xml) => {
+      const saved = await op('saveXmlPart', { ns, xml });
+      if (ns === SETTINGS_NS) settingsSaved(xml);
+      return saved;
+    },
     deleteXmlParts: (ns) => op('deleteXmlParts', { ns }),
 
     // Per-document settings: Word's document variables, as JSON.
@@ -542,12 +546,22 @@
 
   // ─── The document's type, for Word's ribbon ────────────────────────────────────────────────
   //
-  // yaqatw keeps it in its settings inside the document, possibly encrypted: Word's ribbon could
-  // not read it there. A plain copy goes into a document variable the template reads to show its
-  // groups for the type, kept in step with yaqatw ("fileType" events).
+  // yaqatw keeps it in its settings inside the document (a custom XML part Word's ribbon has no
+  // way to read). A plain copy goes into a document variable the template reads to show its
+  // groups for the type. The type comes from yaqatw (getFileType, then its "fileType" events);
+  // a yaqatw too old to say is read in the document's settings part instead, and every save of
+  // that part, which passes through this page, carries the type as it now is.
 
   const TYPE_VARIABLE = 'yaqatw.fileType';
+  const SETTINGS_NS = 'http://yaqat.alefa.net/xml/settings';
   let fileType = null;
+
+  /** The type in yaqatw's settings XML (`<setting … name="yaqatw-file-type" value="…"/>`), or null. */
+  function fileTypeIn(xml) {
+    const el = /<setting\b[^>]*\bname="yaqatw-file-type"[^>]*>/.exec(String(xml || ''));
+    const value = el && /\bvalue="([^"]*)"/.exec(el[0]);
+    return value ? value[1] : null;
+  }
 
   /** Takes the type, then copies it into Word in the background (actions never wait on that). */
   function mirrorFileType(type) {
@@ -567,9 +581,20 @@
     try {
       type = await callPlugin('getFileType');
     } catch {
-      /* an older yaqatw: no type, the ribbon shows everything */
+      // A yaqatw without getFileType: the document's own settings part says.
+      try {
+        type = fileTypeIn(await op('readXmlPart', { ns: SETTINGS_NS, root: 'settings' }));
+      } catch {
+        /* no type: the ribbon shows everything */
+      }
     }
     mirrorFileType(type);
+  }
+
+  /** yaqatw saves its settings part: the type, as it now is, follows at once. */
+  function settingsSaved(xml) {
+    const type = fileTypeIn(xml);
+    if ((type === 'analyze' || type === 'write' ? type : null) !== fileType) mirrorFileType(type);
   }
 
   function pluginEvent(event, payload) {
