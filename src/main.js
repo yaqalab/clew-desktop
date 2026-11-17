@@ -1,6 +1,6 @@
 'use strict';
 const path = require('node:path');
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell } = require('electron');
 const desktopConfig = require('../desktop.config.json');
 const sites = require('./sites');
 const siteUpdates = require('./site-updates');
@@ -307,19 +307,41 @@ function hiddenZoomKeys() {
   ];
 }
 
+const REPO_URL = 'https://github.com/yaqalab/clew-desktop';
+
 function buildMenu() {
   const isMac = process.platform === 'darwin';
   const about = { label: `About ${app.name}`, click: () => showAbout() };
+  // Where each platform's own apps keep it: the app menu on macOS, File on Windows and Linux.
+  const settings = { label: 'Settings…', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() };
   const template = [
     ...(isMac
-      ? [{ label: app.name, submenu: [about, { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }]
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              about,
+              { type: 'separator' },
+              settings,
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
+          },
+        ]
       : [
           {
             label: 'File',
             submenu: [
-              { label: 'Settings…', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() },
+              settings,
               { type: 'separator' },
-              { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => quitApp() },
+              // Windows says "Exit". Closing the window only hides it in the tray.
+              { label: process.platform === 'win32' ? 'Exit' : 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => quitApp() },
             ],
           },
         ]),
@@ -353,7 +375,10 @@ function buildMenu() {
       submenu: [
         ...restartItems(),
         ...(SITE_UPDATES || APP_UPDATES ? [{ label: 'Check for updates…', click: () => checkFromMenu() }] : []),
-        ...(isMac ? [] : [about]),
+        { label: 'Report a problem…', click: () => shell.openExternal(`${REPO_URL}/issues`) },
+        // The profile: the pages' storage, settings, the tools' files, the logs.
+        { label: 'Open the data folder', click: () => shell.openPath(app.getPath('userData')) },
+        ...(isMac ? [] : [{ type: 'separator' }, about]),
       ],
     },
   ];
