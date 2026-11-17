@@ -8,17 +8,21 @@ Attribute VB_Name = "Bridge"
 ' for more, so a burst of operations runs back to back. These exchanges do not let Word do its
 ' background work while they wait (it made them slow in large documents): the waits are short.
 ' A document that has been closed ends its session. With no session open, nothing runs.
+'
+' Word keeps a single OnTime timer: setting another cancels the one pending. So the tick is the
+' only timer, and it also sends the selection changes noted meanwhile; a selection change moves it
+' forward rather than setting a second one. Should another add-in take Word's timer anyway, the
+' next event or ribbon action sees the tick overdue and sets it again (BridgeKeepTicking).
 Option Explicit
 
 Private ids As Collection      ' session ids, in opening order
 Private docs As Collection     ' session id -> Document
-Private scheduled As Boolean
+Private nextAt As Date         ' when the tick is due (0: none set)
 Private inTick As Boolean
 Private failures As Long       ' ticks in a row that could not reach Clew
 Private events As AppEvents    ' Word's events, once a session is open
 Private lastHid As Collection      ' session id -> last highlight id sent ("" for none)
 Private pendingHid As Collection   ' session id -> highlight id still to send
-Private flushScheduled As Boolean
 
 Private Const TICK_MACRO As String = "BridgeTick"
 ' Ticks in a row without Clew before the sessions are given up (Clew quit: they are gone there).
@@ -219,10 +223,29 @@ Private Function ValueJson(ByVal answer As String) As String
     End If
 End Function
 
-Private Sub Schedule()
-    If scheduled Then Exit Sub
-    scheduled = True
-    Application.OnTime When:=Now + TimeSerial(0, 0, 1), Name:=TICK_MACRO
+' Sets the tick `seconds` from now, unless one is due sooner and still alive. Setting it replaces
+' Word's one timer, which is the tick's own.
+Private Sub Schedule(Optional ByVal seconds As Long = 1)
+    Dim at As Date
+    at = Now + TimeSerial(0, 0, seconds)
+    If nextAt <> 0 And nextAt <= at And Not TickLost() Then Exit Sub
+    nextAt = at
+    Application.OnTime When:=at, Name:=TICK_MACRO
+End Sub
+
+' Due more than 3 seconds ago and not run: another macro took Word's timer.
+Private Function TickLost() As Boolean
+    TickLost = (nextAt <> 0 And Now > nextAt + TimeSerial(0, 0, 3))
+End Function
+
+' Sets the tick again if it was lost (from Word's events and the ribbon's actions).
+Public Sub BridgeKeepTicking()
+    EnsureCollections
+    If ids.Count = 0 Then Exit Sub
+    If nextAt = 0 Or TickLost() Then
+        nextAt = 0
+        Schedule
+    End If
 End Sub
 
 ' The tick (Application.OnTime). Public so OnTime can find it.
@@ -230,7 +253,7 @@ Public Sub BridgeTick()
     Dim i As Long
     Dim list() As String
     Dim reached As Boolean
-    scheduled = False
+    nextAt = 0
     EnsureCollections
     If inTick Then
         Schedule
@@ -238,6 +261,7 @@ Public Sub BridgeTick()
     End If
     inTick = True
     On Error GoTo Done
+    FlushEvents
     If ids.Count > 0 Then
         ReDim list(1 To ids.Count)
         For i = 1 To ids.Count
@@ -357,9 +381,9 @@ Private Function IsEdit(ByVal name As String) As Boolean
 End Function
 
 ' ----------------------------------------------------------------------------------------------
-' Events from Word (AppEvents.cls): the highlight under the cursor. Noted at once, sent from a
-' macro run right after (OnTime), never from inside Word's event: no request while Word is in
-' the middle of something.
+' Events from Word (AppEvents.cls): the highlight under the cursor. Noted at once and sent by the
+' tick, brought forward to run right after, never from inside Word's event: no request while
+' Word is in the middle of something.
 
 
 Public Sub BridgeSelectionChanged(ByVal sel As Selection)
@@ -369,6 +393,7 @@ Public Sub BridgeSelectionChanged(ByVal sel As Selection)
     On Error GoTo Done
     EnsureCollections
     If ids.Count = 0 Then Exit Sub
+    BridgeKeepTicking
     id = SessionOf(sel.Document)
     If Len(id) = 0 Then Exit Sub
     Set cc = HighlightAt(sel.Range)
@@ -377,21 +402,18 @@ Public Sub BridgeSelectionChanged(ByVal sel As Selection)
     If pendingHid Is Nothing Then Set pendingHid = New Collection
     If KeyValue(lastHid, id) = hid And Not HasKey(pendingHid, id) Then Exit Sub
     SetKey pendingHid, id, hid
-    If Not flushScheduled Then
-        flushScheduled = True
-        Application.OnTime When:=Now, Name:="BridgeFlushEvents"
-    End If
+    ' The tick sends it: right away, in place of the one due within the second.
+    Schedule 0
 Done:
 End Sub
 
-' Sends the noted selection changes (Application.OnTime). Public so OnTime can find it.
-Public Sub BridgeFlushEvents()
+' Sends the noted selection changes (from the tick).
+Private Sub FlushEvents()
     Dim i As Long
     Dim id As String
     Dim hid As String
     Dim status As Long
     Dim payload As String
-    flushScheduled = False
     If pendingHid Is Nothing Then Exit Sub
     EnsureCollections
     For i = 1 To ids.Count

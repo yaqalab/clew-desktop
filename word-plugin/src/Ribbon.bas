@@ -110,6 +110,7 @@ End Function
 Private Function Act(ByVal action As String, Optional ByVal argsJson As String = "{}") As String
     Dim r As String
     r = BridgeAction(action, argsJson)
+    BridgeKeepTicking
     If Left$(r, 3) = "ok:" Then
         Act = Mid$(r, 4)
         Exit Function
