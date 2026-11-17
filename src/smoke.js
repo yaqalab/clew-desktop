@@ -56,6 +56,44 @@ function programGet(url, headers = {}) {
   });
 }
 
+/** A POST with a JSON body as a program sends it. */
+function programPost(url, body, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request(
+      url,
+      { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data), ...headers } },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null') }));
+      },
+    );
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+/** What a fake Word answers to an operation: an empty document. */
+function fakeWord(op) {
+  const a = op.args || {};
+  switch (op.op) {
+    case 'readXmlPart':
+    case 'ensureXmlPart':
+      return `<${a.root} xmlns="${a.ns}"></${a.root}>`;
+    case 'getAllText':
+      return '';
+    case 'getParagraphs':
+      return [];
+    case 'isEmpty':
+      return true;
+    case 'getDocumentTitle':
+      return 'Smoke';
+    default:
+      return null;
+  }
+}
+
 async function finalUrl(ses, url) {
   const win = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true } });
   try {
@@ -255,6 +293,44 @@ async function run(win, ses, server, tools, folder, db, api) {
       return `port ${st.port}; hello, 401 unpaired; Clew's page refused`;
     });
 
+    await check('a Word window: host page, yaqatw in its frame, its calls reach Word (a fake one)', async () => {
+      const base = `http://127.0.0.1:${api.status().port}`;
+      const auth = { authorization: `Bearer ${api.clients.add('Smoke Word', { kind: 'word-template' }).token}` };
+      const opened = await programPost(`${base}/v1/word/open`, { title: 'Smoke.docx', path: 'C:\\Smoke.docx' }, auth);
+      assert(opened.status === 200 && opened.body.session, `open: ${opened.status} ${JSON.stringify(opened.body)}`);
+      const session = opened.body.session;
+      const ops = [];
+      let closed = false;
+      const pump = (async () => {
+        let result;
+        while (!closed) {
+          const r = await programPost(`${base}/v1/word/next`, { session, waitMs: 300, result }, auth);
+          result = undefined;
+          if (r.body?.closed) closed = true;
+          else if (r.body?.op) {
+            ops.push(r.body.op.op);
+            result = { id: r.body.op.id, ok: true, value: fakeWord(r.body.op) };
+          }
+        }
+      })();
+      let wordWin = null;
+      for (let i = 0; i < 40 && !wordWin; i++) {
+        wordWin = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('clew-word://bridge/'));
+        if (!wordWin) await wait(250);
+      }
+      assert(wordWin, 'no Word window');
+      for (let i = 0; i < 80 && !ops.includes('readXmlPart'); i++) await wait(250);
+      const frame = wordWin.webContents.mainFrame.framesInSubtree.find((f) => f.origin === 'https://yaqatw.alefa.net');
+      const status = await wordWin.webContents.executeJavaScript("document.getElementById('status').textContent");
+      wordWin.destroy();
+      for (let i = 0; i < 20 && !closed; i++) await wait(250);
+      closed = true;
+      await pump.catch(() => {});
+      assert(frame, 'no yaqatw frame in the Word window');
+      assert(ops.includes('readXmlPart'), `yaqatw did not read its parts; ops: ${ops.join(', ') || 'none'}`);
+      return `ops from yaqatw: ${[...new Set(ops)].join(', ')}${status ? `; status "${status}"` : ''}`;
+    });
+
     await check('external requests reach the network with Origin/Referer as a browser sends them', async () => {
       const before = stats.local;
       const r = await js(`fetch('${echo}/echo', { method: 'POST', body: 'hello', referrerPolicy: 'unsafe-url' }).then(r => r.json())`);
@@ -357,6 +433,9 @@ async function run(win, ses, server, tools, folder, db, api) {
         // The app itself first, then each bundled site: a label and a cell each.
         assert(updateCells === 6, `updates section: ${updateCells} cells`);
         assert(updateText.startsWith('Clew DesktopVersion '), `updates section: ${updateText.slice(0, 60)}`);
+        // The programs connected to Clew: in a smoke run, the fake Word of the Word window check.
+        const clients = await sw.webContents.executeJavaScript("document.getElementById('clients').textContent");
+        assert(clients.length > 0, 'no list of connected programs');
         assert(text, 'no server state shown');
         assert(errors.length === 0, errors.join(' | '));
         sw.destroy();

@@ -1,6 +1,7 @@
 'use strict';
 const path = require('node:path');
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell } = require('electron');
+const fs = require('node:fs');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, session, shell } = require('electron');
 const desktopConfig = require('../desktop.config.json');
 const sites = require('./sites');
 const siteUpdates = require('./site-updates');
@@ -14,8 +15,12 @@ const { createAppUpdater } = require('./app-update');
 const databases = require('./db');
 const localApi = require('./local-api');
 const { createWordPlugin } = require('./word-plugin');
+const { createWordBridge } = require('./word-bridge');
 
 const PARTITION = 'persist:alefa';
+// The host page of Word windows (src/word-host/), on an origin of its own.
+const WORD_SCHEME = 'clew-word';
+protocol.registerSchemesAsPrivileged([{ scheme: WORD_SCHEME, privileges: { standard: true, secure: true } }]);
 const SMOKE = process.argv.includes('--smoke');
 // Started at login: the tray only, no window until asked for.
 const HIDDEN = process.argv.includes('--hidden');
@@ -236,6 +241,7 @@ function installAppUpdate() {
   leaving = true;
   quitting = true;
   settle(appContents())
+    .then(() => wordBridge.closeAll())
     .then(() => api?.close())
     .then(() => db?.stop())
     .then(() => (tools ? tools.stop() : undefined))
@@ -360,7 +366,10 @@ async function approveLocalClient({ name, signal }) {
   };
   try {
     const { response } = await dialog.showMessageBox(parent, opts);
-    return response === 0 && !signal.aborted;
+    const yes = response === 0 && !signal.aborted;
+    // Settings lists the connected programs: the new one is added once this has returned.
+    if (yes) setTimeout(wordChanged, 100);
+    return yes;
   } finally {
     if (holder) holder.destroy();
     else if (!mainWindow?.isDestroyed()) mainWindow.flashFrame(false);
@@ -375,6 +384,7 @@ async function startLocalApi() {
     port: SMOKE ? 0 : localApiPort(),
     clients: localApi.createClients(path.join(dir, 'clients.json')),
     approve: approveLocalClient,
+    routes: wordBridge.routes,
   });
   try {
     const port = await api.listen();
@@ -383,6 +393,95 @@ async function startLocalApi() {
     console.warn(`[local-api] not started: ${api.status().error}`);
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Word windows: yaqatw working on a Word document, through Yaqatw for Word (src/word-bridge.js,
+// src/word-host/). One window per document; closing it ends the session, and a document closed
+// in Word says so in its window.
+
+const WORD_HOST_DIR = path.join(__dirname, 'word-host');
+const WORD_HOST_FILES = { 'index.html': 'text/html', 'host.js': 'text/javascript', 'host.css': 'text/css' };
+const WORD_HOST_URL = `${WORD_SCHEME}://bridge/index.html`;
+/** session id → its window; webContents id → session id. */
+const wordWindows = new Map();
+const wordSessionByContents = new Map();
+
+const wordBridge = createWordBridge({
+  onOpen: (s) => openWordWindow(s),
+  onClose: (s, by) => {
+    if (by === 'word') wordWindows.get(s.id)?.webContents.send('word:event', 'closed', null);
+  },
+  onEvent: (id, event, payload) => wordWindows.get(id)?.webContents.send('word:event', event, payload),
+});
+
+function serveWordHost(ses) {
+  ses.protocol.handle(WORD_SCHEME, (request) => {
+    const url = new URL(request.url);
+    const name = url.pathname.replace(/^\//, '') || 'index.html';
+    if (url.host !== 'bridge' || !Object.hasOwn(WORD_HOST_FILES, name)) return new Response('Not found', { status: 404 });
+    return new Response(fs.readFileSync(path.join(WORD_HOST_DIR, name)), {
+      headers: { 'content-type': `${WORD_HOST_FILES[name]}; charset=utf-8`, 'cache-control': 'no-store' },
+    });
+  });
+}
+
+function openWordWindow(s) {
+  const known = wordWindows.get(s.id);
+  if (known && !known.isDestroyed()) {
+    if (known.isMinimized()) known.restore();
+    known.show();
+    known.focus();
+    return;
+  }
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 820,
+    title: `Yaqatw – ${s.title}`,
+    autoHideMenuBar: true,
+    webPreferences: {
+      session: appSession,
+      preload: path.join(WORD_HOST_DIR, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      nodeIntegrationInSubFrames: false,
+    },
+  });
+  const contentsId = win.webContents.id;
+  wordWindows.set(s.id, win);
+  wordSessionByContents.set(contentsId, s.id);
+  // The host page stays put; yaqatw navigates inside its frame.
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.on('page-title-updated', (event) => event.preventDefault());
+  win.on('closed', () => {
+    wordWindows.delete(s.id);
+    wordSessionByContents.delete(contentsId);
+    wordBridge.close(s.id);
+  });
+  win.loadURL(WORD_HOST_URL);
+  win.focus();
+}
+
+/** The session of a Word window's host page, or null for anyone else. */
+function wordSessionOf(event) {
+  if (event.senderFrame !== event.sender.mainFrame) return null;
+  if (!String(event.senderFrame?.url || '').startsWith(`${WORD_SCHEME}://bridge/`)) return null;
+  return wordSessionByContents.get(event.sender.id) ?? null;
+}
+
+ipcMain.handle('word:info', (event) => {
+  const id = wordSessionOf(event);
+  if (!id) throw new Error('not allowed');
+  const s = wordBridge.get(id);
+  return { session: id, title: s?.title ?? '', path: s?.path ?? '', open: Boolean(s) };
+});
+
+ipcMain.handle('word:call', (event, op, args) => {
+  const id = wordSessionOf(event);
+  if (!id) throw new Error('not allowed');
+  if (typeof op !== 'string' || !/^[A-Za-z]{1,40}$/.test(op)) throw new Error('not allowed');
+  return wordBridge.call(id, op, args && typeof args === 'object' && !Array.isArray(args) ? args : {});
+});
 
 // ---------------------------------------------------------------------------------------------
 // Yaqatw for Word (`src/word-plugin.js`): Windows, never in a smoke run.
@@ -401,10 +500,33 @@ function startWordPlugin() {
   wordPlugin.refresh().then(() => buildMenu());
 }
 
+/** Over the window in use (Settings, when asked from there), else Clew's. */
 function wordDialog(opts) {
-  const parent = mainWindow?.isVisible() ? mainWindow : null;
+  const parent = BrowserWindow.getFocusedWindow() ?? (mainWindow?.isVisible() ? mainWindow : null);
   const all = { title: app.name, noLink: true, ...opts };
   return parent ? dialog.showMessageBox(parent, all) : dialog.showMessageBox(all);
+}
+
+/** What Settings › General shows: the template, and the programs connected to the local API. */
+function wordSnapshot() {
+  return {
+    plugin: wordPlugin?.status() ?? { available: false, installed: false, connected: false },
+    clients: api ? api.clients.list() : [],
+  };
+}
+
+function wordChanged() {
+  buildMenu();
+  tools?.send('tools:word', wordSnapshot());
+}
+
+/** Disconnects a program; the template's own connection goes with Remove instead. */
+function forgetLocalClient(id) {
+  const client = api?.clients.list().find((c) => c.id === id);
+  if (!client || client.kind === 'word-template') throw new Error('not allowed');
+  api.clients.remove(id);
+  wordChanged();
+  return wordSnapshot();
 }
 
 async function installWordPlugin() {
@@ -418,7 +540,8 @@ async function installWordPlugin() {
   } catch (err) {
     await wordDialog({ type: 'warning', message: 'Yaqatw for Word could not be installed.', detail: err.message });
   }
-  buildMenu();
+  wordChanged();
+  return wordSnapshot();
 }
 
 async function removeWordPlugin() {
@@ -430,13 +553,14 @@ async function removeWordPlugin() {
     defaultId: 1,
     cancelId: 1,
   });
-  if (response !== 0) return;
+  if (response !== 0) return wordSnapshot();
   try {
     await wordPlugin.remove();
   } catch (err) {
     await wordDialog({ type: 'warning', message: 'Yaqatw for Word could not be removed.', detail: err.message });
   }
-  buildMenu();
+  wordChanged();
+  return wordSnapshot();
 }
 
 /** File › Install / Remove Yaqatw for Word, when this build carries the template. */
@@ -607,6 +731,7 @@ app.on('before-quit', (event) => {
   if (leaving) return;
   leaving = true;
   settle(appContents())
+    .then(() => wordBridge.closeAll())
     .then(() => api?.close())
     .then(() => db?.stop())
     .then(() => (tools ? tools.stop() : undefined))
@@ -619,6 +744,7 @@ app.on('before-quit', (event) => {
 
 app.whenReady().then(async () => {
   appSession = session.fromPartition(PARTITION);
+  serveWordHost(appSession);
   if (SITE_UPDATES) activateSiteUpdates();
   const server = await network.install(appSession, sites);
   permissions.install(appSession, sites);
@@ -652,6 +778,12 @@ app.whenReady().then(async () => {
         snapshot: updatesSnapshot,
         check: checkAllUpdates,
         restart: restartApp,
+      },
+      word: {
+        snapshot: wordSnapshot,
+        install: () => (wordPlugin ? installWordPlugin() : wordSnapshot()),
+        remove: () => (wordPlugin ? removeWordPlugin() : wordSnapshot()),
+        forgetClient: forgetLocalClient,
       },
     });
     tools.start();

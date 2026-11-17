@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; frame-src https://yaqatw.alefa.net; img-src 'self' data:"
+    />
+    <title>Yaqatw</title>
+    <link rel="stylesheet" href="host.css" />
+  </head>
+  <body>
+    <div id="status" role="status">Loading Yaqatw…</div>
+    <iframe
+      id="yaqatw"
+      title="Yaqatw"
+      hidden
+      allow="clipboard-read; clipboard-write; microphone"
+    ></iframe>
+    <script src="host.js"></script>
+  </body>
+</html>

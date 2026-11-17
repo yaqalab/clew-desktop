@@ -6,6 +6,20 @@ Option Explicit
 Private Const TITLE As String = "Yaqatw"
 Private Const NOT_RUNNING As String = "Clew Desktop is not running. Start it, then try again."
 
+' Open Yaqatw: a Clew Desktop window on this document (Bridge.bas), or its window again.
+Public Sub Ribbon_Open(ByVal control As Object)
+    Dim result As String
+    result = BridgeOpen()
+    Select Case True
+        Case Left$(result, 3) = "ok:"
+        Case result = "no-document": MsgBox "Open a document first.", vbExclamation, TITLE
+        Case result = "not-running": MsgBox NOT_RUNNING, vbExclamation, TITLE
+        Case result = "unpaired"
+            If Reconnect() Then Ribbon_Open control
+        Case Else: MsgBox "Could not open Yaqatw in Clew Desktop (" & result & ").", vbExclamation, TITLE
+    End Select
+End Sub
+
 ' Connection: says whether Yaqatw for Word is connected. Clew connects it when it installs it;
 ' if that was lost, this offers to connect again (Clew asks the user to confirm).
 Public Sub Ribbon_Connect(ByVal control As Object)
@@ -20,28 +34,6 @@ Public Sub Ribbon_Connect(ByVal control As Object)
     Else
         Reconnect
     End If
-End Sub
-
-' Mark selection: marks the selected text, once Clew Desktop answers for this template.
-Public Sub Ribbon_Mark(ByVal control As Object)
-    Dim state As String
-    Dim result As String
-    state = ClewCheck()
-    If state = "not-running" Then
-        MsgBox NOT_RUNNING, vbExclamation, TITLE
-        Exit Sub
-    ElseIf Left$(state, 7) <> "paired:" Then
-        If Not Reconnect() Then Exit Sub
-        state = ClewCheck()
-        If Left$(state, 7) <> "paired:" Then Exit Sub
-    End If
-    result = InsertMark("Clew: " & Mid$(state, 8))
-    Select Case True
-        Case Left$(result, 3) = "ok:"
-        Case result = "no-selection": MsgBox "Select some text first.", vbExclamation, TITLE
-        Case result = "no-document": MsgBox "Open a document first.", vbExclamation, TITLE
-        Case Else: MsgBox "Could not mark the selection: " & Mid$(result, 7), vbExclamation, TITLE
-    End Select
 End Sub
 
 ' Asks before pairing again; True once connected.

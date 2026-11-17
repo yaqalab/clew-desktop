@@ -4,14 +4,14 @@
     <tabs>
       <tab id="yaqatwTab" label="Yaqatw">
         <group id="yaqatwClew" label="Clew Desktop">
+          <button id="yaqatwOpen" label="Open Yaqatw" size="large" imageMso="FileOpen"
+                  screentip="Open Yaqatw for this document"
+                  supertip="Opens Yaqatw in a Clew Desktop window, working on this document."
+                  onAction="Ribbon_Open"/>
           <button id="yaqatwConnect" label="Connection" size="large" imageMso="HyperlinkInsert"
                   screentip="Connection to Clew Desktop"
                   supertip="Shows whether Yaqatw for Word is connected to Clew Desktop, and connects it again if needed."
                   onAction="Ribbon_Connect"/>
-          <button id="yaqatwMark" label="Mark selection" size="large" imageMso="ContentControlRichText"
-                  screentip="Mark the selection"
-                  supertip="Puts a Yaqatw mark around the selected text."
-                  onAction="Ribbon_Mark"/>
         </group>
       </tab>
     </tabs>
