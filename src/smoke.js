@@ -43,6 +43,19 @@ function echoServer() {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** A GET as a program sends it: no Origin, no browser headers. */
+function programGet(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    http
+      .get(url, { headers }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      })
+      .on('error', reject);
+  });
+}
+
 async function finalUrl(ses, url) {
   const win = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true } });
   try {
@@ -53,7 +66,7 @@ async function finalUrl(ses, url) {
   }
 }
 
-async function run(win, ses, server, tools, folder, db) {
+async function run(win, ses, server, tools, folder, db, api) {
   const { stats } = server;
   setTimeout(() => {
     console.error('smoke: timed out');
@@ -224,6 +237,24 @@ async function run(win, ses, server, tools, folder, db) {
       return `${r.info.engine} ${r.info.cipher}, SQLite ${r.info.sqlite}; refused attach/rekey/begin; wrong key caught; yaqatw kept apart`;
     });
 
+    await check('the local API answers programs on loopback, refuses pages and unpaired calls', async () => {
+      const st = api?.status();
+      assert(st?.listening, `not listening: ${st?.error}`);
+      const base = `http://127.0.0.1:${st.port}`;
+      const hello = await programGet(`${base}/v1/hello`);
+      assert(hello.status === 200 && JSON.parse(hello.body).app === 'clew-desktop', `hello: ${hello.status} ${hello.body}`);
+      const me = await programGet(`${base}/v1/me`);
+      assert(me.status === 401, `unpaired /v1/me: ${me.status}`);
+      // Clew's page is a web page like any other here: refused, and nobody is asked anything.
+      const page = await js(`fetch('${base}/v1/hello').then(r => 'status ' + r.status, () => 'blocked')`);
+      assert(page === 'blocked', `page: ${page}`);
+      const pair = await js(
+        `fetch('${base}/v1/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"name":"page"}' }).then(r => 'status ' + r.status, () => 'blocked')`,
+      );
+      assert(pair === 'blocked', `page pairing: ${pair}`);
+      return `port ${st.port}; hello, 401 unpaired; Clew's page refused`;
+    });
+
     await check('external requests reach the network with Origin/Referer as a browser sends them', async () => {
       const before = stats.local;
       const r = await js(`fetch('${echo}/echo', { method: 'POST', body: 'hello', referrerPolicy: 'unsafe-url' }).then(r => r.json())`);
@@ -345,6 +376,10 @@ async function run(win, ses, server, tools, folder, db) {
     if (db) {
       await db.stop();
       require('node:fs').rmSync(db.root, { recursive: true, force: true });
+    }
+    if (api) {
+      await api.close();
+      require('node:fs').rmSync(require('node:path').dirname(api.clients.file), { recursive: true, force: true });
     }
   }
 
