@@ -1,8 +1,27 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui" onLoad="Ribbon_OnLoad">
   <ribbon>
     <tabs>
       <tab id="yaqatwTab" label="Yaqatw">
+        <!-- Shown for analysis documents, and for documents without a type yet (Ribbon.bas). -->
+        <group id="yaqatwCoding" label="Coding" tag="analyze" getVisible="Ribbon_GetVisible">
+          <dynamicMenu id="yaqatwApply" label="Apply code" size="large" imageMso="TextHighlightColorPicker"
+                       screentip="Apply a code"
+                       supertip="Codes the selected text: your codes, the ones you used last first."
+                       getContent="Ribbon_CodesMenu" invalidateContentOnDrop="true"/>
+          <button id="yaqatwFind" label="Find code" size="large" imageMso="FindDialog"
+                  screentip="Find a code"
+                  supertip="Type to find a code, Enter applies it to the selected text."
+                  onAction="Ribbon_PickCode"/>
+          <button id="yaqatwNew" label="New code" size="large" imageMso="FileNew"
+                  screentip="New code"
+                  supertip="Creates a code (name, colour, description) and applies it to the selected text."
+                  onAction="Ribbon_NewCode"/>
+          <button id="yaqatwInVivo" label="In vivo" size="large" imageMso="ContentControlPlainText"
+                  screentip="In vivo code"
+                  supertip="Creates a code named after the selected text and applies it."
+                  onAction="Ribbon_InVivo"/>
+        </group>
         <group id="yaqatwClew" label="Clew Desktop">
           <button id="yaqatwOpen" label="Open Yaqatw" size="large" imageMso="FileOpen"
                   screentip="Open Yaqatw for this document"

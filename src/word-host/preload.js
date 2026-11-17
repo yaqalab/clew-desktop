@@ -18,5 +18,21 @@ if (location.protocol === 'clew-word:') {
       ipcRenderer.on('word:event', listener);
       return () => ipcRenderer.off('word:event', listener);
     },
+    /** The host page answers actions (Word's ribbon, the code picker) with `handler`. */
+    onAction: (handler) => {
+      ipcRenderer.on('word:action', async (_event, id, name, args) => {
+        try {
+          ipcRenderer.send('word:action-result', id, true, await handler(name, args));
+        } catch (err) {
+          ipcRenderer.send('word:action-result', id, false, String((err && err.message) || err));
+        }
+      });
+      // The main process holds actions until the page listens (a hidden window still loading).
+      ipcRenderer.send('word:host-ready');
+    },
+    /** The code picker: an action carried out by this document's Yaqatw. */
+    action: (name, args) => ipcRenderer.invoke('word:picker-action', String(name), args ?? {}),
+    /** The code picker closes itself. */
+    close: () => ipcRenderer.send('word:picker-close'),
   });
 }

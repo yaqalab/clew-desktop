@@ -25,8 +25,9 @@ const SMOKE = process.argv.includes('--smoke');
 // Started at login: the tray only, no window until asked for.
 const HIDDEN = process.argv.includes('--hidden');
 // The tools (tray, audio server) stay out of the smoke run unless asked for: it would bind the
-// audio server's port, which a running Clew or the standalone tools may hold.
-const WITH_TOOLS = !SMOKE || process.env.CLEW_SMOKE_TOOLS === '1';
+// audio server's port, which a running Clew or the standalone tools may hold. CLEW_TOOLS=0 keeps
+// them out of any run (a second Clew for tests, beside the one in use).
+const WITH_TOOLS = (!SMOKE || process.env.CLEW_SMOKE_TOOLS === '1') && process.env.CLEW_TOOLS !== '0';
 // Newer builds of the sites (src/site-updates.js): the installed app only, never dev or smoke
 // runs, unless CLEW_SITE_UPDATES=1 asks for them.
 const SITE_UPDATES =
@@ -400,18 +401,103 @@ async function startLocalApi() {
 // in Word says so in its window.
 
 const WORD_HOST_DIR = path.join(__dirname, 'word-host');
-const WORD_HOST_FILES = { 'index.html': 'text/html', 'host.js': 'text/javascript', 'host.css': 'text/css' };
+const WORD_HOST_FILES = {
+  'index.html': 'text/html',
+  'host.js': 'text/javascript',
+  'host.css': 'text/css',
+  'colors.js': 'text/javascript',
+  'picker.html': 'text/html',
+  'picker.js': 'text/javascript',
+  'picker.css': 'text/css',
+};
 const WORD_HOST_URL = `${WORD_SCHEME}://bridge/index.html`;
 /** session id → its window; webContents id → session id. */
 const wordWindows = new Map();
 const wordSessionByContents = new Map();
+/** session id → its code picker; webContents id → session id. */
+const pickerWindows = new Map();
+const pickerSessionByContents = new Map();
+/** Actions sent to a host page, waiting for its answer: id → { resolve, reject, timer, contentsId }. */
+const wordActions = new Map();
+let nextWordAction = 1;
+const WORD_ACTION_MS = 60000;
 
 const wordBridge = createWordBridge({
-  onOpen: (s) => openWordWindow(s),
+  onOpen: (s, again, { show } = {}) => openWordWindow(s, show !== false),
   onClose: (s, by) => {
     if (by === 'word') wordWindows.get(s.id)?.webContents.send('word:event', 'closed', null);
+    pickerWindows.get(s.id)?.close();
   },
   onEvent: (id, event, payload) => wordWindows.get(id)?.webContents.send('word:event', event, payload),
+  onAction: (s, action, args) => wordAction(s, action, args),
+});
+
+/**
+ * A ribbon action (Yaqatw for Word): shown here (the window, the code picker), or carried out by
+ * yaqatw in the document's window (its host page answers, host.js `actions`).
+ */
+function wordAction(s, action, args) {
+  if (action === 'showWindow') {
+    openWordWindow(s, true);
+    return null;
+  }
+  if (action === 'openPicker') {
+    openPicker(s, args.mode === 'new' ? 'new' : 'find');
+    return null;
+  }
+  return hostAction(s.id, action, args);
+}
+
+/** Asks the host page of a session's window to carry out an action; resolves with its answer. */
+async function hostAction(sessionId, action, args) {
+  const win = wordWindows.get(sessionId);
+  if (!win || win.isDestroyed()) throw new Error('This document has no Yaqatw window.');
+  // A window just opened (hidden, for this very action) is still loading: a message sent now
+  // would be lost. Its page says when it listens.
+  await Promise.race([
+    hostPageReady(win),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('The Yaqatw window did not load.')), 30000)),
+  ]);
+  if (win.isDestroyed()) throw new Error('The Yaqatw window was closed.');
+  const id = nextWordAction++;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      wordActions.delete(id);
+      reject(new Error('Yaqatw did not answer in time.'));
+    }, WORD_ACTION_MS);
+    wordActions.set(id, { resolve, reject, timer, contentsId: win.webContents.id });
+    win.webContents.send('word:action', id, action, args);
+  });
+}
+
+/** Resolves once the window's host page listens for actions (word:host-ready). */
+const hostPagesReady = new WeakMap();
+function hostPageReady(win) {
+  let entry = hostPagesReady.get(win);
+  if (!entry) {
+    entry = {};
+    entry.promise = new Promise((resolve) => (entry.resolve = resolve));
+    hostPagesReady.set(win, entry);
+  }
+  return entry.promise;
+}
+
+ipcMain.on('word:host-ready', (event) => {
+  if (!isWordHostPage(event)) return;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  hostPageReady(win);
+  hostPagesReady.get(win).resolve();
+});
+
+ipcMain.on('word:action-result', (event, id, ok, value) => {
+  const pending = wordActions.get(id);
+  // Only the page it was asked of answers it.
+  if (!pending || pending.contentsId !== event.sender.id || !isWordHostPage(event)) return;
+  wordActions.delete(id);
+  clearTimeout(pending.timer);
+  if (ok) pending.resolve(value);
+  else pending.reject(new Error(String(value)));
 });
 
 function serveWordHost(ses) {
@@ -425,9 +511,14 @@ function serveWordHost(ses) {
   });
 }
 
-function openWordWindow(s) {
+/**
+ * The Word window of a session: shown, or (`show` false, for the ribbon's actions) loaded hidden,
+ * yaqatw running in it all the same, until it is asked to show.
+ */
+function openWordWindow(s, show = true) {
   const known = wordWindows.get(s.id);
   if (known && !known.isDestroyed()) {
+    if (!show) return;
     if (known.isMinimized()) known.restore();
     known.show();
     known.focus();
@@ -438,6 +529,7 @@ function openWordWindow(s) {
     height: 820,
     title: `Yaqatw – ${s.title}`,
     autoHideMenuBar: true,
+    show,
     webPreferences: {
       session: appSession,
       preload: path.join(WORD_HOST_DIR, 'preload.js'),
@@ -445,6 +537,8 @@ function openWordWindow(s) {
       nodeIntegration: false,
       sandbox: true,
       nodeIntegrationInSubFrames: false,
+      // A hidden window keeps yaqatw working at full speed for the ribbon.
+      backgroundThrottling: false,
     },
   });
   const contentsId = win.webContents.id;
@@ -453,24 +547,86 @@ function openWordWindow(s) {
   // The host page stays put; yaqatw navigates inside its frame.
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.on('page-title-updated', (event) => event.preventDefault());
+  // CLEW_WORD_DEBUG=1: the window's console (yaqatw's included) in the app's log.
+  if (process.env.CLEW_WORD_DEBUG === '1') {
+    win.webContents.on('console-message', (event) => {
+      console.log(`[word ${s.id.slice(0, 6)}] ${event.level ?? ''} ${event.message ?? ''}`);
+    });
+  }
   win.on('closed', () => {
     wordWindows.delete(s.id);
     wordSessionByContents.delete(contentsId);
+    for (const [id, pending] of wordActions) {
+      if (pending.contentsId !== contentsId) continue;
+      wordActions.delete(id);
+      clearTimeout(pending.timer);
+      pending.reject(new Error('The Yaqatw window was closed.'));
+    }
+    pickerWindows.get(s.id)?.close();
     wordBridge.close(s.id);
   });
   win.loadURL(WORD_HOST_URL);
+  if (show) win.focus();
+}
+
+/** The code picker of a session (Find code… / New code…): one per document, in front. */
+function openPicker(s, mode) {
+  const known = pickerWindows.get(s.id);
+  if (known && !known.isDestroyed()) known.destroy();
+  const win = new BrowserWindow({
+    width: 440,
+    height: 520,
+    minWidth: 320,
+    minHeight: 300,
+    title: `${mode === 'new' ? 'New code' : 'Apply a code'} – ${s.title}`,
+    autoHideMenuBar: true,
+    alwaysOnTop: true,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      session: appSession,
+      preload: path.join(WORD_HOST_DIR, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  const contentsId = win.webContents.id;
+  pickerWindows.set(s.id, win);
+  pickerSessionByContents.set(contentsId, s.id);
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.on('page-title-updated', (event) => event.preventDefault());
+  win.on('closed', () => {
+    if (pickerWindows.get(s.id) === win) pickerWindows.delete(s.id);
+    pickerSessionByContents.delete(contentsId);
+  });
+  win.loadURL(`${WORD_SCHEME}://bridge/picker.html?mode=${mode}`);
   win.focus();
+}
+
+/** From the main frame of one of this scheme's pages. */
+function fromWordScheme(event, page) {
+  if (event.senderFrame !== event.sender.mainFrame) return false;
+  const url = String(event.senderFrame?.url || '');
+  return url.startsWith(`${WORD_SCHEME}://bridge/${page}`);
+}
+
+function isWordHostPage(event) {
+  return fromWordScheme(event, 'index.html') && wordSessionByContents.has(event.sender.id);
 }
 
 /** The session of a Word window's host page, or null for anyone else. */
 function wordSessionOf(event) {
-  if (event.senderFrame !== event.sender.mainFrame) return null;
-  if (!String(event.senderFrame?.url || '').startsWith(`${WORD_SCHEME}://bridge/`)) return null;
-  return wordSessionByContents.get(event.sender.id) ?? null;
+  return isWordHostPage(event) ? wordSessionByContents.get(event.sender.id) : null;
+}
+
+/** The session of a code picker, or null for anyone else. */
+function pickerSessionOf(event) {
+  return fromWordScheme(event, 'picker.html') ? (pickerSessionByContents.get(event.sender.id) ?? null) : null;
 }
 
 ipcMain.handle('word:info', (event) => {
-  const id = wordSessionOf(event);
+  const id = wordSessionOf(event) ?? pickerSessionOf(event);
   if (!id) throw new Error('not allowed');
   const s = wordBridge.get(id);
   return { session: id, title: s?.title ?? '', path: s?.path ?? '', open: Boolean(s) };
@@ -481,6 +637,22 @@ ipcMain.handle('word:call', (event, op, args) => {
   if (!id) throw new Error('not allowed');
   if (typeof op !== 'string' || !/^[A-Za-z]{1,40}$/.test(op)) throw new Error('not allowed');
   return wordBridge.call(id, op, args && typeof args === 'object' && !Array.isArray(args) ? args : {});
+});
+
+/** The picker's few actions: the codes, apply one, a new one, the full window. */
+const PICKER_ACTIONS = new Set(['codes', 'applyCode', 'newCode', 'showWindow']);
+
+ipcMain.handle('word:picker-action', async (event, action, args) => {
+  const id = pickerSessionOf(event);
+  if (!id || !PICKER_ACTIONS.has(action)) throw new Error('not allowed');
+  const s = wordBridge.get(id);
+  if (!s) throw new Error('The Word document was closed.');
+  return wordAction(s, action, args && typeof args === 'object' && !Array.isArray(args) ? args : {});
+});
+
+ipcMain.on('word:picker-close', (event) => {
+  const id = pickerSessionOf(event);
+  if (id) pickerWindows.get(id)?.close();
 });
 
 // ---------------------------------------------------------------------------------------------

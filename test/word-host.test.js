@@ -10,14 +10,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'src', 'word-host', 'host.js'), 'utf8');
+const DIR = path.join(__dirname, '..', 'src', 'word-host');
+const SOURCE = fs.readFileSync(path.join(DIR, 'host.js'), 'utf8');
+const COLORS = fs.readFileSync(path.join(DIR, 'colors.js'), 'utf8');
 const YAQATW = 'https://yaqatw.alefa.net';
 
 /** The page with `word(op, args)` answering operations; rpc(method, ...args) → yaqatw's reply. */
-function page(word, { open = true } = {}) {
+// `plugin` plays yaqatw's HostRpcServer: method -> answer (or a function of the args).
+function page(word, { open = true, plugin = {} } = {}) {
   const calls = [];
   const posted = [];
+  const pluginCalls = [];
   const waiting = new Map();
+  let actionHandler = null;
   const frameWindow = {
     postMessage(sent, origin) {
       assert.equal(origin, YAQATW);
@@ -27,6 +32,22 @@ function page(word, { open = true } = {}) {
       if (msg.type === 'yaqatw-rpc-response' && waiting.has(msg.id)) {
         waiting.get(msg.id)(msg);
         waiting.delete(msg.id);
+      }
+      if (msg.type === 'yaqatw-host-rpc') {
+        pluginCalls.push({ method: msg.method, args: msg.args });
+        setTimeout(async () => {
+          const reply = { type: 'yaqatw-host-rpc-response', id: msg.id };
+          if (!Object.prototype.hasOwnProperty.call(plugin, msg.method)) reply.error = `Unknown method: ${msg.method}`;
+          else {
+            try {
+              const a = plugin[msg.method];
+              reply.result = typeof a === 'function' ? await a(...msg.args) : a;
+            } catch (err) {
+              reply.error = err.message;
+            }
+          }
+          onMessage({ source: frameWindow, origin: YAQATW, data: reply });
+        }, 0);
       }
     },
   };
@@ -57,6 +78,9 @@ function page(word, { open = true } = {}) {
         onWordEvent = cb;
         return () => {};
       },
+      onAction: (handler) => {
+        actionHandler = handler;
+      },
     },
     addEventListener: (name, fn) => {
       if (name === 'message') onMessage = fn;
@@ -64,6 +88,7 @@ function page(word, { open = true } = {}) {
   };
   ctx.window = ctx;
   vm.createContext(ctx);
+  vm.runInContext(COLORS, ctx);
   vm.runInContext(SOURCE, ctx);
   let next = 1;
   const rpc = (method, ...args) =>
@@ -72,7 +97,22 @@ function page(word, { open = true } = {}) {
       waiting.set(id, resolve);
       onMessage({ source: frameWindow, origin: YAQATW, data: { type: 'yaqatw-rpc', id, method, args } });
     });
-  return { rpc, calls, posted, status, frame, fireWord: (...a) => onWordEvent(...a), onMessage: (e) => onMessage(e) };
+  // An action as main.js passes it (Word's ribbon, the picker); a copy of the answer.
+  const act = async (name, args) => JSON.parse(JSON.stringify((await actionHandler(name, args)) ?? null));
+  const pluginEvent = (event, payload) =>
+    onMessage({ source: frameWindow, origin: YAQATW, data: { type: 'yaqatw-host-rpc-event', event, payload } });
+  return {
+    rpc,
+    calls,
+    posted,
+    pluginCalls,
+    status,
+    frame,
+    act,
+    pluginEvent,
+    fireWord: (...a) => onWordEvent(...a),
+    onMessage: (e) => onMessage(e),
+  };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -255,4 +295,105 @@ test("Word's selection reaches yaqatw as selectionchange", async () => {
   p.fireWord('selection', { hid: null });
   const events = p.posted.filter((m) => m.event === 'selectionchange').map((m) => m.payload.parentHighlightId);
   assert.deepEqual(events, ['h7', null]);
+});
+
+// --- Word's ribbon: the document's type and the actions ---------------------------------------
+
+test("once yaqatw is there, the document's type goes into a document variable, and follows it", async () => {
+  const vars = new Map();
+  const p = page(
+    (op, args) => {
+      if (op === 'getVariable') return vars.has(args.key) ? vars.get(args.key) : null;
+      if (op === 'setVariable') vars.set(args.key, args.value);
+      return null;
+    },
+    { plugin: { getFileType: 'analyze' } },
+  );
+  await p.rpc('pluginConnected');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(vars.get('yaqatw.fileType'), 'analyze');
+  assert.ok(p.calls.some((c) => c.op === 'refreshRibbon'));
+  p.pluginEvent('fileType', { fileType: 'write' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(vars.get('yaqatw.fileType'), 'write');
+  // Unchanged: no write to the document.
+  const writes = p.calls.filter((c) => c.op === 'setVariable').length;
+  p.pluginEvent('fileType', { fileType: 'write' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(p.calls.filter((c) => c.op === 'setVariable').length, writes);
+});
+
+test('an older yaqatw without getFileType: no type, the ribbon shows everything', async () => {
+  const vars = new Map([['yaqatw.fileType', 'analyze']]);
+  const p = page((op, args) => {
+    if (op === 'getVariable') return vars.has(args.key) ? vars.get(args.key) : null;
+    if (op === 'setVariable') vars.set(args.key, args.value);
+    return null;
+  });
+  await p.rpc('pluginConnected');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(vars.get('yaqatw.fileType'), null);
+});
+
+test('actions wait for yaqatw, then: codes (Word colours), apply, new code, in vivo', async () => {
+  const p = page(() => null, {
+    plugin: {
+      getFileType: 'analyze',
+      getCodeMenuItems: [
+        { id: 'c1', name: 'Calm', color: '#4CAF50', description: 'quiet' },
+        { id: 'c2', name: 'Place' },
+      ],
+      applyCodeToSelection: null,
+      createCodeAndApply: null,
+      createInVivoCodeAndApply: null,
+    },
+  });
+  const early = p.act('codes');
+  await p.rpc('pluginConnected');
+  assert.deepEqual(await early, {
+    fileType: 'analyze',
+    codes: [
+      { id: 'c1', name: 'Calm', description: 'quiet', color: '#00FF00' },
+      { id: 'c2', name: 'Place', description: '', color: '' },
+    ],
+  });
+  await p.act('applyCode', { codeId: 'c2' });
+  await p.act('newCode', { name: ' Hope ', description: 'd', color: '#008080' });
+  await p.act('inVivo');
+  assert.deepEqual(
+    p.pluginCalls.filter((c) => c.method !== 'getFileType' && c.method !== 'getCodeMenuItems'),
+    [
+      { method: 'applyCodeToSelection', args: ['c2'] },
+      { method: 'createCodeAndApply', args: ['Hope', 'd', '#008080'] },
+      { method: 'createInVivoCodeAndApply', args: [] },
+    ],
+  );
+  await assert.rejects(p.act('newCode', { name: '  ' }), /needs a name/);
+  await assert.rejects(p.act('nothing'), /Unknown action/);
+});
+
+test('coding actions say why not, in a writing document or one without a type', async () => {
+  for (const [type, why] of [
+    ['write', /writing document/],
+    [null, /type first/],
+  ]) {
+    const p = page(() => null, { plugin: { getFileType: type, applyCodeToSelection: null } });
+    await p.rpc('pluginConnected');
+    await new Promise((r) => setTimeout(r, 20));
+    await assert.rejects(p.act('applyCode', { codeId: 'c1' }), why);
+    assert.ok(!p.pluginCalls.some((c) => c.method === 'applyCodeToSelection'));
+  }
+});
+
+test("yaqatw's own refusal comes back as the action's error", async () => {
+  const p = page(() => null, {
+    plugin: {
+      getFileType: 'analyze',
+      applyCodeToSelection: () => {
+        throw new Error('applyCodeToSelection: unknown code id "zz"');
+      },
+    },
+  });
+  await p.rpc('pluginConnected');
+  await assert.rejects(p.act('applyCode', { codeId: 'zz' }), /unknown code id/);
 });

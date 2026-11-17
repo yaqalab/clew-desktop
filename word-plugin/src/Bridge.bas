@@ -63,39 +63,57 @@ End Function
 ' Opens a Clew window on the active document, or shows its window again. "ok:<session>",
 ' "no-document", "not-running", "unpaired" or "error:<code>".
 Public Function BridgeOpen() As String
-    Dim d As Document
+    If Documents.Count = 0 Then
+        BridgeOpen = "no-document"
+        Exit Function
+    End If
+    BridgeOpen = BridgeOpenDoc(ActiveDocument, True)
+End Function
+
+' Word's events (AppEvents.cls): the selection for open sessions, and the ribbon following the
+' document in front. Set up once (at the ribbon's load, or the first session).
+Public Sub BridgeEnsureEvents()
+    If events Is Nothing Then
+        Set events = New AppEvents
+        Set events.App = Application
+    End If
+End Sub
+
+' A session for this document: its Clew window shown, or (`show` False) opened hidden for the
+' ribbon's actions, or the one it has already. Same answers as BridgeOpen.
+Public Function BridgeOpenDoc(ByVal d As Document, ByVal show As Boolean) As String
     Dim known As String
     Dim body As String
     Dim answer As String
     Dim status As Long
     Dim id As String
     EnsureCollections
-    If Documents.Count = 0 Then
-        BridgeOpen = "no-document"
+    known = SessionOf(d)
+    If Len(known) > 0 And Not show Then
+        BridgeOpenDoc = "ok:" & known
         Exit Function
     End If
-    Set d = ActiveDocument
-    known = SessionOf(d)
     body = "{""title"":" & JsonStr(d.Name) & ",""path"":" & JsonStr(d.FullName)
     If Len(known) > 0 Then body = body & ",""session"":" & JsonStr(known)
+    If Not show Then body = body & ",""show"":false"
     body = body & "}"
-    ClewAllowForeground
+    If show Then ClewAllowForeground
     answer = ClewPost("/v1/word/open", body, status)
     Select Case status
         Case 0
-            BridgeOpen = "not-running"
+            BridgeOpenDoc = "not-running"
             Exit Function
         Case 401
-            BridgeOpen = "unpaired"
+            BridgeOpenDoc = "unpaired"
             Exit Function
         Case 200
         Case Else
-            BridgeOpen = "error:" & status
+            BridgeOpenDoc = "error:" & status
             Exit Function
     End Select
     id = JsonString(answer, "session")
     If Len(id) = 0 Then
-        BridgeOpen = "error:no-session"
+        BridgeOpenDoc = "error:no-session"
         Exit Function
     End If
     If id <> known Then
@@ -104,12 +122,101 @@ Public Function BridgeOpen() As String
         docs.Add d, id
     End If
     failures = 0
-    If events Is Nothing Then
-        Set events = New AppEvents
-        Set events.App = Application
-    End If
+    BridgeEnsureEvents
     Schedule
-    BridgeOpen = "ok:" & id
+    BridgeOpenDoc = "ok:" & id
+End Function
+
+' Asks the active document's Yaqatw (in Clew Desktop) to do `action` with `argsJson`, opening a
+' hidden session first when the document has none. While it waits, it carries out the Word
+' operations the action needs (the tick cannot run meanwhile). Returns "ok:" & the answer's
+' value as JSON, or "error:" & a message for the user. Variant parameters, for Application.Run.
+Public Function BridgeAction(ByVal actionName As Variant, Optional ByVal argsText As Variant = "{}", _
+                             Optional ByVal waitFor As Variant = 120) As String
+    Dim d As Document
+    Dim opened As String
+    Dim id As String
+    Dim attempt As Long
+    Dim http As Object
+    Dim failed As Boolean
+    Dim started As Single
+    Dim answer As Variant
+    Dim action As String
+    Dim argsJson As String
+    Dim waitSeconds As Long
+    action = CStr(actionName)
+    argsJson = CStr(argsText)
+    waitSeconds = CLng(waitFor)
+    If Documents.Count = 0 Then
+        BridgeAction = "error:Open a document first."
+        Exit Function
+    End If
+    Set d = ActiveDocument
+    For attempt = 1 To 2
+        opened = BridgeOpenDoc(d, False)
+        Select Case True
+            Case opened = "not-running"
+                BridgeAction = "error:Clew Desktop is not running. Start it, then try again."
+                Exit Function
+            Case opened = "unpaired"
+                BridgeAction = "error:unpaired"
+                Exit Function
+            Case Left$(opened, 3) <> "ok:"
+                BridgeAction = "error:Could not reach Yaqatw in Clew Desktop (" & opened & ")."
+                Exit Function
+        End Select
+        id = Mid$(opened, 4)
+        Set http = ClewStart("/v1/word/action", "{""session"":" & JsonStr(id) & ",""action"":" & JsonStr(action) & _
+                             ",""args"":" & argsJson & "}", waitSeconds)
+        If http Is Nothing Then
+            BridgeAction = "error:Clew Desktop is not running. Start it, then try again."
+            Exit Function
+        End If
+        failed = False
+        started = Timer
+        Do Until ClewDone(http, 0.05, failed)
+            ' Serve the operations the action needs.
+            If Not Pump(id) Then failed = True: Exit Do
+            If Timer < started Then started = started - 86400
+            If Timer - started > waitSeconds Then
+                BridgeAction = "error:Yaqatw did not answer in time."
+                Exit Function
+            End If
+        Loop
+        If failed Then
+            BridgeAction = "error:Clew Desktop stopped answering."
+            Exit Function
+        End If
+        ' Operations queued as the answer came: carry them out now rather than at the next tick.
+        Pump id
+        answer = Empty
+        On Error Resume Next
+        Set answer = JsonParse(http.ResponseText)
+        On Error GoTo 0
+        If Not IsObject(answer) Then
+            BridgeAction = "error:Clew Desktop gave no answer (" & http.status & ")."
+            Exit Function
+        End If
+        If JsonGet(answer, "ok", False) = True Then
+            BridgeAction = "ok:" & ValueJson(http.ResponseText)
+            Exit Function
+        End If
+        BridgeAction = "error:" & CStr(JsonGet(answer, "error", "Yaqatw could not do it."))
+        ' The session is gone in Clew (it restarted): forget it and try once more.
+        If BridgeAction <> "error:The Word document was closed." Then Exit Function
+        Forget id
+    Next attempt
+End Function
+
+' The "value" member of an action's answer, as JSON text (the answer is {"ok":true,"value":...}).
+Private Function ValueJson(ByVal answer As String) As String
+    Dim p As Long
+    p = InStr(1, answer, """value"":")
+    If p = 0 Then
+        ValueJson = "null"
+    Else
+        ValueJson = Mid$(answer, p + 8, Len(answer) - (p + 8))
+    End If
 End Function
 
 Private Sub Schedule()
