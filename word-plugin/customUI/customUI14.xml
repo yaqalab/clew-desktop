@@ -3,21 +3,23 @@
   <ribbon>
     <tabs>
       <tab id="yaqatwTab" label="Yaqatw">
+        <!-- Icons are Office's own (imageMso), grey with one accent colour like Word's. A name
+             Office does not have shows an empty space and no error: check new ones in Word. -->
         <!-- Shown for analysis documents, and for documents without a type yet (Ribbon.bas). -->
         <group id="yaqatwCoding" label="Coding" tag="analyze" getVisible="Ribbon_GetVisible">
-          <dynamicMenu id="yaqatwApply" label="Apply code" size="large" imageMso="TextHighlightColorPicker"
+          <dynamicMenu id="yaqatwApply" label="Apply code" size="large" imageMso="Highlight"
                        screentip="Apply a code"
                        supertip="Codes the selected text: your codes, the ones you used last first."
                        getContent="Ribbon_CodesMenu" invalidateContentOnDrop="true"/>
-          <button id="yaqatwFind" label="Find code" size="large" imageMso="FindDialog"
+          <button id="yaqatwFind" label="Find code" size="large" imageMso="ResearchPane"
                   screentip="Find a code"
                   supertip="Type to find a code, Enter applies it to the selected text."
                   onAction="Ribbon_PickCode"/>
-          <button id="yaqatwNew" label="New code" size="large" imageMso="FileNew"
+          <button id="yaqatwNew" label="New code" size="large" imageMso="NameDefine"
                   screentip="New code"
                   supertip="Creates a code (name, colour, description) and applies it to the selected text."
                   onAction="Ribbon_NewCode"/>
-          <button id="yaqatwInVivo" label="In vivo" size="large" imageMso="ContentControlPlainText"
+          <button id="yaqatwInVivo" label="In vivo" size="large" imageMso="QuickStylesGallery"
                   screentip="In vivo code"
                   supertip="Creates a code named after the selected text and applies it."
                   onAction="Ribbon_InVivo"/>
