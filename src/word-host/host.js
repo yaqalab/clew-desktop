@@ -39,7 +39,38 @@
     return m ? m[1] : msg;
   }
 
-  const op = (name, args) => word.call(name, args);
+  // Operations waiting on Word. Word picks them up when it is idle; past 2 s the page says it is
+  // waiting, so a slow Word (its own background work, a dialog) is not mistaken for a hang.
+  const WAITING_TEXT = 'Waiting for Word… (if a dialog is open in Word, close it)';
+  let waitingOps = 0;
+  let waitingTimer = null;
+
+  function op(name, args) {
+    waitingOps++;
+    if (!waitingTimer) {
+      waitingTimer = setTimeout(() => {
+        waitingTimer = null;
+        if (waitingOps > 0 && !status.textContent) showStatus(WAITING_TEXT);
+      }, 2000);
+    }
+    const done = () => {
+      waitingOps--;
+      if (waitingOps > 0) return;
+      clearTimeout(waitingTimer);
+      waitingTimer = null;
+      if (status.textContent === WAITING_TEXT) showStatus('');
+    };
+    return word.call(name, args).then(
+      (v) => {
+        done();
+        return v;
+      },
+      (err) => {
+        done();
+        throw err;
+      },
+    );
+  }
 
   function notSupported(what) {
     return () => {
@@ -596,10 +627,10 @@
     if (/^(closed|no-session):/.test(message)) {
       showStatus(`“${info.title}” was closed in Word. Open it again in Word, then Yaqatw › Open Yaqatw.`, 'closed');
     } else if (/^word-busy:/.test(message)) {
-      showStatus('Word is busy: finish what is open in Word, then try again.', 'closed');
+      showStatus('Word did not answer for 30 seconds: if a dialog is open in Word, close it, then try again.', 'closed');
       setTimeout(() => {
-        if (status.textContent.startsWith('Word is busy')) showStatus('');
-      }, 5000);
+        if (status.textContent.startsWith('Word did not answer')) showStatus('');
+      }, 8000);
     }
   }
 

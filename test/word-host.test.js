@@ -397,3 +397,15 @@ test("yaqatw's own refusal comes back as the action's error", async () => {
   await p.rpc('pluginConnected');
   await assert.rejects(p.act('applyCode', { codeId: 'zz' }), /unknown code id/);
 });
+
+test('an operation Word is slow to take: the page says it is waiting, then clears it', async () => {
+  let release;
+  const p = page((op) => (op === 'getAllText' ? new Promise((r) => (release = r)) : null));
+  await settle();
+  const pending = p.rpc('getAllText');
+  await new Promise((r) => setTimeout(r, 2200));
+  assert.match(p.status.textContent, /Waiting for Word/);
+  release('text');
+  assert.equal((await pending).result, 'text');
+  assert.equal(p.status.textContent, '');
+});

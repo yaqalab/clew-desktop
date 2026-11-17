@@ -32,11 +32,13 @@ const { KIND } = require('./word-plugin');
 const MAX_SESSIONS = 20;
 const MAX_WAIT_MS = 1000;
 const MAX_RESULT = 16 * 1024 * 1024;
-const BUSY_MS = 5000;
+// Word picks up work when it is idle; a visible Word, busy with its own background work (layout,
+// proofing) or a dialog, can be late by several seconds: give it time before calling it busy.
+const BUSY_MS = 30000;
 const RUN_MS = 60000;
 
 const MESSAGES = {
-  'word-busy': 'Word is busy: finish what is open in Word, then try again.',
+  'word-busy': 'Word did not answer for 30 seconds: if a dialog is open in Word, close it, then try again.',
   'word-timeout': 'Word did not finish in time.',
   closed: 'The Word document was closed.',
   'no-session': 'This window is no longer connected to a Word document.',
