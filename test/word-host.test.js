@@ -409,3 +409,42 @@ test('an operation Word is slow to take: the page says it is waiting, then clear
   assert.equal((await pending).result, 'text');
   assert.equal(p.status.textContent, '');
 });
+
+test("a yaqatw without getFileType: the type is read in the document's settings part", async () => {
+  const vars = new Map();
+  const settings = '<settings xmlns="http://yaqat.alefa.net/xml/settings"><setting id="projectName" name="projectName" value="p"/><setting id="yaqatw-file-type" created="x" name="yaqatw-file-type" value="analyze"/></settings>';
+  const p = page(
+    (op, args) => {
+      if (op === 'readXmlPart' && args.ns === 'http://yaqat.alefa.net/xml/settings') return settings;
+      if (op === 'getVariable') return vars.has(args.key) ? vars.get(args.key) : null;
+      if (op === 'setVariable') vars.set(args.key, args.value);
+      return null;
+    },
+    { plugin: { applyCodeToSelection: null } },
+  );
+  await p.rpc('pluginConnected');
+  await p.act('applyCode', { codeId: 'c1' });
+  assert.ok(p.pluginCalls.some((c) => c.method === 'applyCodeToSelection'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(vars.get('yaqatw.fileType'), 'analyze');
+});
+
+test('saving the settings part carries the new type at once', async () => {
+  const vars = new Map();
+  const p = page(
+    (op, args) => {
+      if (op === 'getVariable') return vars.has(args.key) ? vars.get(args.key) : null;
+      if (op === 'setVariable') vars.set(args.key, args.value);
+      return null;
+    },
+    { plugin: { getFileType: null, applyCodeToSelection: null } },
+  );
+  await p.rpc('pluginConnected');
+  await assert.rejects(p.act('applyCode', { codeId: 'c1' }), /type first/);
+  await p.rpc('saveXmlPart', 'http://yaqat.alefa.net/xml/settings', '<settings xmlns="http://yaqat.alefa.net/xml/settings"><setting id="yaqatw-file-type" name="yaqatw-file-type" value="analyze"/></settings>');
+  await p.act('applyCode', { codeId: 'c1' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(vars.get('yaqatw.fileType'), 'analyze');
+  await p.rpc('saveXmlPart', 'http://yaqat.alefa.net/xml/settings', '<settings xmlns="http://yaqat.alefa.net/xml/settings"><setting id="yaqatw-file-type" name="yaqatw-file-type" value="write"/></settings>');
+  await assert.rejects(p.act('applyCode', { codeId: 'c1' }), /writing document/);
+});
