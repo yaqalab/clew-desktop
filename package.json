@@ -13,7 +13,8 @@
     "sources": "node scripts/fetch-sources.mjs",
     "build:sites": "node scripts/build-sites.mjs",
     "build:tools": "node scripts/build-tools.mjs",
-    "dist": "npm run sources && npm run build:sites && npm run build:tools && electron-builder",
+    "build:word": "node scripts/build-word.mjs",
+    "dist": "npm run sources && npm run build:sites && npm run build:tools && npm run build:word && electron-builder",
     "pack": "electron-builder --dir",
     "start": "node scripts/electron.mjs",
     "dev": "node scripts/dev.mjs",
@@ -58,6 +59,12 @@
     ],
     "win": {
       "target": "nsis",
+      "extraResources": [
+        {
+          "from": "word-plugin/dist/yaqatw.dotm",
+          "to": "word-plugin/yaqatw.dotm"
+        }
+      ],
       "files": [
         "!node_modules/better-sqlite3-multiple-ciphers/prebuilds/{darwin,linux,linuxmusl}-*"
       ]

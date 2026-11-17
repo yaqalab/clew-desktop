@@ -64,7 +64,7 @@ test('hello needs nothing and says what it is', async (t) => {
   const { port } = await fresh(t);
   const r = await request(port, { path: '/v1/hello' });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { app: 'clew-desktop', api: 1 });
+  assert.deepEqual(r.body, { app: 'clew-desktop', api: 1, pid: process.pid });
   assert.equal(r.headers['cache-control'], 'no-store');
   assert.equal(r.headers['access-control-allow-origin'], undefined);
 });

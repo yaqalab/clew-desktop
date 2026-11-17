@@ -90,8 +90,9 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
 - **The local API** ([src/local-api.js](../src/local-api.js)): plain HTTP on `127.0.0.1:47830`
   (`CLEW_LOCAL_API_PORT`; a smoke run takes any free port) for programs on this computer, not
   web pages. `Host` must be `127.0.0.1:<port>` or `localhost:<port>`; a request with an `Origin`
-  or a browser's `Sec-Fetch-Site` is refused. `GET /v1/hello` answers anyone; `POST /v1/pair
-  { name }` asks the user, in the app, whether to allow that program, and returns a token once;
+  or a browser's `Sec-Fetch-Site` is refused. `GET /v1/hello` answers anyone (with the app's
+  `pid`, which a program in front can allow to come forward); `POST /v1/pair { name }` asks the
+  user, in the app, whether to allow that program, and returns a token once;
   every other route needs `Authorization: Bearer <token>` (`GET /v1/me`). Only a SHA-256 of each
   token is kept, in `userData/local-api/clients.json`. If the port is taken, the app runs
   without it and says so in its log.
@@ -282,19 +283,31 @@ GPL parts; Clew docs/32, section 2).
 
 ## The Word template (`word-plugin/`)
 
-`yaqatw.dotm`, a Word template that talks to the app through the local API: a **yaqatw** tab
-with **Connect** (pairs with the app; the app asks the user) and **Mark selection** (puts a mark
-around the selected text, in the form the yaqatw add-in uses: a rich-text content control
-tagged `yaqatw:id=<uuid>`). Windows only for now.
+Yaqatw for Word, `yaqatw.dotm`: a Word template that talks to the app through the local API. A
+**Yaqatw** tab with **Connection** (says whether it is connected to the app) and **Mark
+selection** (puts a mark around the selected text, in the form the yaqatw add-in uses: a
+rich-text content control tagged `yaqatw:id=<uuid>`). Windows only.
 
-- Sources: VBA modules in `word-plugin/src/*.bas` (ASCII only), the ribbon in
-  `word-plugin/customUI/customUI14.xml`. No VBScript components (Windows is retiring VBScript).
-- Build, on Windows with Word: `powershell -ExecutionPolicy Bypass -File word-plugin\build.ps1`
-  → `word-plugin/dist/yaqatw.dotm`; `-Install` also copies it to Word's Startup folder
-  (`%APPDATA%\Microsoft\Word\STARTUP`), from where Word loads it at its next start, macros
-  enabled (a trusted location). The build runs a hidden Word of its own, which needs "Trust
-  access to the VBA project object model" (`AccessVBOM`): the script turns it on for the build
-  only and puts the old value back once that Word has exited, also when the build fails or
-  hangs (two minutes).
-- The token from pairing is kept in `HKCU\Software\VB and VBA Program Settings\yaqatw\Clew`
-  (`Token`); a `Port` value there overrides 47830.
+- **Installed by the app**: File › Install Yaqatw for Word… ([src/word-plugin.js](../src/word-plugin.js))
+  copies it to Word's Startup folder (`%APPDATA%\Microsoft\Word\STARTUP`, where Word loads it
+  at its next start, macros enabled: a trusted location), registers it with the local API as a
+  client of kind `word-template` and writes its token to
+  `HKCU\Software\VB and VBA Program Settings\yaqatw\Clew` (`Token`, and `Port` when not 47830).
+  Installing is the consent: no pairing question. At each start the app replaces an installed
+  template older than its own (unless Word holds it) and reconnects one whose client is gone.
+  File › Remove Yaqatw for Word… takes away the file, the key and the client.
+  `CLEW_WORD_STARTUP_DIR` points it at another folder.
+- **When the token is lost**, Connection offers to pair (the app asks the user). The template
+  first allows the app to come to the front (`AllowSetForegroundWindow` with the `pid` from
+  `/v1/hello`), and the app shows the question over a small always-on-top window: otherwise
+  Windows keeps it behind Word.
+- Sources: VBA modules in `word-plugin/src/*.bas` (ASCII only; project name `Yaqatw`), the
+  ribbon in `word-plugin/customUI/customUI14.xml`. No VBScript components (Windows is retiring
+  VBScript).
+- Build, on Windows with Word: `npm run build:word` (part of `npm run dist`; skipped on other
+  systems), or `word-plugin\build.ps1` itself → `word-plugin/dist/yaqatw.dotm`, which the Windows
+  installer ships as `resources/word-plugin/yaqatw.dotm`; `build.ps1 -Install` also copies it to
+  the Startup folder. The build runs a hidden Word of its own, which needs "Trust access to the
+  VBA project object model" (`AccessVBOM`): the script turns it on for the build only and puts
+  the old value back once that Word has exited, also when the build fails or hangs (two
+  minutes).

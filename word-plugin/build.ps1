@@ -56,6 +56,9 @@ try {
       $word.Visible = $false
       $word.DisplayAlerts = 0
       $doc = $word.Documents.Add()
+      # Its own project name: macros can be called as Yaqatw.Module.Macro, apart from any other
+      # template's (all are "Project" otherwise).
+      $doc.VBProject.Name = 'Yaqatw'
       foreach ($m in Get-ChildItem (Join-Path $work '*.bas')) { [void]$doc.VBProject.VBComponents.Import($m.FullName) }
       $doc.SaveAs2($plain, 15) # wdFormatXMLTemplateMacroEnabled
       $doc.Close(0)

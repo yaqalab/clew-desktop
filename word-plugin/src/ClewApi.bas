@@ -4,8 +4,9 @@ Attribute VB_Name = "ClewApi"
 ' The functions here show nothing to the user and return a short status string, so they can be
 ' called from the ribbon (Ribbon.bas) or from a test through Application.Run.
 '
-' The token Clew hands out when the user allows this template is kept in the registry, under
-' HKCU\Software\VB and VBA Program Settings\yaqatw\Clew. "Port" there overrides the port.
+' The token is kept in the registry, under HKCU\Software\VB and VBA Program Settings\yaqatw\Clew.
+' Clew writes it there itself when it installs this template; pairing (ClewPair) is the way
+' back when it is lost. "Port" there overrides the port.
 '
 ' No VBScript components (VBScript.RegExp, ScriptControl, Scriptlet.TypeLib): Windows is
 ' retiring VBScript. WinHttp is part of Windows itself.
@@ -14,9 +15,13 @@ Option Explicit
 Private Const APP_KEY As String = "yaqatw"
 Private Const SECTION As String = "Clew"
 Private Const DEFAULT_PORT As String = "47830"
-Private Const CLIENT_NAME As String = "yaqatw for Word"
+Private Const CLIENT_NAME As String = "Yaqatw for Word"
 ' Clew waits two minutes for the user's answer; a little longer here.
 Private Const PAIR_WAIT_SECONDS As Long = 130
+
+' Word is in front, Clew is not: Windows lets Clew bring its question forward only if the
+' program in front allows it.
+Private Declare PtrSafe Function AllowSetForegroundWindow Lib "user32" (ByVal dwProcessId As Long) As Long
 
 Private Function BaseUrl() As String
     BaseUrl = "http://127.0.0.1:" & GetSetting(APP_KEY, SECTION, "Port", DEFAULT_PORT)
@@ -97,8 +102,12 @@ Public Function ClewPair() As String
     Dim status As Long
     Dim body As String
     Dim newToken As String
+    Dim pid As String
     ' A token Clew no longer knows would be sent along; it is not needed to pair.
     ClewForget
+    body = HttpCall("GET", "/v1/hello", status)
+    pid = JsonDigits(body, "pid")
+    If status = 200 And Len(pid) > 0 And Len(pid) < 10 Then AllowSetForegroundWindow CLng(pid)
     body = HttpCall("POST", "/v1/pair", status, "{""name"":""" & JsonEscape(CLIENT_NAME) & """}", PAIR_WAIT_SECONDS)
     If status = 0 Then
         ClewPair = "not-running"
@@ -186,4 +195,23 @@ Public Function JsonString(ByVal jsonText As Variant, ByVal fieldName As Variant
         End If
         p = p + 1
     Loop
+End Function
+
+' The digits of a non-negative integer "key" in a flat JSON object, or "" when it is not one.
+Public Function JsonDigits(ByVal jsonText As Variant, ByVal fieldName As Variant) As String
+    Dim json As String
+    Dim p As Long
+    Dim out As String
+    json = CStr(jsonText)
+    p = InStr(1, json, """" & CStr(fieldName) & """")
+    If p = 0 Then Exit Function
+    p = p + Len(CStr(fieldName)) + 2
+    Do While p <= Len(json) And Mid$(json, p, 1) Like "[ :" & vbTab & vbCr & vbLf & "]"
+        p = p + 1
+    Loop
+    Do While p <= Len(json) And Mid$(json, p, 1) Like "[0-9]"
+        out = out & Mid$(json, p, 1)
+        p = p + 1
+    Loop
+    JsonDigits = out
 End Function

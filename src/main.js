@@ -13,6 +13,7 @@ const { Tools } = require('./tools');
 const { createAppUpdater } = require('./app-update');
 const databases = require('./db');
 const localApi = require('./local-api');
+const { createWordPlugin } = require('./word-plugin');
 
 const PARTITION = 'persist:alefa';
 const SMOKE = process.argv.includes('--smoke');
@@ -42,6 +43,8 @@ const DB = databases.probe();
 let db = null;
 /** The local API for programs on this computer (`src/local-api.js`). */
 let api = null;
+/** Yaqatw for Word, the Word template the app installs (`src/word-plugin.js`); Windows only. */
+let wordPlugin = null;
 
 /** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
 const settle = createSettler(ipcMain);
@@ -316,7 +319,32 @@ function localApiPort() {
  * up or the wait times out (`signal`). The name is the program's own: shown, never trusted.
  */
 async function approveLocalClient({ name, signal }) {
-  const parent = mainWindow?.isVisible() && !mainWindow.isMinimized() ? mainWindow : null;
+  // The program asking is usually in front (Word) and Clew behind, or in the tray, and Windows
+  // keeps a program behind from coming forward. The one in front allows it first (the Word
+  // template calls AllowSetForegroundWindow with the pid from /v1/hello); then a window of
+  // Clew's takes the front and holds the question: Clew's own window when it is open, else a
+  // tiny always-on-top one.
+  const shown = mainWindow?.isVisible() && !mainWindow.isMinimized();
+  const holder = shown
+    ? null
+    : new BrowserWindow({
+        width: 1,
+        height: 1,
+        frame: false,
+        transparent: true,
+        resizable: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        show: false,
+        title: app.name,
+      });
+  const parent = holder ?? mainWindow;
+  if (holder) {
+    holder.center();
+    holder.show();
+  }
+  parent.focus();
+  parent.flashFrame(true);
   const opts = {
     type: 'question',
     title: app.name,
@@ -330,8 +358,13 @@ async function approveLocalClient({ name, signal }) {
     noLink: true,
     signal,
   };
-  const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
-  return response === 0 && !signal.aborted;
+  try {
+    const { response } = await dialog.showMessageBox(parent, opts);
+    return response === 0 && !signal.aborted;
+  } finally {
+    if (holder) holder.destroy();
+    else if (!mainWindow?.isDestroyed()) mainWindow.flashFrame(false);
+  }
 }
 
 async function startLocalApi() {
@@ -349,6 +382,73 @@ async function startLocalApi() {
   } catch {
     console.warn(`[local-api] not started: ${api.status().error}`);
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Yaqatw for Word (`src/word-plugin.js`): Windows, never in a smoke run.
+
+function startWordPlugin() {
+  if (process.platform !== 'win32' || SMOKE || !api) return;
+  wordPlugin = createWordPlugin({
+    template: app.isPackaged
+      ? path.join(process.resourcesPath, 'word-plugin', 'yaqatw.dotm')
+      : path.join(__dirname, '..', 'word-plugin', 'dist', 'yaqatw.dotm'),
+    startupDir: process.env.CLEW_WORD_STARTUP_DIR || path.join(app.getPath('appData'), 'Microsoft', 'Word', 'STARTUP'),
+    clients: api.clients,
+    port: () => api.status().port,
+    defaultPort: localApi.DEFAULT_PORT,
+  });
+  wordPlugin.refresh().then(() => buildMenu());
+}
+
+function wordDialog(opts) {
+  const parent = mainWindow?.isVisible() ? mainWindow : null;
+  const all = { title: app.name, noLink: true, ...opts };
+  return parent ? dialog.showMessageBox(parent, all) : dialog.showMessageBox(all);
+}
+
+async function installWordPlugin() {
+  try {
+    await wordPlugin.install();
+    await wordDialog({
+      type: 'info',
+      message: 'Yaqatw for Word is installed.',
+      detail: 'Word shows the Yaqatw tab the next time it starts. If Word is open, close it and open it again.',
+    });
+  } catch (err) {
+    await wordDialog({ type: 'warning', message: 'Yaqatw for Word could not be installed.', detail: err.message });
+  }
+  buildMenu();
+}
+
+async function removeWordPlugin() {
+  const { response } = await wordDialog({
+    type: 'question',
+    message: 'Remove Yaqatw for Word?',
+    detail: 'Word will no longer show the Yaqatw tab. Your documents and their marks stay as they are.',
+    buttons: ['Remove', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  if (response !== 0) return;
+  try {
+    await wordPlugin.remove();
+  } catch (err) {
+    await wordDialog({ type: 'warning', message: 'Yaqatw for Word could not be removed.', detail: err.message });
+  }
+  buildMenu();
+}
+
+/** File › Install / Remove Yaqatw for Word, when this build carries the template. */
+function wordPluginItems() {
+  const s = wordPlugin?.status();
+  if (!s?.available && !s?.installed) return [];
+  return [
+    s.installed
+      ? { label: 'Remove Yaqatw for Word…', click: () => removeWordPlugin() }
+      : { label: 'Install Yaqatw for Word…', click: () => installWordPlugin() },
+    { type: 'separator' },
+  ];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -398,6 +498,7 @@ function buildMenu() {
             submenu: [
               settings,
               { type: 'separator' },
+              ...wordPluginItems(),
               // Windows says "Exit". Closing the window only hides it in the tray.
               { label: process.platform === 'win32' ? 'Exit' : 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => quitApp() },
             ],
@@ -539,6 +640,7 @@ app.whenReady().then(async () => {
     });
   }
   await startLocalApi();
+  startWordPlugin();
   if (WITH_TOOLS) {
     tools = new Tools({
       openApp: showMainWindow,
