@@ -575,6 +575,10 @@ function appUpdateText(a) {
 
 function renderUpdates(u) {
   if (!u) return;
+  if (u.releasesUrl) {
+    $('releases-link').href = u.releasesUrl;
+    $('releases-note').hidden = false;
+  }
   const appOn = Boolean(u.app?.enabled);
   $('updates-note').textContent =
     u.enabled || appOn
@@ -604,6 +608,8 @@ function renderUpdates(u) {
       cell.append(textEl('div', `A newer build needs Clew Desktop ${s.last.minDesktop}: install the new version`, 'muted'));
     } else if (s.last?.status === 'error') {
       cell.append(textEl('div', `Last check failed: ${s.last.error}`, 'muted'));
+    } else if (s.last?.signed) {
+      cell.append(textEl('div', 'Latest build on the site: signed', 'muted'));
     }
     grid.append(cell);
   }

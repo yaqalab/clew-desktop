@@ -458,6 +458,8 @@ function updatesSnapshot() {
     app: { current: app.getVersion(), ...appUpdater.snapshot() },
     checking: Boolean(checking),
     checkedAt: lastCheck.at,
+    // Where to get the app by hand when updates do not work (Settings › General).
+    releasesUrl: `${REPO_URL}/releases/latest`,
     intervalHours: desktopConfig.siteUpdates.intervalHours || 4,
     sites: sites.list.map((site) => {
       const info = sites.buildInfo(site);
@@ -507,8 +509,10 @@ async function runSiteUpdateCheck() {
         appVersion: app.getVersion(),
         current,
         fetchImpl: (url, opts) => net.fetch(url, opts),
+        keys: desktopConfig.siteUpdates.publicKeys || [],
+        requireSignature: Boolean(desktopConfig.siteUpdates.requireSignature),
       });
-      result = { status: r.status, id: r.build?.id, minDesktop: r.build?.minDesktop };
+      result = { status: r.status, id: r.build?.id, minDesktop: r.build?.minDesktop, signed: r.build?.signed ?? null };
       if (r.status === 'ready') {
         waiting.set(site.name, r.info);
         console.log(`[updates] ${site.name}: ${r.build.id} downloaded, used from the next start`);
