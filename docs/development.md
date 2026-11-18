@@ -181,7 +181,10 @@ up their newer builds by itself, **straight from the live sites** ([src/site-upd
    - `/desktop/<name>-site-<commit12>.part1…N`: the whole output, with its `.build-info.json`,
      as one `.tar.gz` cut in parts of at most 20 MiB (Cloudflare Pages refuses files over
      25 MiB; today each site is one part, 17–20 MB);
-   - `/desktop/version.json`: commit, commit date, size, SHA-256, the parts, `minDesktop`.
+   - `/desktop/version.json`: commit, commit date, size, SHA-256, the parts, `minDesktop`;
+   - `/desktop/version.json.sig`: the Ed25519 signature (base64) of version.json's bytes, when
+     the Cloudflare project has `DESKTOP_SIGNING_KEY` (`DESKTOP_REQUIRE_SIGNING=1` fails the
+     build without it).
 
    Local builds, this repo's included, are unchanged.
 2. **The app** reads `https://<host>/desktop/version.json` 15 s after start, then every 4 hours
@@ -196,8 +199,16 @@ up their newer builds by itself, **straight from the live sites** ([src/site-upd
    updates** (also in the Help menu). A downloaded build is
    used only while it is newer than the installer's own, so a newer installer wins.
 
-The trust is the site's own: the app runs what `clew.alefa.net` serves, as a browser does. No
-token, secret or CI is involved. `DESKTOP_MIN_VERSION`, set in a Cloudflare project's
+The trust is the site's own, as in a browser, **plus a signature**: `siteUpdates.publicKeys`
+in [desktop.config.json](../desktop.config.json) holds two Ed25519 public keys (one the sites
+sign with, one spare kept offline). A signature that matches neither is always refused; a
+missing one is refused once `siteUpdates.requireSignature` is true. A lost key stops site
+updates only: installed apps keep the build they have, and an app release carrying a new public
+key (it updates itself from GitHub, a separate channel) takes them up again. Settings › General
+links to the releases page for anyone whose updates stop. Keys:
+`node scripts/site-signing-key.mjs new <folder>` (prints the public key);
+`node scripts/site-signing-key.mjs check` reads the live sites and says whether they are signed.
+`DESKTOP_MIN_VERSION`, set in a Cloudflare project's
 environment variables, marks builds that need a newer app (for a site that starts using
 something new in `window.alefaDesktop`).
 

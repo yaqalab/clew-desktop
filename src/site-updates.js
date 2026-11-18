@@ -17,7 +17,15 @@
  * it; the app switches at its next start (a running page never has its files changed underneath
  * it), and only if that copy is still newer than the installer's own.
  *
- * The trust is the site's: what https://clew.alefa.net serves is what its web users run.
+ * The trust is the site's: what https://clew.alefa.net serves is what its web users run. On top
+ * of it, a signature: `/desktop/version.json.sig` holds the Ed25519 signature (base64) of
+ * version.json's exact bytes, made by the sites' build with a key whose public half the app
+ * carries (`siteUpdates.publicKeys` in desktop.config.json: one in use, one spare kept offline).
+ * version.json names every part's SHA-256, so the signature covers the whole build. A signature
+ * that does not match is always refused; a missing one is refused once `requireSignature` is on
+ * (it is off until both sites sign). Losing the key: installed apps keep the build they have and
+ * take signed builds again from the app release that carries the new public key.
+ *
  * Plain Node: no Electron here.
  */
 const crypto = require('node:crypto');
@@ -132,24 +140,62 @@ async function join(files, to, sha256) {
   if (hash.digest('hex') !== sha256) throw new Error('the joined parts do not match their SHA-256');
 }
 
+/** A public key from desktop.config.json: base64 of its SPKI DER (`MCowBQYDK2VwAyEA…`). */
+function publicKey(b64) {
+  return crypto.createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' });
+}
+
+/**
+ * Whether `signature` (base64, from version.json.sig) signs `bytes` with one of `keys`. Throws
+ * when a signature is there and matches none.
+ * @returns {boolean}  true: signed by a known key; false: no signature
+ */
+function verifySignature(bytes, signature, keys) {
+  if (signature == null) return false;
+  const sig = Buffer.from(String(signature).trim(), 'base64');
+  if (sig.length !== 64) throw new Error('version.json.sig is not an Ed25519 signature');
+  for (const k of keys) {
+    if (crypto.verify(null, bytes, publicKey(k), sig)) return true;
+  }
+  throw new Error('version.json is not signed by a key this app knows');
+}
+
+const NO_CACHE = { redirect: 'follow', cache: 'no-store', headers: { 'cache-control': 'no-cache' } };
+
+/** A file of the site's /desktop/ folder, or null when the site does not have it. */
+async function fetchOptional(url, { signal, fetchImpl }) {
+  const res = await fetchImpl(`${url}?t=${Date.now()}`, { signal, ...NO_CACHE });
+  // A single-page site answers a missing file with its page (200, HTML).
+  if (res.status === 404 || /text\/html/i.test(res.headers.get('content-type') || '')) return null;
+  if (!res.ok) throw new Error(`could not read ${url.split('/').pop()} (${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 /**
  * Looks for a newer build of `name` than `current` (the build info in use or already waiting),
- * at `at` (`https://<host>/desktop`). Resolves with `{ status, build?, info? }`: 'none' (the site
- * publishes nothing for the desktop), 'current', 'needs-app' or 'ready' (downloaded, used from the
- * next start).
+ * at `at` (`https://<host>/desktop`). Resolves with `{ status, build?, info?, signed? }`: 'none'
+ * (the site publishes nothing for the desktop), 'current', 'needs-app' or 'ready' (downloaded,
+ * used from the next start). `keys`: the public keys a signature may come from;
+ * `requireSignature`: refuse a build without one.
  */
-async function check(dir, name, { at, appVersion, current, signal, fetchImpl = fetch }) {
+async function check(dir, name, { at, appVersion, current, signal, fetchImpl = fetch, keys = [], requireSignature = false }) {
   // Never a cached copy: browsers may keep the site's files for hours.
-  const res = await fetchImpl(`${at}/version.json?t=${Date.now()}`, {
-    signal,
-    redirect: 'follow',
-    cache: 'no-store',
-    headers: { 'cache-control': 'no-cache' },
-  });
-  // A single-page site answers a missing file with its page (200, HTML): nothing published either.
-  if (res.status === 404 || /text\/html/i.test(res.headers.get('content-type') || '')) return { status: 'none' };
-  if (!res.ok) throw new Error(`could not read version.json (${res.status})`);
-  const build = parse(await res.json(), name, at);
+  const bytes = await fetchOptional(`${at}/version.json`, { signal, fetchImpl });
+  if (!bytes) return { status: 'none' };
+  let signed = false;
+  if (keys.length) {
+    const sig = await fetchOptional(`${at}/version.json.sig`, { signal, fetchImpl });
+    signed = verifySignature(bytes, sig?.toString('utf8') ?? null, keys);
+  }
+  if (!signed && requireSignature) throw new Error('version.json is not signed');
+  let v;
+  try {
+    v = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    throw new Error('version.json is not JSON');
+  }
+  const build = parse(v, name, at);
+  build.signed = signed;
   if (!isNewer(build, current)) return { status: 'current', build };
   if (compareVersions(appVersion, build.minDesktop) < 0) return { status: 'needs-app', build };
 
@@ -180,4 +226,4 @@ async function check(dir, name, { at, appVersion, current, signal, fetchImpl = f
   }
 }
 
-module.exports = { activate, check, parse, isNewer, compareVersions };
+module.exports = { activate, check, parse, isNewer, compareVersions, verifySignature };

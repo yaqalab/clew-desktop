@@ -171,3 +171,50 @@ test('part addresses come from the site and commit, never from version.json', ()
   assert.equal(updates.isNewer({ commit: sha('b'), committedAt: '2026-11-02T00:00:00Z', builtAt: '2026-11-02T10:00:00Z' },
     { commit: sha('a'), builtAt: '2026-11-02T09:00:00Z' }), true);
 });
+
+// Signatures: version.json.sig, Ed25519 over version.json's bytes (desktop-package.mjs signs).
+function keyPair() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  return { pub: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'), privateKey };
+}
+const signed = (files, privateKey) => ({
+  ...files,
+  'version.json.sig': crypto.sign(null, Buffer.from(files['version.json']), privateKey).toString('base64'),
+});
+
+test('a signed build is taken; a wrong or broken signature never is', async () => {
+  const k1 = keyPair();
+  const k2 = keyPair();
+  const other = keyPair();
+  const good = deploy('clew', newer);
+  const site = {};
+  const { server, at } = await host(site);
+  const run = (o = {}) => updates.check(tmp('upd-'), 'clew', { ...opts(at, bundled), keys: [k1.pub, k2.pub], ...o });
+  try {
+    site.files = signed(good.files, k1.privateKey);
+    let r = await run({ requireSignature: true });
+    assert.equal(r.status, 'ready');
+    assert.equal(r.build.signed, true);
+    // The spare key signs as well.
+    site.files = signed(good.files, k2.privateKey);
+    assert.equal((await run({ requireSignature: true })).status, 'ready');
+    // Another key: refused, required or not.
+    site.files = signed(good.files, other.privateKey);
+    await assert.rejects(run(), /not signed by a key this app knows/);
+    // version.json changed after signing (a part's hash swapped).
+    const v = JSON.parse(good.files['version.json']);
+    v.parts[0].sha256 = 'f'.repeat(64);
+    site.files = { ...signed(good.files, k1.privateKey), 'version.json': JSON.stringify(v) };
+    await assert.rejects(run(), /not signed by a key this app knows/);
+    site.files = { ...good.files, 'version.json.sig': 'not a signature' };
+    await assert.rejects(run(), /not an Ed25519 signature/);
+    // No signature: taken until signatures are required.
+    site.files = good.files;
+    r = await run();
+    assert.equal(r.status, 'ready');
+    assert.equal(r.build.signed, false);
+    await assert.rejects(run({ requireSignature: true }), /version.json is not signed/);
+  } finally {
+    server.close();
+  }
+});
