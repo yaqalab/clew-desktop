@@ -487,6 +487,11 @@ async function run(win, ses, server, tools, folder, db, api) {
         // The programs connected to Clew: in a smoke run, the fake Word of the Word window check.
         const clients = await sw.webContents.executeJavaScript("document.getElementById('clients').textContent");
         assert(clients.length > 0, 'no list of connected programs');
+        // Developer tools: always on in a development run, so the switch is ticked and locked.
+        const devtools = await sw.webContents.executeJavaScript(
+          "window.tools.appPrefs().then((p) => { const c = document.getElementById('devtools'); return c.checked && c.disabled ? '' : `checked ${c.checked}, disabled ${c.disabled}, prefs ${JSON.stringify(p)}`; })",
+        );
+        assert(!devtools, `the developer tools switch is not shown as always on: ${devtools}`);
         assert(text, 'no server state shown');
         assert(errors.length === 0, errors.join(' | '));
         sw.destroy();

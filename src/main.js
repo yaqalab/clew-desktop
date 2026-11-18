@@ -17,6 +17,7 @@ const databases = require('./db');
 const localApi = require('./local-api');
 const { createWordPlugin } = require('./word-plugin');
 const { createWordBridge } = require('./word-bridge');
+const { createAppSettings } = require('./app-settings');
 
 const PARTITION = 'persist:alefa';
 // The host page of Word windows (src/word-host/), on an origin of its own.
@@ -52,6 +53,32 @@ let db = null;
 let api = null;
 /** Yaqatw for Word, the Word template the app installs (`src/word-plugin.js`); Windows only. */
 let wordPlugin = null;
+
+/** The app's own preferences (`app-settings.js`); made once the profile folder is known. */
+let appSettings = null;
+const settingsNow = () => appSettings?.get() ?? require('./app-settings').DEFAULTS;
+
+/** DevTools in the View menu: always in a development run, else when Settings › General allows. */
+function devToolsAllowed() {
+  return !app.isPackaged || settingsNow().devTools;
+}
+
+/** Settings › General's switch: the menu follows, and turning it off closes any open DevTools. */
+function setDevTools(on) {
+  const next = appSettings.set({ devTools: Boolean(on) });
+  if (!devToolsAllowed()) {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents.isDevToolsOpened()) w.webContents.closeDevTools();
+    }
+  }
+  buildMenu();
+  return appSnapshot(next);
+}
+
+/** What Settings › General shows of the app's own preferences. */
+function appSnapshot(s = settingsNow()) {
+  return { devTools: s.devTools, devToolsAlways: !app.isPackaged };
+}
 
 /** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
 const settle = createSettler(ipcMain);
@@ -845,7 +872,8 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+Shift+R',
           click: (_item, win) => reloadSettled(win, true),
         },
-        { role: 'toggleDevTools' },
+        // On a shared computer DevTools would show an open vault's data: off unless allowed.
+        ...(devToolsAllowed() ? [{ role: 'toggleDevTools' }] : []),
         { type: 'separator' },
         // Electron's own Zoom In listens for Ctrl+Shift+= ("Plus") only. Ctrl+= first, as in
         // Chrome; the other presses people use follow, unseen. A press the page took for itself
@@ -910,6 +938,10 @@ function createMainWindow() {
 }
 
 app.on('web-contents-created', (_event, contents) => {
+  // However DevTools were opened, they stay closed unless allowed.
+  contents.on('devtools-opened', () => {
+    if (!devToolsAllowed()) contents.closeDevTools();
+  });
   if (contents.session === appSession) {
     contents.on('will-prevent-unload', (event) => askBeforeUnload(contents, event));
   }
@@ -1039,6 +1071,7 @@ function stopServices() {
 }
 
 app.whenReady().then(async () => {
+  appSettings = createAppSettings(path.join(app.getPath('userData'), 'desktop-settings.json'));
   appSession = session.fromPartition(PARTITION);
   serveWordHost(appSession);
   if (SITE_UPDATES) activateSiteUpdates();
@@ -1080,6 +1113,10 @@ app.whenReady().then(async () => {
         install: () => (wordPlugin ? installWordPlugin() : wordSnapshot()),
         remove: () => (wordPlugin ? removeWordPlugin() : wordSnapshot()),
         forgetClient: forgetLocalClient,
+      },
+      appPrefs: {
+        snapshot: () => appSnapshot(),
+        setDevTools,
       },
     });
     tools.start();
