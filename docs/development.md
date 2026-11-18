@@ -269,7 +269,12 @@ tray icon, one settings window.**
   *Quit Clew* stops everything. The installed app starts at login from its first run (in the
   tray, `--hidden`); a development or test run never registers itself.
 - **Settings window** ([src/tools/settings/](../src/tools/settings/)): Audio, Conversion, Dictation,
-  Analysis, General (start at login, activity).
+  Analysis, General (start at login, Word, connected programs, updates, developer tools,
+  activity).
+- **Developer tools** are not in the installed app's View menu unless Settings › General allows
+  them (`<profile>/desktop-settings.json`, [src/app-settings.js](../src/app-settings.js)): on a
+  shared computer they would show an open vault's data. DevTools opened any other way close again.
+  A development run always has them.
 
 Building the tools needs, on Windows, Visual Studio or Build Tools with the C++ workload (CMake
 and Ninja come with it) and Python 3.10+. Where they come from: `tools/` of the Clew source in

@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('tools', {
   installWord: () => ipcRenderer.invoke('tools:word-install'),
   removeWord: () => ipcRenderer.invoke('tools:word-remove'),
   forgetClient: (id) => ipcRenderer.invoke('tools:forget-client', id),
+  appPrefs: () => ipcRenderer.invoke('tools:app-prefs'),
+  setDevTools: (on) => ipcRenderer.invoke('tools:set-dev-tools', on),
   onUpdates: on('tools:updates'),
   onWord: on('tools:word'),
   onStatus: on('tools:status'),

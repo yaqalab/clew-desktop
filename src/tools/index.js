@@ -81,11 +81,23 @@ class Tools {
    * @param {{ snapshot: () => object, install: () => Promise<object>, remove: () => Promise<object>,
    *          forgetClient: (id: string) => object }} [opts.word]  Yaqatw for Word and the programs
    *        connected to the local API, that Settings › General shows (main.js)
+   * @param {{ snapshot: () => object, setDevTools: (on: boolean) => object }} [opts.appPrefs]  the
+   *        app's own preferences that Settings › General shows (main.js, `app-settings.js`)
    * @param {() => BrowserWindow | null} [opts.parentWindow]  the window Settings opens as a modal
    *        over, when there is one on screen (from the tray with Clew hidden, it opens on its own)
    */
-  constructor({ openApp, quitApp, firstRunLoginItem = false, appItems = () => [], updates = null, word = null, parentWindow = () => null }) {
+  constructor({
+    openApp,
+    quitApp,
+    firstRunLoginItem = false,
+    appItems = () => [],
+    updates = null,
+    word = null,
+    appPrefs = null,
+    parentWindow = () => null,
+  }) {
     this.openApp = openApp;
+    this.appPrefs = appPrefs;
     this.parentWindow = parentWindow;
     this.quitApp = quitApp;
     this.appItems = appItems;
@@ -377,6 +389,8 @@ class Tools {
     handle('tools:word-install', () => this.word?.install() ?? null);
     handle('tools:word-remove', () => this.word?.remove() ?? null);
     handle('tools:forget-client', (id) => this.word?.forgetClient(String(id)) ?? null);
+    handle('tools:app-prefs', () => this.appPrefs?.snapshot() ?? null);
+    handle('tools:set-dev-tools', (on) => this.appPrefs?.setDevTools(Boolean(on)) ?? null);
     handle('tools:login-item', () => loginItem());
     handle('tools:set-login-item', (on) => {
       setLoginItem(Boolean(on));

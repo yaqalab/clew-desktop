@@ -88,7 +88,8 @@ function renderAll() {
         : `The audio server is ${snap.state}${snap.problem ? `: ${snap.problem}` : ''}.`;
   } else banner.hidden = true;
   for (const b of document.querySelectorAll('main button, main input, main select')) {
-    if (b.id !== 'open-app' && b.id !== 'login') b.disabled = snap.state !== 'running';
+    // The app's own rows (`data-app`) do not depend on the audio server.
+    if (b.id !== 'open-app' && b.id !== 'login' && !b.closest('[data-app]')) b.disabled = snap.state !== 'running';
   }
   renderSettings();
   renderStatus();
@@ -416,6 +417,18 @@ $('login').addEventListener('change', async () => {
   $('login').checked = await window.tools.setLoginItem($('login').checked);
 });
 $('open-app').addEventListener('click', () => window.tools.openApp());
+
+// The app's own preferences (main.js, src/app-settings.js)
+function renderAppPrefs(p) {
+  if (!p) return;
+  $('devtools').checked = p.devTools || p.devToolsAlways;
+  $('devtools').disabled = p.devToolsAlways;
+  if (p.devToolsAlways) $('devtools-note').textContent = 'Always shown in a development run.';
+}
+$('devtools').addEventListener('change', async () => {
+  renderAppPrefs(await run(() => window.tools.setDevTools($('devtools').checked)));
+});
+window.tools.appPrefs().then(renderAppPrefs);
 
 // Updates (src/site-updates.js, driven from main.js)
 const SITE_NAMES = { clew: 'Clew', yaqatw: 'yaqatw' };
