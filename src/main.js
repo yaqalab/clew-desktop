@@ -2,7 +2,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFile } = require('node:child_process');
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerMonitor, protocol, session, shell } = require('electron');
 const desktopConfig = require('../desktop.config.json');
 const sites = require('./sites');
 const siteUpdates = require('./site-updates');
@@ -103,7 +103,7 @@ function childWindowOptions() {
 // Site updates
 
 const siteUpdatesDir = () => path.join(app.getPath('userData'), 'site-updates');
-/** name → build info of a newer build, downloaded and used from the next start. */
+/** name 竊・build info of a newer build, downloaded and used from the next start. */
 const waiting = new Map();
 
 /** At start, before anything is served: a newer downloaded build replaces the installer's. */
@@ -127,7 +127,7 @@ let checking = null;
 
 const appUpdater = createAppUpdater({ enabled: APP_UPDATES, onChange: () => updatesChanged() });
 
-/** What Settings › General shows. */
+/** What Settings 窶ｺ General shows. */
 function updatesSnapshot() {
   return {
     enabled: SITE_UPDATES,
@@ -218,7 +218,7 @@ function restartItems() {
   return [{ label: 'Restart to update', click: () => restartApp() }, { type: 'separator' }];
 }
 
-/** Help › Check for updates: Settings › General shows the check and its result. */
+/** Help 窶ｺ Check for updates: Settings 窶ｺ General shows the check and its result. */
 function checkFromMenu() {
   tools?.openSettings('general');
   checkAllUpdates();
@@ -242,16 +242,9 @@ function installAppUpdate() {
   if (leaving) return;
   leaving = true;
   quitting = true;
-  settle(appContents())
-    .then(() => wordBridge.closeAll())
-    .then(() => api?.close())
-    .then(() => db?.stop())
-    .then(() => (tools ? tools.stop() : undefined))
-    .catch(() => undefined)
-    .finally(() => {
-      readyToQuit = true;
-      if (!appUpdater.install()) app.quit();
-    });
+  leaveApp(() => {
+    if (!appUpdater.install()) app.quit();
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -260,7 +253,7 @@ function installAppUpdate() {
 function aboutText() {
   const lines = [
     `Version ${app.getVersion()}`,
-    `Electron ${process.versions.electron} · Chromium ${process.versions.chrome}`,
+    `Electron ${process.versions.electron} ﾂｷ Chromium ${process.versions.chrome}`,
     '',
   ];
   for (const site of sites.list) {
@@ -356,11 +349,11 @@ async function approveLocalClient({ name, signal }) {
   const opts = {
     type: 'question',
     title: app.name,
-    message: `Allow “${name}” to connect to ${app.name}?`,
+    message: `Allow 窶・{name}窶・to connect to ${app.name}?`,
     detail:
       'A program on this computer is asking to connect. Allow it only if you have just set up ' +
       'a program you trust and it told you to confirm here.',
-    buttons: ['Allow', 'Don’t allow'],
+    buttons: ['Allow', 'Don窶冲 allow'],
     defaultId: 1,
     cancelId: 1,
     noLink: true,
@@ -415,13 +408,13 @@ const WORD_HOST_FILES = {
   'insert.js': 'text/javascript',
 };
 const WORD_HOST_URL = `${WORD_SCHEME}://bridge/index.html`;
-/** session id → its window; webContents id → session id. */
+/** session id 竊・its window; webContents id 竊・session id. */
 const wordWindows = new Map();
 const wordSessionByContents = new Map();
-/** session id → its code picker; webContents id → session id. */
+/** session id 竊・its code picker; webContents id 竊・session id. */
 const pickerWindows = new Map();
 const pickerSessionByContents = new Map();
-/** Actions sent to a host page, waiting for its answer: id → { resolve, reject, timer, contentsId }. */
+/** Actions sent to a host page, waiting for its answer: id 竊・{ resolve, reject, timer, contentsId }. */
 const wordActions = new Map();
 let nextWordAction = 1;
 const WORD_ACTION_MS = 60000;
@@ -556,7 +549,7 @@ function openWordWindow(s, show = true) {
   const win = new BrowserWindow({
     width: 1100,
     height: 820,
-    title: `Yaqatw – ${s.title}`,
+    title: `Yaqatw 窶・${s.title}`,
     autoHideMenuBar: true,
     show,
     webPreferences: {
@@ -602,8 +595,8 @@ const PICKER_TITLES = { new: 'New code', find: 'Apply a code', insert: 'Insert' 
 const INSERT_SOURCES = new Set(['all', 'highlights', 'artifacts', 'notes', 'tables', 'figures']);
 
 /**
- * The small window of a session, in front, one per document: the code picker (Find code… / New
- * code…) or the insert window (a quote, an artifact… found and inserted, `source` what it
+ * The small window of a session, in front, one per document: the code picker (Find code窶ｦ / New
+ * code窶ｦ) or the insert window (a quote, an artifact窶ｦ found and inserted, `source` what it
  * searches first).
  */
 function openPicker(s, mode, source) {
@@ -614,7 +607,7 @@ function openPicker(s, mode, source) {
     height: 520,
     minWidth: 320,
     minHeight: 300,
-    title: `${PICKER_TITLES[mode]} – ${s.title}`,
+    title: `${PICKER_TITLES[mode]} 窶・${s.title}`,
     autoHideMenuBar: true,
     alwaysOnTop: true,
     minimizable: false,
@@ -720,7 +713,7 @@ function wordDialog(opts) {
   return parent ? dialog.showMessageBox(parent, all) : dialog.showMessageBox(all);
 }
 
-/** What Settings › General shows: the template, and the programs connected to the local API. */
+/** What Settings 窶ｺ General shows: the template, and the programs connected to the local API. */
 function wordSnapshot() {
   return {
     plugin: wordPlugin?.status() ?? { available: false, installed: false, connected: false },
@@ -776,14 +769,14 @@ async function removeWordPlugin() {
   return wordSnapshot();
 }
 
-/** File › Install / Remove Yaqatw for Word, when this build carries the template. */
+/** File 窶ｺ Install / Remove Yaqatw for Word, when this build carries the template. */
 function wordPluginItems() {
   const s = wordPlugin?.status();
   if (!s?.available && !s?.installed) return [];
   return [
     s.installed
-      ? { label: 'Remove Yaqatw for Word…', click: () => removeWordPlugin() }
-      : { label: 'Install Yaqatw for Word…', click: () => installWordPlugin() },
+      ? { label: 'Remove Yaqatw for Word窶ｦ', click: () => removeWordPlugin() }
+      : { label: 'Install Yaqatw for Word窶ｦ', click: () => installWordPlugin() },
     { type: 'separator' },
   ];
 }
@@ -808,7 +801,7 @@ function buildMenu() {
   const isMac = process.platform === 'darwin';
   const about = { label: `About ${app.name}`, click: () => showAbout() };
   // Where each platform's own apps keep it: the app menu on macOS, File on Windows and Linux.
-  const settings = { label: 'Settings…', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() };
+  const settings = { label: 'Settings窶ｦ', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() };
   const template = [
     ...(isMac
       ? [
@@ -870,9 +863,9 @@ function buildMenu() {
       role: 'help',
       submenu: [
         ...restartItems(),
-        // Always there: in a run where updates are off, Settings › General says so.
-        { label: 'Check for updates…', enabled: Boolean(tools), click: () => checkFromMenu() },
-        { label: 'Report a problem…', click: () => shell.openExternal(`${REPO_URL}/issues`) },
+        // Always there: in a run where updates are off, Settings 窶ｺ General says so.
+        { label: 'Check for updates窶ｦ', enabled: Boolean(tools), click: () => checkFromMenu() },
+        { label: 'Report a problem窶ｦ', click: () => shell.openExternal(`${REPO_URL}/issues`) },
         // The profile: the pages' storage, settings, the tools' files, the logs.
         { label: 'Open the data folder', click: () => shell.openPath(app.getPath('userData')) },
         ...(isMac ? [] : [{ type: 'separator' }, about]),
@@ -905,11 +898,21 @@ function createMainWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+  // Windows shutting down, restarting or signing out: held back while the pages write out what
+  // they hold (the quit below), then let go. Windows lists Clew as "preventing shutdown" for those
+  // few seconds. `session-end` comes when the system no longer waits: whatever can still be done.
+  mainWindow.on('query-session-end', (event) => endingSession(event));
+  mainWindow.on('session-end', () => {
+    if (!readyToQuit) quitApp();
+  });
   mainWindow.loadURL(sites.mainUrl);
   return mainWindow;
 }
 
 app.on('web-contents-created', (_event, contents) => {
+  if (contents.session === appSession) {
+    contents.on('will-prevent-unload', (event) => askBeforeUnload(contents, event));
+  }
   if (contents.getType() !== 'window' || contents.session !== appSession) return;
   // A window opened by another is an in-app popup.
   const isPopup = mainWindow !== null && contents !== mainWindow.webContents;
@@ -930,11 +933,45 @@ function quitApp() {
   app.quit();
 }
 
+/** The system is ending the session: delays it, and quits the way the menu does. */
+function endingSession(event) {
+  if (readyToQuit) return;
+  event.preventDefault();
+  quitApp();
+}
+
+/**
+ * A page that asks before it is left (`beforeunload`): Electron would cancel the close, reload or
+ * quit without a word. The user decides instead.
+ */
+function askBeforeUnload(contents, event) {
+  const win = BrowserWindow.fromWebContents(contents);
+  const opts = {
+    type: 'question',
+    title: app.name,
+    message: 'Leave this page?',
+    detail: 'It says some of your changes may not be saved yet.',
+    buttons: ['Leave', 'Stay'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const response = win ? dialog.showMessageBoxSync(win, opts) : dialog.showMessageBoxSync(opts);
+  if (response === 0) {
+    event.preventDefault();
+    return;
+  }
+  // Staying cancels a quit under way (nothing was stopped yet): the next Exit starts over.
+  unloadRefused?.();
+}
+
 app.on('second-instance', () => showMainWindow());
 
 // Before the app goes, however it was asked to (the menu, the tray, Restart to update, the
-// system): the pages write out what they still hold — an edit inside its save delay was lost
-// otherwise — and the audio server is asked to stop (it would end with its stdin anyway).
+// system): the pages write out what they still hold 窶・an edit inside its save delay was lost
+// otherwise. Then the windows close; a page may still refuse (`askBeforeUnload`), which cancels
+// the quit with everything still running. Only once they are all gone do the Word sessions, the
+// local API, the databases and the audio server stop.
 let readyToQuit = false;
 let leaving = false;
 app.on('before-quit', (event) => {
@@ -943,17 +980,63 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (leaving) return;
   leaving = true;
+  leaveApp(() => app.quit());
+});
+
+/** Settles the pages, closes the windows, stops the services, then `done`; or gives up on Stay. */
+function leaveApp(done) {
   settle(appContents())
+    .then(() => closeWindows())
+    .then((closed) => {
+      if (!closed) {
+        leaving = false;
+        quitting = false;
+        return;
+      }
+      return stopServices().finally(() => {
+        readyToQuit = true;
+        done();
+      });
+    });
+}
+
+/** Called when the user keeps a page that refused to unload, during `closeWindows`. */
+let unloadRefused = null;
+
+/** Closes every window; false when a page was kept (`askBeforeUnload`, Stay). */
+function closeWindows() {
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+  if (!wins.length) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let left = wins.length;
+    let over = false;
+    const finish = (closed) => {
+      if (over) return;
+      over = true;
+      unloadRefused = null;
+      clearTimeout(timer);
+      resolve(closed);
+    };
+    // A page that hangs in its beforeunload: the rest of the quit goes on without it.
+    const timer = setTimeout(() => finish(true), 15000);
+    unloadRefused = () => finish(false);
+    for (const w of wins) {
+      w.once('closed', () => {
+        if (--left === 0) finish(true);
+      });
+      w.close();
+    }
+  });
+}
+
+function stopServices() {
+  return Promise.resolve()
     .then(() => wordBridge.closeAll())
     .then(() => api?.close())
     .then(() => db?.stop())
     .then(() => (tools ? tools.stop() : undefined))
-    .catch(() => undefined)
-    .finally(() => {
-      readyToQuit = true;
-      app.quit();
-    });
-});
+    .catch(() => undefined);
+}
 
 app.whenReady().then(async () => {
   appSession = session.fromPartition(PARTITION);
@@ -1003,6 +1086,8 @@ app.whenReady().then(async () => {
   }
   buildMenu();
   startUpdates();
+  // macOS and Linux shutting down (Windows: the main window's query-session-end).
+  if (process.platform !== 'win32') powerMonitor.on('shutdown', (event) => endingSession(event));
   const win = createMainWindow();
   win.hiddenAtStart = HIDDEN;
   if (SMOKE) {

@@ -7,7 +7,7 @@
  * Every path Clew gives is relative to the root and `/`-separated; anything that could leave the
  * root is refused — `..`, an absolute path, a drive, a backslash — and so is a path that would
  * reach outside it through a link already on disk. A write lands whole or not at all: the bytes
- * go to a temporary file beside the target, which is then renamed over it.
+ * go to a temporary file beside the target, flushed to disk, which is then renamed over it.
  *
  * Plain Node: the IPC that reaches it is `folder-ipc.js`.
  */
@@ -101,7 +101,15 @@ function createFolder(rootDir) {
     await fs.mkdir(path.dirname(abs), { recursive: true });
     const temp = `${abs}.${crypto.randomBytes(4).toString('hex')}${TEMP_SUFFIX}`;
     try {
-      await fs.writeFile(temp, bytes);
+      // On disk before the rename: a power cut right after it would otherwise leave an empty
+      // file under the real name.
+      const handle = await fs.open(temp, 'w');
+      try {
+        await handle.writeFile(bytes);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
       await fs.rename(temp, abs);
     } catch (err) {
       await fs.rm(temp, { force: true });
