@@ -118,7 +118,15 @@ function createWordPlugin({ template, startupDir, clients, port, defaultPort, re
     async refresh() {
       try {
         const s = status();
-        if (!s.installed || !s.available) return s;
+        // Removed from outside the app (uninstalled, deleted by hand): its connection goes too.
+        if (!s.installed) {
+          if (clients.list().some((c) => c.kind === KIND)) {
+            clients.removeKind(KIND);
+            log.log('[word-plugin] template gone: its connection removed');
+          }
+          return status();
+        }
+        if (!s.available) return s;
         if (sha256(template) !== sha256(installed())) {
           try {
             copy();

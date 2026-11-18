@@ -41,6 +41,7 @@
       "!node_modules/better-sqlite3-multiple-ciphers/{deps,src}/**",
       "!node_modules/better-sqlite3-multiple-ciphers/binding.gyp"
     ],
+    "afterPack": "build/after-pack.cjs",
     "extraResources": [
       {
         "from": "sites",
@@ -66,13 +67,15 @@
         }
       ],
       "files": [
+        "src/**/*",
         "!node_modules/better-sqlite3-multiple-ciphers/prebuilds/{darwin,linux,linuxmusl}-*"
       ]
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "artifactName": "Clew-Setup-${version}.${ext}"
+      "artifactName": "Clew-Setup-${version}.${ext}",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [

@@ -105,7 +105,8 @@ Worth knowing before you rely on it:
 
 ## Uninstall
 
-Uninstall **Clew** from Windows Settings › Apps. Your data stays (see above). To remove it too,
+Uninstall **Clew** from Windows Settings › Apps. Yaqatw for Word and the start at sign-in go
+with it (close Word first). Your data stays (see above). To remove it too,
 use **Settings › General › Remove all Clew data from this computer** before uninstalling, or
 delete `%APPDATA%\Clew` and `Documents\Clew` yourself.
 
