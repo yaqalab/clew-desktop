@@ -427,7 +427,7 @@ function childWindowOptions() {
 // Site updates
 
 const siteUpdatesDir = () => path.join(app.getPath('userData'), 'site-updates');
-/** name 竊・build info of a newer build, downloaded and used from the next start. */
+/** name → build info of a newer build, downloaded and used from the next start. */
 const waiting = new Map();
 
 /** At start, before anything is served: a newer downloaded build replaces the installer's. */
@@ -451,7 +451,7 @@ let checking = null;
 
 const appUpdater = createAppUpdater({ enabled: APP_UPDATES, onChange: () => updatesChanged() });
 
-/** What Settings 窶ｺ General shows. */
+/** What Settings › General shows. */
 function updatesSnapshot() {
   return {
     enabled: SITE_UPDATES,
@@ -546,7 +546,7 @@ function restartItems() {
   return [{ label: 'Restart to update', click: () => restartApp() }, { type: 'separator' }];
 }
 
-/** Help 窶ｺ Check for updates: Settings 窶ｺ General shows the check and its result. */
+/** Help › Check for updates: Settings › General shows the check and its result. */
 function checkFromMenu() {
   tools?.openSettings('general');
   checkAllUpdates();
@@ -581,7 +581,7 @@ function installAppUpdate() {
 function aboutText() {
   const lines = [
     `Version ${app.getVersion()}`,
-    `Electron ${process.versions.electron} ﾂｷ Chromium ${process.versions.chrome}`,
+    `Electron ${process.versions.electron} · Chromium ${process.versions.chrome}`,
     '',
   ];
   for (const site of sites.list) {
@@ -677,11 +677,11 @@ async function approveLocalClient({ name, signal }) {
   const opts = {
     type: 'question',
     title: app.name,
-    message: `Allow 窶・{name}窶・to connect to ${app.name}?`,
+    message: `Allow “${name}” to connect to ${app.name}?`,
     detail:
       'A program on this computer is asking to connect. Allow it only if you have just set up ' +
       'a program you trust and it told you to confirm here.',
-    buttons: ['Allow', 'Don窶冲 allow'],
+    buttons: ['Allow', 'Don’t allow'],
     defaultId: 1,
     cancelId: 1,
     noLink: true,
@@ -736,13 +736,13 @@ const WORD_HOST_FILES = {
   'insert.js': 'text/javascript',
 };
 const WORD_HOST_URL = `${WORD_SCHEME}://bridge/index.html`;
-/** session id 竊・its window; webContents id 竊・session id. */
+/** session id → its window; webContents id → session id. */
 const wordWindows = new Map();
 const wordSessionByContents = new Map();
-/** session id 竊・its code picker; webContents id 竊・session id. */
+/** session id → its code picker; webContents id → session id. */
 const pickerWindows = new Map();
 const pickerSessionByContents = new Map();
-/** Actions sent to a host page, waiting for its answer: id 竊・{ resolve, reject, timer, contentsId }. */
+/** Actions sent to a host page, waiting for its answer: id → { resolve, reject, timer, contentsId }. */
 const wordActions = new Map();
 let nextWordAction = 1;
 const WORD_ACTION_MS = 60000;
@@ -877,7 +877,7 @@ function openWordWindow(s, show = true) {
   const win = new BrowserWindow({
     width: 1100,
     height: 820,
-    title: `Yaqatw 窶・${s.title}`,
+    title: `Yaqatw – ${s.title}`,
     autoHideMenuBar: true,
     show,
     webPreferences: {
@@ -923,8 +923,8 @@ const PICKER_TITLES = { new: 'New code', find: 'Apply a code', insert: 'Insert' 
 const INSERT_SOURCES = new Set(['all', 'highlights', 'artifacts', 'notes', 'tables', 'figures']);
 
 /**
- * The small window of a session, in front, one per document: the code picker (Find code窶ｦ / New
- * code窶ｦ) or the insert window (a quote, an artifact窶ｦ found and inserted, `source` what it
+ * The small window of a session, in front, one per document: the code picker (Find code… / New
+ * code…) or the insert window (a quote, an artifact… found and inserted, `source` what it
  * searches first).
  */
 function openPicker(s, mode, source) {
@@ -935,7 +935,7 @@ function openPicker(s, mode, source) {
     height: 520,
     minWidth: 320,
     minHeight: 300,
-    title: `${PICKER_TITLES[mode]} 窶・${s.title}`,
+    title: `${PICKER_TITLES[mode]} – ${s.title}`,
     autoHideMenuBar: true,
     alwaysOnTop: true,
     minimizable: false,
@@ -1041,7 +1041,7 @@ function wordDialog(opts) {
   return parent ? dialog.showMessageBox(parent, all) : dialog.showMessageBox(all);
 }
 
-/** What Settings 窶ｺ General shows: the template, and the programs connected to the local API. */
+/** What Settings › General shows: the template, and the programs connected to the local API. */
 function wordSnapshot() {
   return {
     plugin: wordPlugin?.status() ?? { available: false, installed: false, connected: false },
@@ -1097,14 +1097,14 @@ async function removeWordPlugin() {
   return wordSnapshot();
 }
 
-/** File 窶ｺ Install / Remove Yaqatw for Word, when this build carries the template. */
+/** File › Install / Remove Yaqatw for Word, when this build carries the template. */
 function wordPluginItems() {
   const s = wordPlugin?.status();
   if (!s?.available && !s?.installed) return [];
   return [
     s.installed
-      ? { label: 'Remove Yaqatw for Word窶ｦ', click: () => removeWordPlugin() }
-      : { label: 'Install Yaqatw for Word窶ｦ', click: () => installWordPlugin() },
+      ? { label: 'Remove Yaqatw for Word…', click: () => removeWordPlugin() }
+      : { label: 'Install Yaqatw for Word…', click: () => installWordPlugin() },
     { type: 'separator' },
   ];
 }
@@ -1129,7 +1129,7 @@ function buildMenu() {
   const isMac = process.platform === 'darwin';
   const about = { label: `About ${app.name}`, click: () => showAbout() };
   // Where each platform's own apps keep it: the app menu on macOS, File on Windows and Linux.
-  const settings = { label: 'Settings窶ｦ', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() };
+  const settings = { label: 'Settings…', accelerator: 'CmdOrCtrl+,', enabled: Boolean(tools), click: () => tools?.openSettings() };
   const template = [
     ...(isMac
       ? [
@@ -1192,9 +1192,9 @@ function buildMenu() {
       role: 'help',
       submenu: [
         ...restartItems(),
-        // Always there: in a run where updates are off, Settings 窶ｺ General says so.
-        { label: 'Check for updates窶ｦ', enabled: Boolean(tools), click: () => checkFromMenu() },
-        { label: 'Report a problem窶ｦ', click: () => shell.openExternal(`${REPO_URL}/issues`) },
+        // Always there: in a run where updates are off, Settings › General says so.
+        { label: 'Check for updates…', enabled: Boolean(tools), click: () => checkFromMenu() },
+        { label: 'Report a problem…', click: () => shell.openExternal(`${REPO_URL}/issues`) },
         // The profile: the pages' storage, settings, the tools' files, the logs.
         { label: 'Open the data folder', click: () => shell.openPath(app.getPath('userData')) },
         ...(isMac ? [] : [{ type: 'separator' }, about]),
@@ -1303,7 +1303,7 @@ function askBeforeUnload(contents, event) {
 app.on('second-instance', () => showMainWindow());
 
 // Before the app goes, however it was asked to (the menu, the tray, Restart to update, the
-// system): the pages write out what they still hold 窶・an edit inside its save delay was lost
+// system): the pages write out what they still hold — an edit inside its save delay was lost
 // otherwise. Then the windows close; a page may still refuse (`askBeforeUnload`), which cancels
 // the quit with everything still running. Only once they are all gone do the Word sessions, the
 // local API, the databases and the audio server stop.
