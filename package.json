@@ -74,7 +74,8 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "artifactName": "Clew-Setup-${version}.${ext}"
+      "artifactName": "Clew-Setup-${version}.${ext}",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [

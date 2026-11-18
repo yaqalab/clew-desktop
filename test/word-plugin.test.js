@@ -104,6 +104,18 @@ test('refresh: updates an older template, reconnects a lost client, leaves an un
   assert.equal(values.get('Token'), kept);
 });
 
+test('refresh: a template removed from outside (uninstalled) takes its connection with it', async (t) => {
+  const { plugin, clients, installed } = fresh(t);
+  await plugin.install();
+  clients.add('Something else');
+  fs.rmSync(installed);
+  assert.deepEqual(await plugin.refresh(), { available: true, installed: false, connected: false });
+  assert.deepEqual(
+    clients.list().map((c) => c.name),
+    ['Something else'],
+  );
+});
+
 test('no template in this build: install says so, nothing is written', async (t) => {
   const { plugin, template, values, installed } = fresh(t);
   fs.rmSync(template);

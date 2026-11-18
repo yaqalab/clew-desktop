@@ -142,6 +142,14 @@ cp ../yaqatw/.env  env/yaqatw.env
 
 `npm run build:sites -- clew` builds one app; `--install` forces `npm ci` in a local checkout, `--no-install` skips it wherever `node_modules` exists (e.g. while `npm run dev` is using it).
 
+The installer: electron-builder's one-click NSIS, per user. [build/after-pack.cjs](../build/after-pack.cjs)
+fails a build whose `app.asar` holds more than `src`, `node_modules` and the three config files
+(a platform's `files` list that only excludes gets an implicit `**/*`, which once packed the
+whole working folder). [build/installer.nsh](../build/installer.nsh) adds to the uninstaller,
+not when it runs for an update (`${isUpdated}`): Yaqatw for Word's template and registry key,
+and the start-at-login entry, go; the data folder and `Documents\Clew` stay. Tested on Windows
+11 with a silent install, an install over it (all kept) and a silent uninstall (all removed).
+
 ### Using your own checkouts
 
 To build or develop against the checkouts you already work in, instead of `.sources/`:
