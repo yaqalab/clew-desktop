@@ -23,6 +23,6 @@
       "MCowBQYDK2VwAyEAS794/Jd0m8MFSKtq2Zj+3woQq7eAOWtoU7md3fF9vUI=",
       "MCowBQYDK2VwAyEAmJHXZ0IjJ9fozYoVuKjgEbe7J/tlwqnUagVGPvjLTEI="
     ],
-    "requireSignature": false
+    "requireSignature": true
   }
 }

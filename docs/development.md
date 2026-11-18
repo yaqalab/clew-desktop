@@ -210,7 +210,7 @@ up their newer builds by itself, **straight from the live sites** ([src/site-upd
 The trust is the site's own, as in a browser, **plus a signature**: `siteUpdates.publicKeys`
 in [desktop.config.json](../desktop.config.json) holds two Ed25519 public keys (one the sites
 sign with, one spare kept offline). A signature that matches neither is always refused; a
-missing one is refused once `siteUpdates.requireSignature` is true. A lost key stops site
+missing one is refused too (`siteUpdates.requireSignature`, on since both sites sign). A lost key stops site
 updates only: installed apps keep the build they have, and an app release carrying a new public
 key (it updates itself from GitHub, a separate channel) takes them up again. Settings › General
 links to the releases page for anyone whose updates stop. Keys:

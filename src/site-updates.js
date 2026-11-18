@@ -22,8 +22,8 @@
  * version.json's exact bytes, made by the sites' build with a key whose public half the app
  * carries (`siteUpdates.publicKeys` in desktop.config.json: one in use, one spare kept offline).
  * version.json names every part's SHA-256, so the signature covers the whole build. A signature
- * that does not match is always refused; a missing one is refused once `requireSignature` is on
- * (it is off until both sites sign). Losing the key: installed apps keep the build they have and
+ * that does not match is always refused; a missing one too while `requireSignature` is on (it is,
+ * since both sites sign). Losing the key: installed apps keep the build they have and
  * take signed builds again from the app release that carries the new public key.
  *
  * Plain Node: no Electron here.
