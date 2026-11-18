@@ -519,6 +519,18 @@ async function run(win, ses, server, tools, folder, db, api) {
           "window.tools.folder().then(() => [document.getElementById('folder-root').textContent, document.getElementById('folder-move').disabled])",
         );
         assert(folderRow[0] === folder.root && folderRow[1] === true, `folder row: ${folderRow}`);
+        // Remove all Clew data: the dialog lists what goes and what stays; it cannot run here.
+        const wipeShown = await sw.webContents.executeJavaScript(`(async () => {
+          document.getElementById('wipe-open').click();
+          for (let i = 0; i < 40 && !document.getElementById('wipe-dialog').open; i++) await new Promise((r) => setTimeout(r, 100));
+          const r = { open: document.getElementById('wipe-dialog').open,
+            items: document.querySelectorAll('#wipe-items li').length,
+            kept: document.querySelectorAll('#wipe-kept li').length,
+            go: document.getElementById('wipe-go').disabled };
+          document.getElementById('wipe-dialog').close();
+          return r;
+        })()`);
+        assert(wipeShown.open && wipeShown.items === 2 && wipeShown.kept >= 2 && wipeShown.go, `wipe dialog: ${JSON.stringify(wipeShown)}`);
         assert(text, 'no server state shown');
         assert(errors.length === 0, errors.join(' | '));
         sw.destroy();

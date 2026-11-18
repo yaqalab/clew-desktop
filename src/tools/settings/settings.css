@@ -177,6 +177,33 @@ progress {
   border-radius: 6px;
 }
 
+button.danger {
+  color: var(--bad);
+}
+dialog {
+  width: min(620px, 90vw);
+  max-height: 88vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 22px 14px;
+}
+dialog::backdrop {
+  background: color-mix(in srgb, Canvas 40%, transparent);
+}
+dialog .actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+dialog .kept {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+  color: var(--soft);
+}
+dialog input[type='password'] {
+  width: 18em;
+}
+
 /* Updates: each site's name beside the first line of its own lines. */
 #update-sites {
   align-items: start;

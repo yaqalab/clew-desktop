@@ -103,7 +103,12 @@ function createAppUpdater({ enabled, onChange, updater }) {
     return { ...state };
   }
 
-  return { check, install, snapshot, ready: () => state.status === 'ready' };
+  /** A downloaded release is not installed on the way out (the app's data is being removed). */
+  function skipInstallOnQuit() {
+    if (au) au.autoInstallOnAppQuit = false;
+  }
+
+  return { check, install, snapshot, skipInstallOnQuit, ready: () => state.status === 'ready' };
 }
 
 /** The first line of an updater error, without the HTTP dump it carries. */

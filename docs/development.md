@@ -278,6 +278,14 @@ tray icon, one settings window.**
 - **Settings window** ([src/tools/settings/](../src/tools/settings/)): Audio, Conversion, Dictation,
   Analysis, General (start at login, Word, connected programs, updates, developer tools,
   activity).
+- **Remove all Clew data from this computer** (Settings › General; [src/wipe.js](../src/wipe.js)):
+  the profile, Clew's folder (optional) and the updater's downloads. An optional backup first:
+  an AES-256 zip ([src/zip-aes.js](../src/zip-aes.js), WinZip AE-2, ZIP64 when needed; printable
+  ASCII passphrases only, since 7-Zip reads others in the system code page), written after the
+  pages are unloaded and the services stopped, then read back and checked before anything goes.
+  Then Yaqatw for Word is removed, the login item cleared (installed app only), and a helper run
+  by the app's executable as Node (`ELECTRON_RUN_AS_NODE`) deletes once the app has quit, logs to
+  the temp folder and says how it went. A failed backup removes nothing and restarts Clew.
 - **Developer tools** are not in the installed app's View menu unless Settings › General allows
   them (`<profile>/desktop-settings.json`, [src/app-settings.js](../src/app-settings.js)): on a
   shared computer they would show an open vault's data. DevTools opened any other way close again.
