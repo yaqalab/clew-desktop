@@ -58,7 +58,13 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
 - **Quitting waits for unsaved work.** Before the app quits, restarts for an update or reloads a
   page, it asks each app page to finish what it registered with `onBeforeQuit` and waits, five
   seconds at most ([src/settle.js](../src/settle.js)). Clew writes out the edits it still holds
-  there, so the last words typed are not lost to Quit.
+  there, so the last words typed are not lost to Quit. Then the windows close, and only once
+  they are all gone do the local API, the databases and the tools stop. A page that asks before
+  it is left (`beforeunload`) gets a Leave / Stay question; Stay cancels the quit with everything
+  still running. Windows shutting down or signing out is held back for the same steps
+  (`query-session-end`; `powerMonitor` `shutdown` on macOS and Linux).
+- **Writes to the folder are flushed** to disk before the temporary file is renamed over the
+  real one ([src/folder.js](../src/folder.js)).
 - **`window.alefaDesktop.folder`** (Clew's origin only, checked again in the main process on
   every call): one folder on this computer, `Documents\Clew`, where Clew keeps an encrypted copy
   of each vault beside its cloud (Clew's `docs/44`). `root()`, `list(dir, { recursive })`,
