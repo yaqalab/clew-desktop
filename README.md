@@ -84,8 +84,10 @@ Worth knowing before you rely on it:
   lock or wipe them, and locking a vault does not hide them. Use a computer account only you
   can open.
 - **Removing a vault in Clew does not delete its folder copy**, and **uninstalling the app keeps
-  both the data folder and `Documents\Clew`**. On a shared or borrowed computer, delete those two
-  folders yourself when you are done.
+  both the data folder and `Documents\Clew`**. On a shared or borrowed computer, use
+  **Settings › General › Remove all Clew data from this computer** when you are done: it lists
+  what goes, offers an encrypted backup first (a zip protected by a passphrase, which 7-Zip and
+  most archivers open), checks the backup, then closes Clew and deletes the folders.
 - **Quit waits for what you are typing** (a few seconds at most). Switching the computer off
   without quitting does not: lock the vault or quit first.
 - **A vault that is only on this computer is one disk failure from gone.** Connect a cloud in
@@ -103,8 +105,9 @@ Worth knowing before you rely on it:
 
 ## Uninstall
 
-Uninstall **Clew** from Windows Settings › Apps. Your data stays (see above); delete
-`%APPDATA%\Clew` and `Documents\Clew` yourself if you want it gone.
+Uninstall **Clew** from Windows Settings › Apps. Your data stays (see above). To remove it too,
+use **Settings › General › Remove all Clew data from this computer** before uninstalling, or
+delete `%APPDATA%\Clew` and `Documents\Clew` yourself.
 
 ## Licence
 

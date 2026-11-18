@@ -418,6 +418,110 @@ $('login').addEventListener('change', async () => {
 });
 $('open-app').addEventListener('click', () => window.tools.openApp());
 
+// Remove all Clew data from this computer (main.js `wipeData`, src/wipe.js)
+let wipePlanNow = null;
+let wiping = false;
+const size = (bytes) => (bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1e3))} kB` : mb(bytes));
+
+function wipeProblem(text) {
+  $('wipe-problem').textContent = text || '';
+  $('wipe-problem').hidden = !text;
+}
+
+function renderWipePlan(p) {
+  const list = $('wipe-items');
+  list.replaceChildren();
+  for (const item of p.items) {
+    const li = el('li');
+    if (item.optional) {
+      const box = el('input', { type: 'checkbox', id: `wipe-item-${item.id}`, checked: item.exists });
+      box.disabled = !item.exists;
+      li.append(box);
+    }
+    const text = el('span', { class: 'grow', title: item.path }, `${item.label} — ${item.path}`);
+    li.append(text, el('span', { class: 'muted' }, item.exists ? size(item.bytes) : 'not there'));
+    list.append(li);
+  }
+  $('wipe-kept').replaceChildren(...p.kept.map((k) => el('li', {}, k)));
+  $('wipe-word').hidden = !p.word;
+  $('wipe-pass-rule').textContent =
+    `At least ${p.minPassphrase} characters: letters without accents, digits, spaces and punctuation (other characters open differently in different archivers).`;
+}
+
+function wipeBackupShown() {
+  $('wipe-backup-fields').hidden = !$('wipe-backup').checked;
+  $('wipe-go').textContent = $('wipe-backup').checked ? 'Back up and remove…' : 'Remove without a backup…';
+}
+
+$('wipe-open').addEventListener('click', async () => {
+  const p = await run(() => window.tools.wipePlan());
+  if (!p) return;
+  wipePlanNow = p;
+  renderWipePlan(p);
+  $('wipe-pass').value = '';
+  $('wipe-pass2').value = '';
+  $('wipe-backup').checked = true;
+  wipeBackupShown();
+  wipeProblem('');
+  $('wipe-progress').hidden = true;
+  $('wipe-go').disabled = Boolean(p.smoke);
+  $('wipe-dialog').showModal();
+});
+$('wipe-backup').addEventListener('change', wipeBackupShown);
+$('wipe-cancel').addEventListener('click', (e) => {
+  if (wiping) e.preventDefault();
+});
+$('wipe-dialog').addEventListener('cancel', (e) => {
+  if (wiping) e.preventDefault();
+});
+
+$('wipe-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (wiping || e.submitter?.value !== 'go') return;
+  const backup = $('wipe-backup').checked;
+  const pass = $('wipe-pass').value;
+  if (backup) {
+    if (pass.length < wipePlanNow.minPassphrase) return wipeProblem(`The passphrase needs at least ${wipePlanNow.minPassphrase} characters.`);
+    if (!/^[\x20-\x7e]+$/.test(pass)) return wipeProblem('Use letters without accents, digits, spaces and punctuation only.');
+    if (pass !== $('wipe-pass2').value) return wipeProblem('The two passphrases differ.');
+  }
+  wipeProblem('');
+  wiping = true;
+  $('wipe-go').disabled = true;
+  $('wipe-cancel').disabled = true;
+  const box = $('wipe-item-folder');
+  const r = await run(() => window.tools.wipe({ includeFolder: box ? box.checked : false, passphrase: backup ? pass : null }));
+  if (r?.status === 'quitting') return;
+  wiping = false;
+  $('wipe-go').disabled = false;
+  $('wipe-cancel').disabled = false;
+  $('wipe-progress').hidden = true;
+  if (r?.message) wipeProblem(r.message);
+});
+
+const WIPE_PHASES = {
+  closing: 'Closing Clew’s windows…',
+  listing: 'Listing what to back up…',
+  checking: 'Checking the backup with its passphrase…',
+  quitting: 'Clew closes now; the folders are deleted right after.',
+};
+window.tools.onWipe((p) => {
+  if (p.phase === 'idle') {
+    $('wipe-progress').hidden = true;
+    return;
+  }
+  $('wipe-progress').hidden = false;
+  const bar = $('wipe-progress-bar');
+  if (p.phase === 'backup') {
+    $('wipe-progress-text').textContent = `Backing up: ${p.done} of ${p.total} files, ${size(p.bytes)}`;
+    bar.value = p.total ? p.done / p.total : 0;
+  } else {
+    $('wipe-progress-text').textContent = WIPE_PHASES[p.phase] ?? p.phase;
+    if (p.phase === 'quitting') bar.value = 1;
+    else bar.removeAttribute('value');
+  }
+});
+
 // Clew's folder (main.js, src/folder-location.js)
 function renderFolder(f) {
   if (!f) return;

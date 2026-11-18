@@ -85,6 +85,8 @@ class Tools {
    *        app's own preferences that Settings › General shows (main.js, `app-settings.js`)
    * @param {{ snapshot: () => object, move: () => Promise<object>, open: () => Promise<string> }} [opts.folder]
    *        Clew's folder: where it is, moving it (main.js, `folder-location.js`)
+   * @param {{ plan: () => Promise<object>, run: (opts: object) => Promise<object> }} [opts.wipe]
+   *        Remove all Clew data from this computer, with a backup first if asked (main.js, `wipe.js`)
    * @param {() => BrowserWindow | null} [opts.parentWindow]  the window Settings opens as a modal
    *        over, when there is one on screen (from the tray with Clew hidden, it opens on its own)
    */
@@ -97,8 +99,10 @@ class Tools {
     word = null,
     appPrefs = null,
     folder = null,
+    wipe = null,
     parentWindow = () => null,
   }) {
+    this.wipe = wipe;
     this.openApp = openApp;
     this.appPrefs = appPrefs;
     this.folder = folder;
@@ -393,6 +397,8 @@ class Tools {
     handle('tools:word-install', () => this.word?.install() ?? null);
     handle('tools:word-remove', () => this.word?.remove() ?? null);
     handle('tools:forget-client', (id) => this.word?.forgetClient(String(id)) ?? null);
+    handle('tools:wipe-plan', () => this.wipe?.plan() ?? null);
+    handle('tools:wipe-run', (opts) => this.wipe?.run(opts && typeof opts === 'object' ? opts : {}) ?? null);
     handle('tools:folder', () => this.folder?.snapshot() ?? null);
     handle('tools:folder-move', () => this.folder?.move() ?? null);
     handle('tools:folder-open', () => this.folder?.open() ?? null);
@@ -458,4 +464,4 @@ class Tools {
   }
 }
 
-module.exports = { Tools, toolsDir, toolsInfo };
+module.exports = { Tools, toolsDir, toolsInfo, setLoginItem };

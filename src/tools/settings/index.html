@@ -187,8 +187,44 @@
         <h3>Activity</h3>
         <pre id="log" class="log"></pre>
         <p class="muted" id="about"></p>
+        <h3>Remove all Clew data</h3>
+        <p class="muted">For a shared or borrowed computer: deletes the vaults, yaqatw’s storage and Clew’s folder from this computer, with a backup first if you want one.</p>
+        <p data-app><button id="wipe-open" class="danger">Remove all Clew data from this computer…</button></p>
       </section>
     </main>
+
+    <dialog id="wipe-dialog" aria-labelledby="wipe-title">
+      <form id="wipe-form" method="dialog">
+        <h2 id="wipe-title">Remove all Clew data from this computer</h2>
+        <p class="muted">Deleted once Clew has closed:</p>
+        <ul id="wipe-items" class="list"></ul>
+        <p class="muted">Kept:</p>
+        <ul id="wipe-kept" class="kept"></ul>
+        <p id="wipe-word" class="muted" hidden>Yaqatw for Word is removed from Word too. Close Word first.</p>
+
+        <label class="check"><input id="wipe-backup" type="checkbox" checked /> Make an encrypted backup first</label>
+        <div id="wipe-backup-fields">
+          <p class="muted">A zip file protected by a passphrase (AES-256; 7-Zip, WinZip and most archivers open it). Without the passphrase nobody can open it, you included: write it down.</p>
+          <div class="grid">
+            <label for="wipe-pass">Passphrase</label>
+            <input id="wipe-pass" type="password" autocomplete="new-password" />
+            <label for="wipe-pass2">Again</label>
+            <input id="wipe-pass2" type="password" autocomplete="new-password" />
+          </div>
+          <p class="muted" id="wipe-pass-rule"></p>
+        </div>
+
+        <p id="wipe-problem" class="banner" hidden></p>
+        <div id="wipe-progress" hidden>
+          <p id="wipe-progress-text"></p>
+          <progress id="wipe-progress-bar" max="1"></progress>
+        </div>
+        <p class="row actions">
+          <button id="wipe-cancel" value="cancel" formnovalidate>Cancel</button>
+          <button id="wipe-go" class="danger" value="go">Remove…</button>
+        </p>
+      </form>
+    </dialog>
     <p id="toast" class="toast" role="status" hidden></p>
     <script src="settings.js"></script>
   </body>

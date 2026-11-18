@@ -191,6 +191,192 @@ async function warnSyncedFolder() {
   if (response === 0) await moveClewFolder();
 }
 
+// ---------------------------------------------------------------------------------------------
+// Remove all Clew data from this computer (Settings › General; `wipe.js`, `zip-aes.js`): an
+// encrypted backup first if asked, then the app quits and a helper deletes.
+
+const wipe = require('./wipe');
+const zipAes = require('./zip-aes');
+const MIN_BACKUP_PASSPHRASE = 10;
+
+/** electron-updater's downloads (`<package name>-updater` in the system's cache folder). */
+function updaterCacheDir() {
+  if (!app.isPackaged) return null;
+  const name = `${require('../package.json').name}-updater`;
+  if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA || app.getPath('appData'), name);
+  if (process.platform === 'darwin') return path.join(app.getPath('home'), 'Library', 'Caches', name);
+  return path.join(process.env.XDG_CACHE_HOME || path.join(app.getPath('home'), '.cache'), name);
+}
+
+function wipeWhere() {
+  return { profile: app.getPath('userData'), folder: folder.root, updaterCache: updaterCacheDir() };
+}
+
+/** What Settings shows before asking: what goes, with sizes, and what stays. */
+async function wipePlan() {
+  const kept = ['Your Word documents and other files of your own'];
+  const toolsSettings = tools?.snapshot().settingsFile;
+  if (toolsSettings) kept.push(`The audio server’s settings, shared with the standalone Clew tools: ${toolsSettings}`);
+  kept.push('The app itself: uninstall it from the system’s settings');
+  return {
+    items: await wipe.plan(wipeWhere()),
+    kept,
+    word: Boolean(wordPlugin?.status().installed),
+    minPassphrase: MIN_BACKUP_PASSPHRASE,
+    smoke: SMOKE,
+  };
+}
+
+function wipeProgress(p) {
+  tools?.send('tools:wipe', p);
+}
+
+function within(p, places) {
+  return places.some((place) => place && folderLocation.inside(p, place));
+}
+
+/**
+ * @param {{ includeFolder: boolean, passphrase: string | null }} opts  no passphrase: no backup
+ * @returns {Promise<{ status: 'cancelled' | 'refused' | 'quitting', message?: string }>}
+ */
+async function wipeData({ includeFolder, passphrase }) {
+  if (SMOKE) throw new Error('not in a smoke run');
+  const where = wipeWhere();
+  const places = [where.profile, includeFolder ? where.folder : null, where.updaterCache].filter(Boolean);
+  const parent = BrowserWindow.getFocusedWindow() ?? undefined;
+
+  // The backup: a passphrase that opens everywhere, a place that survives the removal.
+  let backupFile = null;
+  if (passphrase !== null) {
+    const problem =
+      zipAes.passphraseProblem(passphrase) ??
+      (passphrase.length < MIN_BACKUP_PASSPHRASE ? `use at least ${MIN_BACKUP_PASSPHRASE} characters` : null);
+    if (problem) return { status: 'refused', message: `Passphrase: ${problem}.` };
+    const day = new Date().toISOString().slice(0, 10);
+    const saved = await dialog.showSaveDialog(parent, {
+      title: 'Save the backup',
+      defaultPath: path.join(app.getPath('documents'), `Clew backup ${day}.zip`),
+      filters: [{ name: 'Encrypted zip', extensions: ['zip'] }],
+    });
+    if (saved.canceled || !saved.filePath) return { status: 'cancelled' };
+    backupFile = saved.filePath;
+    if (within(backupFile, places)) {
+      return { status: 'refused', message: 'The backup cannot go into a folder that is being removed: choose another place.' };
+    }
+  }
+
+  const { response } = await folderDialog({
+    type: 'warning',
+    message: 'Remove all Clew data from this computer?',
+    detail:
+      `${places.join('\n')}\n\n` +
+      (backupFile ? `A backup goes to ${backupFile} first, and is checked before anything is removed.\n\n` : 'No backup is made.\n\n') +
+      'Clew closes, then the folders above are deleted. This cannot be undone.',
+    buttons: ['Remove', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  if (response !== 0) return { status: 'cancelled' };
+
+  // Word's template first: Word holding it open stops everything here, with nothing changed.
+  if (wordPlugin?.status().installed) {
+    try {
+      await wordPlugin.remove();
+    } catch (err) {
+      return { status: 'refused', message: err.message };
+    }
+  }
+
+  // The pages write out and unload; the Settings window stays to show the progress.
+  wipeProgress({ phase: 'closing' });
+  await settle(appContents());
+  const settingsWin = tools?.settingsWin;
+  const closed = await closeWindows((w) => w !== mainWindow && w !== settingsWin);
+  let unloaded = closed;
+  if (closed && mainWindow && !mainWindow.isDestroyed()) {
+    await mainWindow.webContents.loadURL('about:blank').catch(() => {});
+    unloaded = mainWindow.webContents.getURL() === 'about:blank';
+    if (unloaded) mainWindow.hide();
+  }
+  if (!unloaded) {
+    wipeProgress({ phase: 'idle' });
+    return { status: 'cancelled', message: 'A page was kept open: nothing was removed.' };
+  }
+  await wordBridge.closeAll();
+  await api?.close();
+  await db?.stop();
+  await tools?.stop();
+  await appSession.flushStorageData?.();
+
+  if (backupFile) {
+    try {
+      wipeProgress({ phase: 'listing' });
+      const { entries, skipped } = await wipe.backupEntries({ profile: where.profile, folder: includeFolder ? where.folder : null });
+      entries.unshift({
+        name: 'README.txt',
+        data: Buffer.from(
+          wipe.backupReadme({
+            profile: where.profile,
+            folder: includeFolder ? where.folder : null,
+            made: new Date().toString(),
+            appVersion: app.getVersion(),
+            skipped,
+          }),
+        ),
+      });
+      const written = await zipAes.writeZip(backupFile, entries, passphrase, {
+        onProgress: (p) => wipeProgress({ phase: 'backup', ...p }),
+      });
+      wipeProgress({ phase: 'checking' });
+      await zipAes.verifyZip(backupFile, passphrase);
+      console.log(`[wipe] backup ${backupFile}: ${written.entries} entries, ${written.bytes} bytes; left out: ${skipped.join(', ') || 'none'}`);
+    } catch (err) {
+      await folderDialog({
+        type: 'error',
+        message: 'The backup failed: nothing was removed.',
+        detail: `${err.message}\n\nClew starts again.`,
+      });
+      app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--hidden') });
+      readyToQuit = leaving = quitting = true;
+      app.quit();
+      return { status: 'refused', message: err.message };
+    }
+  }
+
+  // Nothing of the app's comes back: no start at login (the installed app's: a development run
+  // never registers, and must not touch the installed app's entry), no update on the way out.
+  if (app.isPackaged) {
+    try {
+      require('./tools').setLoginItem(false);
+    } catch {
+      /* not registered */
+    }
+  }
+  appUpdater.skipInstallOnQuit();
+
+  const os = require('node:os');
+  const stamp = `${process.pid}-${Date.now()}`;
+  const helper = path.join(os.tmpdir(), `clew-remove-${stamp}.js`);
+  const job = path.join(os.tmpdir(), `clew-remove-${stamp}.json`);
+  fs.writeFileSync(helper, wipe.HELPER);
+  fs.writeFileSync(
+    job,
+    JSON.stringify({ pid: process.pid, paths: places, log: path.join(os.tmpdir(), `clew-removed-${stamp}.log`), notify: true }),
+  );
+  require('node:child_process')
+    .spawn(process.execPath, [helper, job], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    })
+    .unref();
+  wipeProgress({ phase: 'quitting' });
+  readyToQuit = leaving = quitting = true;
+  setTimeout(() => app.quit(), 300);
+  return { status: 'quitting' };
+}
+
 /** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
 const settle = createSettler(ipcMain);
 
@@ -1148,9 +1334,9 @@ function leaveApp(done) {
 /** Called when the user keeps a page that refused to unload, during `closeWindows`. */
 let unloadRefused = null;
 
-/** Closes every window; false when a page was kept (`askBeforeUnload`, Stay). */
-function closeWindows() {
-  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+/** Closes every window (or those `which` keeps); false when a page was kept (`askBeforeUnload`, Stay). */
+function closeWindows(which = () => true) {
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && which(w));
   if (!wins.length) return Promise.resolve(true);
   return new Promise((resolve) => {
     let left = wins.length;
@@ -1232,6 +1418,14 @@ app.whenReady().then(async () => {
           fs.mkdirSync(folder.root, { recursive: true });
           return shell.openPath(folder.root);
         },
+      },
+      wipe: {
+        plan: wipePlan,
+        run: (opts) =>
+          wipeData({
+            includeFolder: opts?.includeFolder !== false,
+            passphrase: typeof opts?.passphrase === 'string' ? opts.passphrase : null,
+          }),
       },
     });
     tools.start();
