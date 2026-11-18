@@ -213,6 +213,28 @@ async function run(win, ses, server, tools, folder, db, api) {
       return `round trip in ${r.root}; refused ../; yaqatw: none`;
     });
 
+    await check('the folder moves: files arrive, Clew sees the new place, writes during the move wait', async () => {
+      const fsx = require('node:fs');
+      const before = folder.root;
+      await js(`window.alefaDesktop.folder.write('Moving/a.bin', new Uint8Array([7, 8, 9]))`);
+      const target = `${before}-moved`;
+      // A write sent while the move runs lands in the new place.
+      const moving = folder.moveTo(target);
+      const during = js(`window.alefaDesktop.folder.write('Moving/b.bin', new Uint8Array([1]))`);
+      const result = await moving;
+      await during;
+      const seen = await js(`(async () => ({ root: await window.alefaDesktop.folder.root(),
+        files: (await window.alefaDesktop.folder.list('Moving')).map((i) => i.path).sort().join() }))()`);
+      assert(seen.root === target, `root ${seen.root}`);
+      assert(seen.files === 'a.bin,b.bin', `files ${seen.files}`);
+      assert(!fsx.existsSync(before), 'the old folder is still there');
+      assert(result.files === 1, `moved ${result.files}`);
+      // Back where the rest of the run expects it.
+      await folder.moveTo(before);
+      await js(`window.alefaDesktop.folder.remove('Moving/a.bin').then(() => window.alefaDesktop.folder.remove('Moving/b.bin'))`);
+      return `${before} → ${target} and back`;
+    });
+
     await check('each site has its own encrypted databases (alefaDesktop.db)', async () => {
       assert(db, 'the database did not load (probe failed)');
       const r = await js(`(async () => {
@@ -492,6 +514,11 @@ async function run(win, ses, server, tools, folder, db, api) {
           "window.tools.appPrefs().then((p) => { const c = document.getElementById('devtools'); return c.checked && c.disabled ? '' : `checked ${c.checked}, disabled ${c.disabled}, prefs ${JSON.stringify(p)}`; })",
         );
         assert(!devtools, `the developer tools switch is not shown as always on: ${devtools}`);
+        // Clew's folder: shown, and not movable in a smoke run (a throwaway folder).
+        const folderRow = await sw.webContents.executeJavaScript(
+          "window.tools.folder().then(() => [document.getElementById('folder-root').textContent, document.getElementById('folder-move').disabled])",
+        );
+        assert(folderRow[0] === folder.root && folderRow[1] === true, `folder row: ${folderRow}`);
         assert(text, 'no server state shown');
         assert(errors.length === 0, errors.join(' | '));
         sw.destroy();

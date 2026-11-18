@@ -418,6 +418,25 @@ $('login').addEventListener('change', async () => {
 });
 $('open-app').addEventListener('click', () => window.tools.openApp());
 
+// Clew's folder (main.js, src/folder-location.js)
+function renderFolder(f) {
+  if (!f) return;
+  $('folder-root').textContent = f.root;
+  $('folder-move').disabled = f.fixed;
+  const notes = [];
+  if (f.synced) notes.push(`It is in ${f.synced}: what the files hold stays encrypted, but ${f.synced} sees their names, sizes and times.`);
+  if (f.fixed) notes.push('Set for this run (CLEW_FOLDER_ROOT or a test run): it cannot be moved from here.');
+  $('folder-note').textContent = notes.join(' ');
+  $('folder-note').hidden = !notes.length;
+}
+$('folder-open').addEventListener('click', () => run(() => window.tools.openFolder()));
+$('folder-move').addEventListener('click', async () => {
+  $('folder-move').disabled = true;
+  renderFolder((await run(() => window.tools.moveFolder())) ?? (await window.tools.folder()));
+});
+window.tools.onFolder(renderFolder);
+window.tools.folder().then(renderFolder);
+
 // The app's own preferences (main.js, src/app-settings.js)
 function renderAppPrefs(p) {
   if (!p) return;

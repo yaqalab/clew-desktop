@@ -11,6 +11,10 @@ const path = require('node:path');
 const DEFAULTS = Object.freeze({
   /** Developer tools in the View menu: they show an open vault's data to anyone at the keyboard. */
   devTools: false,
+  /** Clew's folder, when moved from `Documents/Clew` (Settings › General). */
+  folderRoot: '',
+  /** The folder last warned about being synced by a cloud drive: said once per place. */
+  folderWarned: '',
 });
 
 function createAppSettings(file) {

@@ -83,6 +83,8 @@ class Tools {
    *        connected to the local API, that Settings › General shows (main.js)
    * @param {{ snapshot: () => object, setDevTools: (on: boolean) => object }} [opts.appPrefs]  the
    *        app's own preferences that Settings › General shows (main.js, `app-settings.js`)
+   * @param {{ snapshot: () => object, move: () => Promise<object>, open: () => Promise<string> }} [opts.folder]
+   *        Clew's folder: where it is, moving it (main.js, `folder-location.js`)
    * @param {() => BrowserWindow | null} [opts.parentWindow]  the window Settings opens as a modal
    *        over, when there is one on screen (from the tray with Clew hidden, it opens on its own)
    */
@@ -94,10 +96,12 @@ class Tools {
     updates = null,
     word = null,
     appPrefs = null,
+    folder = null,
     parentWindow = () => null,
   }) {
     this.openApp = openApp;
     this.appPrefs = appPrefs;
+    this.folder = folder;
     this.parentWindow = parentWindow;
     this.quitApp = quitApp;
     this.appItems = appItems;
@@ -389,6 +393,9 @@ class Tools {
     handle('tools:word-install', () => this.word?.install() ?? null);
     handle('tools:word-remove', () => this.word?.remove() ?? null);
     handle('tools:forget-client', (id) => this.word?.forgetClient(String(id)) ?? null);
+    handle('tools:folder', () => this.folder?.snapshot() ?? null);
+    handle('tools:folder-move', () => this.folder?.move() ?? null);
+    handle('tools:folder-open', () => this.folder?.open() ?? null);
     handle('tools:app-prefs', () => this.appPrefs?.snapshot() ?? null);
     handle('tools:set-dev-tools', (on) => this.appPrefs?.setDevTools(Boolean(on)) ?? null);
     handle('tools:login-item', () => loginItem());
