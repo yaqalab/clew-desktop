@@ -72,6 +72,13 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
   Paths are relative and `/`-separated; `..`, absolute paths, drives, backslashes and links
   leading out are refused ([src/folder.js](../src/folder.js)). `CLEW_FOLDER_ROOT` points it
   elsewhere; a smoke run uses a throwaway folder.
+- **Clew's folder can move** (Settings › General, kept as `folderRoot` in
+  `<profile>/desktop-settings.json`): the pages settle, folder calls wait, every file is copied
+  and checked by size, the old folder is removed, Clew's window reloads
+  ([src/folder-location.js](../src/folder-location.js), `moveTo` in
+  [src/folder-ipc.js](../src/folder-ipc.js)). A folder in OneDrive (from its environment
+  variables), iCloud Drive, Dropbox or Google Drive (by folder name) is said once per place, when
+  Clew's window first shows and the folder exists.
 - **`window.alefaDesktop.db`** (any bundled origin; absent when the database cannot load, so a
   page checks for it and otherwise works as on the web): encrypted SQLite databases (SQLCipher 4
   format, through `better-sqlite3-multiple-ciphers`). Each site has its own folder,

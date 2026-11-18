@@ -158,6 +158,14 @@
         <h2>General</h2>
         <label class="check"><input id="login" type="checkbox" /> Start Clew when I sign in (in the tray, without a window)</label>
         <p><button id="open-app">Open Clew</button></p>
+        <h3>Clew’s folder</h3>
+        <p class="muted">Where Clew keeps an encrypted copy of each vault on this computer.</p>
+        <div class="row" data-app>
+          <code id="folder-root" class="path"></code>
+          <button id="folder-open">Open</button>
+          <button id="folder-move">Move…</button>
+        </div>
+        <p class="muted" id="folder-note" hidden></p>
         <div id="word-section" hidden>
           <h3>Word</h3>
           <div class="grid" id="word-plugin"></div>

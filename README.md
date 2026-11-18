@@ -77,8 +77,9 @@ protects it:
 Worth knowing before you rely on it:
 
 - **`Documents` is often synced by OneDrive or iCloud Drive.** The vault copy then reaches that
-  cloud too. It is encrypted, but its names are readable. Turn the copy off per vault in Clew's
-  Settings if that is not wanted.
+  cloud too. It is encrypted, but its names are readable. The app says so once when it finds
+  the folder in OneDrive, iCloud Drive, Dropbox or Google Drive. Move the folder elsewhere in
+  **Settings › General › Clew's folder**, or turn the copy off per vault in Clew's Settings.
 - **yaqatw keeps its codes and coded passages unencrypted** in the app's data folder. Clew cannot
   lock or wipe them, and locking a vault does not hide them. Use a computer account only you
   can open.

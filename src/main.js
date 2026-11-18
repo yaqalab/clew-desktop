@@ -80,6 +80,117 @@ function appSnapshot(s = settingsNow()) {
   return { devTools: s.devTools, devToolsAlways: !app.isPackaged };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Clew's folder (`folder-ipc.js`, `folder-location.js`): where it is, a cloud drive syncing it,
+// moving it.
+
+/** Clew's folder (`folder-ipc.js`), once the app is ready. */
+let folder = null;
+const folderLocation = require('./folder-location');
+
+function defaultFolderRoot() {
+  return path.join(app.getPath('documents'), 'Clew');
+}
+
+function folderRoot() {
+  if (process.env.CLEW_FOLDER_ROOT) return process.env.CLEW_FOLDER_ROOT;
+  if (SMOKE) return path.join(require('node:os').tmpdir(), `clew-smoke-folder-${process.pid}`);
+  return settingsNow().folderRoot || defaultFolderRoot();
+}
+
+/** What Settings › General shows. */
+function folderSnapshot() {
+  const root = folder?.root ?? folderRoot();
+  return {
+    root,
+    synced: folderLocation.syncedBy(root),
+    fixed: Boolean(process.env.CLEW_FOLDER_ROOT) || SMOKE,
+    isDefault: folderLocation.samePath(root, defaultFolderRoot()),
+  };
+}
+
+function folderDialog(opts) {
+  const parent = BrowserWindow.getFocusedWindow() ?? (mainWindow?.isVisible() ? mainWindow : null);
+  const all = { title: app.name, noLink: true, ...opts };
+  return parent ? dialog.showMessageBox(parent, all) : dialog.showMessageBox(all);
+}
+
+/** Settings › General › Move…: picks a place, says what will happen, moves, reloads Clew. */
+async function moveClewFolder() {
+  const snap = folderSnapshot();
+  if (snap.fixed) throw new Error('The folder is set by CLEW_FOLDER_ROOT in this run.');
+  const parent = BrowserWindow.getFocusedWindow() ?? undefined;
+  const picked = await dialog.showOpenDialog(parent, {
+    title: 'Choose where Clew’s folder goes',
+    buttonLabel: 'Move here',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (picked.canceled || !picked.filePaths[0]) return folderSnapshot();
+  let target;
+  try {
+    target = await folderLocation.moveTarget(snap.root, picked.filePaths[0]);
+  } catch (err) {
+    await folderDialog({ type: 'warning', message: 'Clew’s folder cannot go there.', detail: err.message });
+    return folderSnapshot();
+  }
+  const syncedThere = folderLocation.syncedBy(target);
+  const { response } = await folderDialog({
+    type: 'question',
+    message: 'Move Clew’s folder?',
+    detail:
+      `From ${snap.root}\nTo ${target}\n\nEverything in it is copied, checked, then removed from the old place. ` +
+      'Clew’s window reloads afterwards.' +
+      (syncedThere ? `\n\nThe new place is in ${syncedThere} too: the files’ names and sizes will be seen there.` : ''),
+    buttons: ['Move', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response !== 0) return folderSnapshot();
+  try {
+    await settle(appContents());
+    const result = await folder.moveTo(target);
+    appSettings.set({
+      folderRoot: folderLocation.samePath(target, defaultFolderRoot()) ? '' : target,
+      folderWarned: syncedThere ? target : '',
+    });
+    if (mainWindow) reloadSettled(mainWindow);
+    await folderDialog({
+      type: 'info',
+      message: 'Clew’s folder was moved.',
+      detail:
+        `${result.files} file${result.files === 1 ? '' : 's'} now in ${target}.` +
+        (result.leftBehind ? `\n\nThe old folder could not be removed: ${result.leftBehind}. Remove it yourself once Clew is closed.` : ''),
+    });
+  } catch (err) {
+    await folderDialog({ type: 'warning', message: 'Clew’s folder was not moved.', detail: `Nothing was removed. ${err.message}` });
+  }
+  tools?.send('tools:folder', folderSnapshot());
+  return folderSnapshot();
+}
+
+/**
+ * Once per place: Clew's folder is in a cloud drive. Said when Clew's window first shows, only if
+ * the folder exists (Clew made its copy there), never in a smoke run or with CLEW_FOLDER_ROOT.
+ */
+async function warnSyncedFolder() {
+  const snap = folderSnapshot();
+  if (snap.fixed || !snap.synced || !fs.existsSync(snap.root)) return;
+  if (folderLocation.samePath(settingsNow().folderWarned || '/', snap.root)) return;
+  appSettings.set({ folderWarned: snap.root });
+  const { response } = await folderDialog({
+    type: 'info',
+    message: `Clew’s folder is in ${snap.synced}.`,
+    detail:
+      `Clew keeps an encrypted copy of each vault in ${snap.root}. What the files hold stays encrypted, ` +
+      `but ${snap.synced} sees their names, sizes and times, and keeps its own history of them.\n\n` +
+      'You can move the folder now, or later in Settings › General.',
+    buttons: ['Move it…', 'Keep it there'],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  if (response === 0) await moveClewFolder();
+}
+
 /** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
 const settle = createSettler(ipcMain);
 
@@ -916,6 +1027,8 @@ function createMainWindow() {
   mainWindow.once('ready-to-show', () => {
     if (!SMOKE && !mainWindow.hiddenAtStart) mainWindow.show();
   });
+  // Once the user sees Clew: a word about its folder, if a cloud drive syncs it.
+  if (!SMOKE) mainWindow.once('show', () => setTimeout(() => warnSyncedFolder().catch(() => {}), 3000));
   // With the tray, closing the window hides it: Clew stays as it was, and the tools keep running.
   mainWindow.on('close', (event) => {
     if (tools && !quitting) {
@@ -1078,15 +1191,9 @@ app.whenReady().then(async () => {
   const server = await network.install(appSession, sites);
   permissions.install(appSession, sites);
   screenPicker.install(appSession, sites, () => BrowserWindow.getFocusedWindow() ?? mainWindow);
-  // Documents/Clew, for Clew's copy of each vault (`folder.js`); a throwaway one in a smoke run.
-  const folder = require('./folder-ipc').install({
-    origin: sites.main.origin,
-    root:
-      process.env.CLEW_FOLDER_ROOT ||
-      (SMOKE
-        ? path.join(require('node:os').tmpdir(), `clew-smoke-folder-${process.pid}`)
-        : path.join(app.getPath('documents'), 'Clew')),
-  });
+  // Documents/Clew, for Clew's copy of each vault (`folder.js`), or where Settings moved it; a
+  // throwaway one in a smoke run.
+  folder = require('./folder-ipc').install({ origin: sites.main.origin, root: folderRoot() });
   // <profile>/db, one folder per site; a throwaway one in a smoke run.
   if (DB) {
     db = databases.install({
@@ -1117,6 +1224,14 @@ app.whenReady().then(async () => {
       appPrefs: {
         snapshot: () => appSnapshot(),
         setDevTools,
+      },
+      folder: {
+        snapshot: folderSnapshot,
+        move: moveClewFolder,
+        open: () => {
+          fs.mkdirSync(folder.root, { recursive: true });
+          return shell.openPath(folder.root);
+        },
       },
     });
     tools.start();
