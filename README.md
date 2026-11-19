@@ -1,5 +1,7 @@
 # Clew Desktop
 
+*Clew: a thread through your research.*
+
 [Clew](https://clew.alefa.net) and [yaqatw](https://yaqatw.alefa.net) as one app on your
 computer. It is the same Clew and yaqatw you use in the browser, with your accounts, clouds and
 calls working as they do there, plus:

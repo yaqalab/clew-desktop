@@ -3,7 +3,7 @@
   "productName": "Clew",
   "version": "0.4.0",
   "private": true,
-  "description": "Clew and yaqatw as an installable desktop app, served under their real origins.",
+  "description": "Clew: a thread through your research. Clew and yaqatw as one desktop app, served under their real origins.",
   "license": "MIT",
   "main": "src/main.js",
   "engines": {
