@@ -134,7 +134,7 @@ window's list for that run). `CLEW_AUDIO_LANG=ja` or `en` forces the window's la
 | `src/core/` | portable C++17: HTTP server, links, folder rules, mp3 tags, settings, conversion cache, headless mode |
 | `src/win/` | Windows: DPAPI, Media Foundation conversion, the sandbox, tray icon and window, en/ja strings |
 | `src/posix/` | macOS and Linux: headless only, ffmpeg-only conversion (the one chosen, else one beside the program or on PATH), secret in a 0600 file. Built and tested on Linux; macOS by CI only |
-| `res/` | dialog, manifest, icons (`make_icons.py` draws them) |
+| `res/` | dialog, manifest, icons (`make_icons.py` composes them from `res/brand/`, a copy of Clew's brand favicons: copy them again when the brand changes) |
 | `test/` | `unit_tests.cpp` (SHA-256/HMAC, PBKDF2 and scrypt vectors, paths, ranges, JSON, settings) and `test_native.py` |
 
 No third-party code and no libraries beyond what Windows ships. The version is written once, in
