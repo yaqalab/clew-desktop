@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Send to an AI model?</title>
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body>
+    <section id="review">
+      <h1 id="heading">Send to an AI model?</h1>
+      <p id="about"></p>
+      <p class="muted">
+        You see the first request of this run. The rest of the run goes the same way.
+      </p>
+      <p class="muted" id="names">
+        Names are not replaced in a Word document: what you see is what goes.
+      </p>
+      <div id="texts"></div>
+      <p class="muted" id="more" hidden></p>
+      <div class="row">
+        <button id="cancel">Cancel</button>
+        <button id="send" class="primary">Send</button>
+      </div>
+    </section>
+    <footer>
+      <span class="muted">Esc cancels</span>
+    </footer>
+    <script src="review.js"></script>
+  </body>
+</html>

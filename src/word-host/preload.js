@@ -34,5 +34,10 @@ if (location.protocol === 'clew-word:') {
     action: (name, args) => ipcRenderer.invoke('word:picker-action', String(name), args ?? {}),
     /** The code picker closes itself. */
     close: () => ipcRenderer.send('word:picker-close'),
+    /** An AI request Yaqatw is about to send, shown in a window in front; true to send. */
+    review: (data) => ipcRenderer.invoke('word:review', data ?? {}),
+    /** The review window: what it shows, and its answer. */
+    reviewData: () => ipcRenderer.invoke('word:review-data'),
+    reviewAnswer: (send) => ipcRenderer.send('word:review-answer', send === true),
   });
 }

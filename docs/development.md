@@ -469,6 +469,16 @@ document) and
     [test/word-yaqatw-rpc.test.js](../test/word-yaqatw-rpc.test.js) checks every yaqatw method
     host.js names against a yaqatw checkout: `YAQATW_PATH=../yaqatw npm test` before a release
     (Clew bundles yaqatw `main`, so a method must be there).
+  - **Yaqatw's AI requests, reviewed**: on connect the host page tells yaqatw it reviews them
+    (`setHostFeatures({ aiGate: true })`), and yaqatw then asks before each request that carries
+    text (yaqatw's `service/ai/aiGate.ts`; host.js's `aiGate_review`). A model on this computer
+    passes; anything else is shown in a window in front
+    ([review.html](../src/word-host/review.html), through `word:review` in main.js) once per run:
+    the feature, the provider and model, where it goes, and the text without the request's
+    settings. It goes only on Send; Cancel, Esc, closing the window or the Word window going
+    away sends nothing, and a cancelled run is not asked about again. A Word document has no
+    Clew names list, so nothing is replaced (the window says so) and `aiGate_restore` gives the
+    answer back as it is.
   - **Right-click**: **Apply code ▸** (the ribbon's menu, with In vivo); in a coded passage only
     (`Ribbon_PassageVisible`), **Add to category ▸**, **Add to relationship ▸** (when the
     document's yaqatw can, `Ribbon_RelationsVisible`) and **Highlight info**. In analysis
