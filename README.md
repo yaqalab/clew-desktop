@@ -26,10 +26,29 @@ your account only and needs no administrator rights.
 The installer is not signed, so Windows may show *Windows protected your PC* the first time.
 Choose **More info → Run anyway**.
 
-The app is for Windows only.
-
 The app starts with Windows from then on, in the system tray (turn this off with **Start at
 login** in the tray menu or in Settings › General).
+
+**macOS and Linux: built, not tested.** These packages pass the automated checks on GitHub's
+machines, but nobody has used them on a real Mac or Linux computer yet. Expect rough edges, keep
+a copy of your work, and tell us in [Issues](https://github.com/yaqalab/clew-desktop/issues) what
+works and what does not.
+
+- **macOS** (Apple silicon or Intel): download `Clew-<version>-mac-arm64.dmg` (Apple silicon:
+  M1 and later) or `Clew-<version>-mac-x64.dmg` (Intel), open it and drag Clew to Applications.
+  The app is not signed by Apple, so macOS refuses it the first time: open **System Settings ›
+  Privacy & Security** and choose **Open Anyway**. It cannot install its own updates: it says
+  when a new version is out, and you download it from the Releases page.
+- **Linux** (x64): `Clew-<version>.AppImage` runs on most distributions (make it executable,
+  then run it) and updates itself; `clew-desktop_<version>_amd64.deb` installs on Debian, Ubuntu
+  and their relatives (`sudo apt install ./clew-desktop_<version>_amd64.deb`), and a new version
+  is installed the same way.
+- On both, Yaqatw for Word and dictation are Windows only, and converting recordings needs
+  [FFmpeg](https://ffmpeg.org) (**Settings › Conversion** says where it is).
+
+**Nothing to install:** [Clew](https://clew.alefa.net) also runs in your browser, on any
+system, with yaqatw inside it and your work encrypted and synced to your own cloud in the same
+way. Use it if the app does not suit your computer, or alongside it.
 
 ## Using it
 
@@ -77,7 +96,7 @@ protects it:
 
 | Where | What | Encrypted |
 |---|---|---|
-| The app's data folder (`%APPDATA%\Clew` on Windows) | Clew's vaults, yaqatw's own storage, downloaded updates, settings | Clew's vaults: yes, with the vault's passphrase. **yaqatw's storage: no** |
+| The app's data folder (`%APPDATA%\Clew` on Windows, `~/Library/Application Support/Clew` on macOS, `~/.config/Clew` on Linux) | Clew's vaults, yaqatw's own storage, downloaded updates, settings | Clew's vaults: yes, with the vault's passphrase. **yaqatw's storage: no** |
 | `Documents\Clew\<vault name>\` | A copy of each vault beside its cloud (on by default; Settings › Copy on this computer in Clew) | Contents: yes. **Folder and file names: no**: they carry the vault's name and the titles of transcripts, papers and files |
 
 Worth knowing before you rely on it:
