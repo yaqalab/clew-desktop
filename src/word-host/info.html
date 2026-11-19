@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Highlight info</title>
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body class="info">
+    <section>
+      <form id="form" class="fields" autocomplete="off">
+        <span class="label">Highlighted text</span>
+        <blockquote id="text"></blockquote>
+
+        <label class="label" for="translation">Translation</label>
+        <div class="field">
+          <textarea id="translation" rows="3"></textarea>
+          <div class="row" id="translate-row" hidden>
+            <select id="provider" aria-label="Translate with"></select>
+            <button type="button" id="translate">Translate</button>
+          </div>
+        </div>
+
+        <label class="label" for="comment">Notes</label>
+        <textarea id="comment" rows="4"></textarea>
+
+        <span class="label">Codes applied</span>
+        <div class="field">
+          <!-- One item per code: its chip, its categories and relationships, Show passages,
+               Manage (info.js builds them). -->
+          <ul id="codes" aria-label="Codes applied"></ul>
+          <fieldset id="edit" class="edit" hidden>
+            <legend>Edit code</legend>
+            <input id="code-name" type="text" placeholder="Name" aria-label="Code name" />
+            <div id="swatches" role="radiogroup" aria-label="Colour"></div>
+            <textarea id="code-desc" rows="2" placeholder="Description (optional)" aria-label="Description"></textarea>
+            <div class="row">
+              <button type="button" id="code-save" class="primary">Save code</button>
+              <button type="button" id="code-cancel">Cancel</button>
+            </div>
+          </fieldset>
+          <fieldset id="cat-edit" class="edit" hidden>
+            <legend>Edit category</legend>
+            <input id="cat-name" type="text" placeholder="Name" aria-label="Category name" />
+            <textarea id="cat-desc" rows="2" placeholder="Description (optional)" aria-label="Category description"></textarea>
+            <div class="row">
+              <button type="button" id="cat-save" class="primary">Save category</button>
+              <button type="button" id="cat-cancel">Cancel</button>
+            </div>
+          </fieldset>
+          <select id="add" aria-label="Add a code"></select>
+        </div>
+      </form>
+    </section>
+    <p id="msg" role="status" hidden></p>
+    <footer>
+      <span class="row">
+        <button id="full" class="link">Open Yaqatw</button>
+        <button id="remove" class="link danger" hidden>Remove highlight</button>
+      </span>
+      <span class="row">
+        <button id="close">Close</button>
+        <button id="save" class="primary">Save &amp; close</button>
+      </span>
+    </footer>
+    <script src="colors.js"></script>
+    <script src="info.js"></script>
+  </body>
+</html>

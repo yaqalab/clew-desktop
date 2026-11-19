@@ -169,6 +169,45 @@ try {
   $w = New-Object IO.StreamWriter($entry.Open(), (New-Object Text.UTF8Encoding($false)))
   $xml.Save($w)
   $w.Close()
+
+  # The ribbon's own pictures: customUI\images\<name>.png, which the XML names image="<name>"
+  # (the relationship id), in customUI/images with customUI/_rels/customUI14.xml.rels.
+  $images = @(Get-ChildItem (Join-Path $root 'customUI\images\*.png') -ErrorAction SilentlyContinue)
+  if ($images.Count -gt 0) {
+    $imageType = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
+    $lines = foreach ($img in $images) {
+      $name = $img.BaseName
+      if ($name -notmatch '^[A-Za-z][A-Za-z0-9]*$') { throw "customUI\images\$($img.Name): a name of letters and digits" }
+      $entry = $zip.CreateEntry("customUI/images/$($img.Name)")
+      $s = $entry.Open()
+      $bytes = [IO.File]::ReadAllBytes($img.FullName)
+      $s.Write($bytes, 0, $bytes.Length)
+      $s.Close()
+      "<Relationship Id=`"$name`" Type=`"$imageType`" Target=`"images/$($img.Name)`"/>"
+    }
+    $entry = $zip.CreateEntry('customUI/_rels/customUI14.xml.rels')
+    $w = New-Object IO.StreamWriter($entry.Open(), (New-Object Text.UTF8Encoding($false)))
+    $w.Write("<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?><Relationships xmlns=`"$ns`">$($lines -join '')</Relationships>")
+    $w.Close()
+
+    # A package says what a .png is once ([Content_Types].xml); a new template does not yet.
+    $types = $zip.GetEntry('[Content_Types].xml')
+    $r = New-Object IO.StreamReader($types.Open())
+    [xml]$ct = $r.ReadToEnd()
+    $r.Close()
+    $ctNs = 'http://schemas.openxmlformats.org/package/2006/content-types'
+    if (-not ($ct.DocumentElement.ChildNodes | Where-Object { $_.LocalName -eq 'Default' -and $_.Extension -eq 'png' })) {
+      $png = $ct.CreateElement('Default', $ctNs)
+      $png.SetAttribute('Extension', 'png')
+      $png.SetAttribute('ContentType', 'image/png')
+      [void]$ct.DocumentElement.PrependChild($png)
+    }
+    $types.Delete()
+    $entry = $zip.CreateEntry('[Content_Types].xml')
+    $w = New-Object IO.StreamWriter($entry.Open(), (New-Object Text.UTF8Encoding($false)))
+    $ct.Save($w)
+    $w.Close()
+  }
 }
 finally {
   $zip.Dispose()

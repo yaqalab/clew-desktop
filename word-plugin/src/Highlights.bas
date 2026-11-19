@@ -70,93 +70,35 @@ None:
 End Function
 
 ' ----------------------------------------------------------------------------------------------
-' Colour: Word highlights come in 16 colours, so a code's colour gets the nearest of them.
+' Colour: Word highlights come in 16 colours. Which one a code gets is decided before it reaches
+' Word (yaqatw's wordColor, which the host page applies: src/word-host/colors.js); here each of
+' the 16 is only named as Word names it.
 
-Private Function HexToRgb(ByVal color As String, ByRef r As Long, ByRef g As Long, ByRef b As Long) As Boolean
-    color = Trim$(color)
-    If Left$(color, 1) = "#" Then color = Mid$(color, 2)
-    If Len(color) = 3 Then color = Mid$(color, 1, 1) & Mid$(color, 1, 1) & Mid$(color, 2, 1) & Mid$(color, 2, 1) & Mid$(color, 3, 1) & Mid$(color, 3, 1)
-    If Len(color) <> 6 Then Exit Function
-    If Not color Like "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]" Then Exit Function
-    r = CLng("&H" & Mid$(color, 1, 2))
-    g = CLng("&H" & Mid$(color, 3, 2))
-    b = CLng("&H" & Mid$(color, 5, 2))
-    HexToRgb = True
-End Function
-
-' The Word highlight colour for "#rrggbb", "#rgb" or a swatch label; wdNoHighlight when the colour
-' cannot be read. The same rule as yaqatw's wordColor (src/service/wordColors.ts): yaqatw's 16
-' swatch colours are Word's and map to themselves exactly; any other colour gets the Word colour
-' of its hue, bright or dark by its lightness, or a grey when it has little colour in it. The
-' host page sends palette colours only; this rule is the fallback.
-Public Function NearestHighlight(ByVal colorValue As Variant) As WdColorIndex
-    Dim names As Variant
+' The Word highlight colour for one of Word's 16 ("#RRGGBB", case ignored); wdNoHighlight for any
+' other value, which leaves the passage's colour as it is.
+Public Function HighlightIndex(ByVal colorValue As Variant) As WdColorIndex
+    Dim hexes As Variant
     Dim indices As Variant
-    Dim r As Long, g As Long, b As Long
     Dim i As Long
-    Dim mx As Double, mn As Double
-    Dim sat As Double
-    Dim hue As Double
-    Dim bright As Variant
-    Dim dark As Variant
-    Dim slot As Long
     Dim color As String
-    color = CStr(colorValue)
-    ' yaqatw's swatch labels.
-    names = Array("white", "yellow", "lime", "turquoise", "pink", "blue", "red", "darkblue", "teal", "green", "purple", "darkred", "olive", "gray", "lightgray", "black")
-    indices = Array(wdWhite, wdYellow, wdBrightGreen, wdTurquoise, wdPink, wdBlue, wdRed, wdDarkBlue, wdTeal, wdGreen, wdViolet, wdDarkRed, wdDarkYellow, wdGray50, wdGray25, wdBlack)
-    For i = LBound(names) To UBound(names)
-        If LCase$(Trim$(color)) = names(i) Then
-            NearestHighlight = indices(i)
+    color = UCase$(Trim$(CStr(colorValue)))
+    hexes = Array("#FFFFFF", "#FFFF00", "#00FF00", "#00FFFF", "#FF00FF", "#0000FF", "#FF0000", "#000080", _
+                  "#008080", "#008000", "#800080", "#800000", "#808000", "#808080", "#C0C0C0", "#000000")
+    indices = Array(wdWhite, wdYellow, wdBrightGreen, wdTurquoise, wdPink, wdBlue, wdRed, wdDarkBlue, _
+                    wdTeal, wdGreen, wdViolet, wdDarkRed, wdDarkYellow, wdGray50, wdGray25, wdBlack)
+    HighlightIndex = wdNoHighlight
+    For i = LBound(hexes) To UBound(hexes)
+        If color = hexes(i) Then
+            HighlightIndex = indices(i)
             Exit Function
         End If
     Next i
-    If Not HexToRgb(color, r, g, b) Then
-        NearestHighlight = wdNoHighlight
-        Exit Function
-    End If
-    mx = r: If g > mx Then mx = g
-    If b > mx Then mx = b
-    mn = r: If g < mn Then mn = g
-    If b < mn Then mn = b
-    ' Too dark to tell a hue: black.
-    If mx < 48 Then
-        NearestHighlight = wdBlack
-        Exit Function
-    End If
-    sat = (mx - mn) / mx
-    If sat < 0.2 Then
-        ' Little colour: white, a grey or black by lightness.
-        If mx >= 224 Then
-            NearestHighlight = wdWhite
-        ElseIf mx >= 160 Then
-            NearestHighlight = wdGray25
-        ElseIf mx >= 64 Then
-            NearestHighlight = wdGray50
-        Else
-            NearestHighlight = wdBlack
-        End If
-        Exit Function
-    End If
-    If mx = r Then
-        hue = 60 * ((g - b) / (mx - mn))
-    ElseIf mx = g Then
-        hue = 60 * ((b - r) / (mx - mn)) + 120
-    Else
-        hue = 60 * ((r - g) / (mx - mn)) + 240
-    End If
-    If hue < 0 Then hue = hue + 360
-    ' Six hues 60 degrees apart: red, yellow, green, turquoise, blue, pink.
-    bright = Array(wdRed, wdYellow, wdBrightGreen, wdTurquoise, wdBlue, wdPink)
-    dark = Array(wdDarkRed, wdDarkYellow, wdGreen, wdTeal, wdDarkBlue, wdViolet)
-    slot = CLng(Int((hue + 30) / 60)) Mod 6
-    If mx >= 160 Then NearestHighlight = bright(slot) Else NearestHighlight = dark(slot)
 End Function
 
 Private Sub Paint(ByVal cc As ContentControl, ByVal color As String)
     Dim idx As WdColorIndex
     If Len(color) = 0 Then Exit Sub
-    idx = NearestHighlight(color)
+    idx = HighlightIndex(color)
     If idx <> wdNoHighlight Then cc.Range.HighlightColorIndex = idx
 End Sub
 

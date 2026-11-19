@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>New</title>
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body>
+    <section id="form">
+      <h1 id="heading"></h1>
+      <p class="muted" id="for"></p>
+      <input id="name" type="text" aria-label="Name" autocomplete="off" />
+      <textarea id="desc" rows="3" placeholder="Description (optional)" aria-label="Description"></textarea>
+      <div class="row">
+        <button id="create" class="primary"></button>
+        <button id="cancel">Cancel</button>
+      </div>
+    </section>
+    <p id="msg" role="status" hidden></p>
+    <footer>
+      <button id="full" class="link">Open Yaqatw</button>
+      <span class="muted">Enter creates · Esc closes</span>
+    </footer>
+    <script src="form.js"></script>
+  </body>
+</html>

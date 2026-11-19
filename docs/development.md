@@ -330,7 +330,8 @@ GPL parts; Clew docs/32, section 2).
 
 Yaqatw for Word, `yaqatw.dotm`: a Word template that talks to the app through the local API. A
 **Yaqatw** tab with a **Coding** group (**Apply code ▾**, **Find code**, **New code**, **In
-vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) and
+vivo**, **Highlight info**) and **Open Yaqatw** (yaqatw in an app window, working on this
+document) and
 **Connection** (says whether it is connected to the app). Windows only.
 
 - **Installed by the app**: File › Install Yaqatw for Word… ([src/word-plugin.js](../src/word-plugin.js))
@@ -376,8 +377,9 @@ vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) 
     fields) are updated after each insert.
   - Colours: Word highlights come in 16 colours, which are yaqatw's swatch colours. A code's
     colour reaches Word as one of them, by yaqatw's own rule (its `wordColor`, copied in the host
-    page; the template maps the 16 exactly): a palette colour is itself, any other the Word
-    colour of its hue.
+    page): a palette colour is itself, any other the Word colour of its hue. The template only
+    names the 16 as Word does (`HighlightIndex`) and decides no colour itself; a test keeps its
+    list equal to the host page's palette.
   - The highlight under the cursor goes to yaqatw (`selectionchange`) through Word's
     `WindowSelectionChange` event, sent right after it, never from inside it.
   - The bridge's quick exchanges wait without `DoEvents`: letting Word do its background work
@@ -408,18 +410,97 @@ vivo**) and **Open Yaqatw** (yaqatw in an app window, working on this document) 
     inserts the result its usual way, the arrow (or →) shows the others (block quote, translation,
     a picture, not linked…; `insertCiteSource`). Refresh and Unlink all are Cite's own
     (`refreshAllCitations`, `unlinkAllCitations`); Unlink all asks first.
-  - **Apply code ▾** is filled when it opens: recently applied codes first, at most 25, each with a
-    square of its Word colour ([CodeImages.bas](../word-plugin/src/CodeImages.bas), bitmaps in
-    `%TEMP%\yaqatw-colors`), then Find code and New code.
+  - **Apply code ▾** is filled when it opens: the codes as the host page's `codes` gives them
+    (yaqatw's live codes, neither deprecated nor merged; those applied lately first, one list
+    with the picker's, kept in the host pages' storage), at most 25, each with a square of its
+    Word colour ([CodeImages.bas](../word-plugin/src/CodeImages.bas), bitmaps in
+    `%TEMP%\yaqatw-colors`), then Find code and New code. Why codes cannot be applied (the
+    document's type) is the host page's `note`, shown as it is by the menu and the picker.
+  - **What the template decides, and what it does not**: it knows Word (is the cursor in a
+    highlight mark, the document's type and features as the host page copied them into document
+    variables); what a passage, a code or a colour is, yaqatw decides, through the host page.
+    The right-click entries show on any highlight mark, without asking yaqatw (that would hold
+    up every right-click); Highlight info then asks, and for a mark yaqatw has no passage for,
+    offers to remove the mark (`deleteHighlight`).
   - **Find code / New code**: the code picker, a small always-on-top app window
     ([picker.html](../src/word-host/picker.html)): type to find, Enter applies, Esc closes; New code
     with Word's 16 colours; Open Yaqatw for everything else. It only asks the document's own
-    yaqatw (`word:picker-action`: codes, applyCode, newCode, searchCites, insertCite, showWindow;
-    the insert window uses the same channel).
+    yaqatw (`word:picker-action`: codes, applyCode, newCode, searchCites, insertCite, the
+    Highlight info actions, newCategory, newRelationship, showWindow; the insert window,
+    Highlight info and the form window use the same channel).
+  - **Highlight info**: the coded passage at the cursor (`HighlightAt`) in a small app window
+    ([info.html](../src/word-host/info.html)), as yaqatw shows it when a highlight is clicked: its
+    text; translation and notes, saved together (Save & close, Ctrl+Enter; yaqatw's
+    `getHighlightDetails`, `updateHighlightDetails`); its codes, detached (×) or added at once
+    (`detachCodeFromHighlight`, `attachCodeToHighlight`; detaching the last one removes the
+    highlight, after asking); Translate when yaqatw has a translator set up
+    (`getTranslateProviders`, `translateHighlightText`). A click (or right-click) on a code's chip
+    edits the code: name, Word's colours, description (yaqatw's `updateCode`, which repaints the
+    document's highlights when the name or colour changes; the colour is sent only when another
+    one is chosen, so a code keeps its exact colour otherwise; the description only when it was
+    changed).
+    Under each code: its categories as tags (a click on the name edits the category's name and
+    description, yaqatw's `updateCategory`; × takes the code out, **+ Category…** puts it in
+    one), the relationships it is in with **Add…** / **Change…** (Add to relationship's window
+    takes the place of Highlight info), **Passages** (yaqatw's
+    `showHighlightsForCode`, then its window comes up) and **Manage ▾**: Deprecate…, Merge
+    into…, Remove from this document…, Delete…. Each one first says what it reaches (yaqatw's
+    `getCodeUsage`: passages here, elsewhere, in how many other files), what happens to the
+    passages and where to undo it in Yaqatw (Reactivate, Unmerge, Trash), then its button
+    (`deprecateCode` with a reason, `mergeCode` into a code picked from a list,
+    `removeCodeFromFile`, `deleteCode`, which is a soft delete). Nothing final is done from Word.
+    **Remove highlight** (footer, after asking) sends the passage to yaqatw's Trash
+    (`deleteHighlight`); its text stays.
+  - **What the open yaqatw can do**: the host page asks yaqatw's `getCapabilities` once per
+    connection and turns its method list into features (`FEATURES` in host.js: categories,
+    editCode, editCategory, relationships, relationshipCategories, removeHighlight, manage,
+    showPassages).
+    Highlight info shows only
+    those; the list also goes into the document variable `yaqatw.features`, which the template
+    reads to show Add to relationship (`HasFeature`). A yaqatw without `getCapabilities` gets
+    what Word offered before (categories, code editing).
+    [test/word-yaqatw-rpc.test.js](../test/word-yaqatw-rpc.test.js) checks every yaqatw method
+    host.js names against a yaqatw checkout: `YAQATW_PATH=../yaqatw npm test` before a release
+    (Clew bundles yaqatw `main`, so a method must be there).
+  - **Right-click**: **Apply code ▸** (the ribbon's menu, with In vivo); in a coded passage only
+    (`Ribbon_PassageVisible`), **Add to category ▸**, **Add to relationship ▸** (when the
+    document's yaqatw can, `Ribbon_RelationsVisible`) and **Highlight info**. In analysis
+    documents only, before Cut in Word's menus on text, in a list and on a misspelled word (there
+    after Word's Spelling submenu, which holds the suggestions), then a separator before Cut.
+    Add to category is about the passage's codes, since a category holds codes: with one code,
+    every category, ticked when the code is in it (a click adds or removes it), then New
+    category… (the small form window, form.html?kind=category: name and description; a name
+    already taken puts the code in that category); with several, a submenu of those for each
+    code (host actions `categoryMenu`, `addToCategory`, `removeFromCategory`, `newCategory`;
+    yaqatw's `getCategoryMenuItems`, `getCategoriesForCode`, `attachCategoryToCode`,
+    `detachCategoryFromCode`, `createCategoryAndAttach`).
+    Add to relationship works the same way, a relationship holding codes and categories in its
+    instances. Its items are the passage's codes, then the categories they are directly in (once
+    each; a submenu per item when there are several). For each: every relationship, a tick when
+    it has one instance, otherwise a submenu of its instances' ticks and New instance (named by
+    yaqatw, "<relationship> N"); then New relationship… (form.html?kind=relationship, with
+    `&item=category` for a category; its first instance holds the item). **More…** opens the
+    window ([relate.html](../src/word-host/relate.html)): the codes, each with its categories and
+    their parents as a tree, and the relationships of the one chosen, with ticks, New instance
+    and New relationship; parent categories are only there, as a menu is no place for a tree.
+    Host actions `relationshipMenu`, `relateItems`, `itemRelationships`, `addToRelationship`,
+    `removeFromRelationship`, `newInstance`, `newRelationship` (each takes `{ itemId, kind }`, or
+    a code's `codeId`); yaqatw's `getRelationshipMenu`, `addCodeToInstance`,
+    `removeCodeFromInstance`, `addInstanceWithCode`, `createRelationshipAndAttach`, and for
+    categories `addItemToInstance`, `addInstanceWithItem`, `createRelationshipWithItem`
+    (feature `relationshipCategories`: an older yaqatw offers codes only).
+    After an action from these menus, Word's status bar says what was done ("“Calm” added to
+    “Feelings”."): the host action answers `{ status }` and the template's `Act` shows it.
+    Each Apply code, Add to category and Add to relationship menu has ids of its own
+    (`Ribbon_CodesMenu`, `Ribbon_CategoriesMenu`, `Ribbon_RelationshipsMenu`);
+    [test/word-ribbon.test.js](../test/word-ribbon.test.js) checks ids and callbacks against the
+    VBA.
   - `CLEW_WORD_DEBUG=1` copies a Word window's console (yaqatw's included) to the app's log.
     `CLEW_TOOLS=0` keeps the tools out of a run (a second Clew for tests beside the one in use).
 - Sources: VBA modules in `word-plugin/src/*.bas` and `*.cls` (ASCII only; project name
-  `Yaqatw`), the ribbon in `word-plugin/customUI/customUI14.xml`. No VBScript components
+  `Yaqatw`), the ribbon in `word-plugin/customUI/customUI14.xml`, its own pictures in
+  `word-plugin/customUI/images/<name>.png` (named `image="<name>"`; Open Yaqatw has yaqatw's
+  logo, a copy of yaqatw's `assets/icon-64.png`). No VBScript components
   (Windows is retiring VBScript). Module-level declarations go at the top of a module (VBA
   refuses them anywhere else).
 - Build, on Windows with Word: `npm run build:word` (part of `npm run dist`; skipped on other

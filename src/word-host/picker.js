@@ -3,7 +3,9 @@
  * window in the manner of Zotero's quick citation. Type to find a code, Enter applies it to the
  * selection in Word; "New code" creates one (Word's 16 highlight colours) and applies it. Every
  * action goes to the document's own Yaqatw (its Word window, src/word-host/host.js), through
- * window.clewWord.action. Codes used here come first next time (kept in this page's storage).
+ * window.clewWord.action. Codes applied lately come first, as the host page orders them (one
+ * list with Word's Apply code menu).
+ * New category and New relationship are form.html's.
  */
 (function () {
   'use strict';
@@ -11,7 +13,6 @@
   const word = window.clewWord;
   const { PALETTE, wordColor } = window.ClewWordColors;
   const $ = (id) => document.getElementById(id);
-  const RECENT_KEY = 'picker.recent';
   const MAX_SHOWN = 200;
 
   let codes = [];
@@ -31,24 +32,6 @@
     return m ? m[1] : msg;
   }
 
-  function recent() {
-    try {
-      const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-      return Array.isArray(list) ? list.map(String) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function remember(codeId) {
-    const list = [codeId, ...recent().filter((id) => id !== codeId)].slice(0, 20);
-    try {
-      localStorage.setItem(RECENT_KEY, JSON.stringify(list));
-    } catch {
-      /* storage unavailable */
-    }
-  }
-
   // ─── Finding ───────────────────────────────────────────────────────────────────────────────
 
   function matches(code, q) {
@@ -63,18 +46,14 @@
 
   function render() {
     const q = $('q').value.trim();
-    const order = recent();
-    const rank = (c) => {
-      const i = order.indexOf(c.id);
-      return i === -1 ? Infinity : i;
-    };
     shown = codes
       .filter((c) => matches(c, q))
       .sort((a, b) => {
-        // A name that starts with what was typed first, then recently used, then yaqatw's order.
+        // A name that starts with what was typed first; otherwise the order the codes came in
+        // (recently applied first, then yaqatw's: host.js codes). The sort is stable.
         const sa = q && a.name.toLowerCase().startsWith(q.toLowerCase()) ? 0 : 1;
         const sb = q && b.name.toLowerCase().startsWith(q.toLowerCase()) ? 0 : 1;
-        return sa - sb || rank(a) - rank(b);
+        return sa - sb;
       })
       .slice(0, MAX_SHOWN);
     const list = $('list');
@@ -126,8 +105,8 @@
     busy = true;
     message('');
     try {
+      // The host page notes it among the codes applied lately (host.js rememberCode).
       await word.action('applyCode', { codeId: code.id });
-      remember(code.id);
       word.close();
     } catch (err) {
       message(cleanError(err));
@@ -233,13 +212,8 @@
     try {
       const r = await word.action('codes');
       codes = (r && r.codes) || [];
-      message(
-        r && r.fileType === 'write'
-          ? 'This is a writing document: codes are applied in analysis documents.'
-          : r && r.fileType !== 'analyze'
-            ? "This document has no type yet: Open Yaqatw, then Settings › Document type: Analysis."
-            : '',
-      );
+      // Why codes cannot be applied here, as the host page says it (host.js codingNote).
+      message((r && r.note) || '');
     } catch (err) {
       message(cleanError(err));
     }

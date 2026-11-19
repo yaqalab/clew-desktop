@@ -354,16 +354,23 @@ test('actions wait for yaqatw, then: codes (Word colours), apply, new code, in v
   await p.rpc('pluginConnected');
   assert.deepEqual(await early, {
     fileType: 'analyze',
+    note: '',
     codes: [
       { id: 'c1', name: 'Calm', description: 'quiet', color: '#00FF00' },
       { id: 'c2', name: 'Place', description: '', color: '' },
     ],
   });
-  await p.act('applyCode', { codeId: 'c2' });
-  await p.act('newCode', { name: ' Hope ', description: 'd', color: '#008080' });
-  await p.act('inVivo');
+  // Word's status bar says what was done.
+  assert.deepEqual(await p.act('applyCode', { codeId: 'c2' }), { status: '“Place” applied.' });
+  // A code applied lately comes first, for Word's menu and the picker alike (one list).
   assert.deepEqual(
-    p.pluginCalls.filter((c) => c.method !== 'getFileType' && c.method !== 'getCodeMenuItems'),
+    (await p.act('codes')).codes.map((c) => c.id),
+    ['c2', 'c1'],
+  );
+  await p.act('newCode', { name: ' Hope ', description: 'd', color: '#008080' });
+  assert.deepEqual(await p.act('inVivo'), { status: 'In vivo code applied.' });
+  assert.deepEqual(
+    p.pluginCalls.filter((c) => !['getFileType', 'getCodeMenuItems', 'getCapabilities'].includes(c.method)),
     [
       { method: 'applyCodeToSelection', args: ['c2'] },
       { method: 'createCodeAndApply', args: ['Hope', 'd', '#008080'] },
@@ -379,12 +386,471 @@ test('coding actions say why not, in a writing document or one without a type', 
     ['write', /writing document/],
     [null, /type first/],
   ]) {
-    const p = page(() => null, { plugin: { getFileType: type, applyCodeToSelection: null } });
+    const p = page(() => null, { plugin: { getFileType: type, applyCodeToSelection: null, getCodeMenuItems: [] } });
     await p.rpc('pluginConnected');
     await new Promise((r) => setTimeout(r, 20));
     await assert.rejects(p.act('applyCode', { codeId: 'c1' }), why);
+    // Word's menu and the picker show the same reason, from here (codes' note).
+    assert.match((await p.act('codes')).note, why);
     assert.ok(!p.pluginCalls.some((c) => c.method === 'applyCodeToSelection'));
   }
+});
+
+test('Highlight info: the passage (Word colours), saved fields, codes detached and added, translation', async () => {
+  const p = page(() => null, {
+    plugin: {
+      getFileType: 'analyze',
+      getHighlightDetails: (hid) =>
+        hid === 'h1'
+          ? { text: 'Text', translation: 'Texte', codes: [{ id: 'c1', name: 'Calm', color: '#4CAF50' }] }
+          : null,
+      updateHighlightDetails: null,
+      detachCodeFromHighlight: (hid, codeId) => ({ deleted: codeId === 'c1' }),
+      attachCodeToHighlight: null,
+      getTranslateProviders: [{ key: 'deepl', label: 'DeepL' }, { key: 'custom' }],
+      translateHighlightText: (hid, provider) => `${provider}:${hid}`,
+    },
+  });
+  await p.rpc('pluginConnected');
+  // A yaqatw without getCapabilities: what Word offered before it, no categories when it cannot
+  // give them.
+  assert.deepEqual(await p.act('highlightInfo', { hid: 'h1' }), {
+    text: 'Text',
+    translation: 'Texte',
+    comment: '',
+    codes: [{ id: 'c1', name: 'Calm', color: '#00FF00' }],
+    categories: [],
+    features: ['categories', 'editCode'],
+  });
+  await assert.rejects(p.act('highlightInfo', { hid: 'gone' }), /no record of this passage/);
+  await p.act('saveHighlightInfo', { hid: 'h1', translation: 'T', comment: 'N' });
+  assert.deepEqual(await p.act('detachCode', { hid: 'h1', codeId: 'c2' }), { deleted: false });
+  assert.deepEqual(await p.act('detachCode', { hid: 'h1', codeId: 'c1' }), { deleted: true });
+  await p.act('attachCode', { hid: 'h1', codeId: 'c3' });
+  assert.deepEqual(await p.act('translateProviders'), {
+    providers: [
+      { key: 'deepl', label: 'DeepL' },
+      { key: 'custom', label: 'custom' },
+    ],
+  });
+  assert.deepEqual(await p.act('translateHighlight', { hid: 'h1', provider: 'deepl' }), { text: 'deepl:h1' });
+  assert.deepEqual(
+    p.pluginCalls.find((c) => c.method === 'updateHighlightDetails'),
+    { method: 'updateHighlightDetails', args: ['h1', { translation: 'T', comment: 'N' }] },
+  );
+  assert.deepEqual(
+    p.pluginCalls.find((c) => c.method === 'attachCodeToHighlight'),
+    { method: 'attachCodeToHighlight', args: ['h1', 'c3'] },
+  );
+});
+
+test("Add to category: the passage's codes with their categories; a category added, a new one made", async () => {
+  const p = page(() => null, {
+    plugin: {
+      getFileType: 'analyze',
+      getHighlightDetails: () => ({
+        text: 'T',
+        codes: [
+          { id: 'c1', name: 'Calm', color: '#4CAF50' },
+          { id: 'c2', name: 'Place' },
+        ],
+      }),
+      getCategoryMenuItems: [
+        { id: 'k1', name: 'Feelings' },
+        { id: 'k2', name: 'Space' },
+      ],
+      getCategoriesForCode: (codeId) => (codeId === 'c1' ? [{ id: 'k1', name: 'Feelings' }] : []),
+      attachCategoryToCode: null,
+      detachCategoryFromCode: null,
+      createCategoryAndAttach: () => ({ id: 'k3' }),
+    },
+  });
+  await p.rpc('pluginConnected');
+  assert.deepEqual(await p.act('categoryMenu', { hid: 'h1' }), {
+    codes: [
+      { id: 'c1', name: 'Calm', color: '#00FF00', categories: ['k1'] },
+      { id: 'c2', name: 'Place', color: '', categories: [] },
+    ],
+    categories: [
+      { id: 'k1', name: 'Feelings' },
+      { id: 'k2', name: 'Space' },
+    ],
+  });
+  await p.act('addToCategory', { categoryId: 'k2', codeId: 'c1' });
+  await p.act('removeFromCategory', { categoryId: 'k1', codeId: 'c1' });
+  // A name already taken (whatever its case): the code goes in that category, none is made.
+  assert.deepEqual(await p.act('newCategory', { codeId: 'c2', name: ' space ', description: 'x' }), { id: 'k2', existed: true });
+  assert.deepEqual(await p.act('newCategory', { codeId: 'c2', name: 'Time', description: ' when ' }), { id: 'k3', existed: false });
+  await assert.rejects(p.act('newCategory', { codeId: 'c2', name: ' ' }), /needs a name/);
+  assert.deepEqual(
+    p.pluginCalls.filter((c) =>
+      ['attachCategoryToCode', 'detachCategoryFromCode', 'createCategoryAndAttach'].includes(c.method),
+    ),
+    [
+      { method: 'attachCategoryToCode', args: ['k2', 'c1'] },
+      { method: 'detachCategoryFromCode', args: ['k1', 'c1'] },
+      { method: 'attachCategoryToCode', args: ['k2', 'c2'] },
+      { method: 'createCategoryAndAttach', args: ['Time', 'when', 'c2'] },
+    ],
+  );
+});
+
+test('editing a code: only what is given goes to yaqatw, a name trimmed, an empty one refused', async () => {
+  const p = page(() => null, { plugin: { getFileType: 'analyze', updateCode: null } });
+  await p.rpc('pluginConnected');
+  await p.act('editCode', { codeId: 'c1', name: ' Calm ', description: 'quiet' });
+  await p.act('editCode', { codeId: 'c1', color: '#FF0000' });
+  await assert.rejects(p.act('editCode', { codeId: 'c1', name: '  ' }), /needs a name/);
+  assert.deepEqual(
+    p.pluginCalls.filter((c) => c.method === 'updateCode'),
+    [
+      { method: 'updateCode', args: ['c1', { name: 'Calm', description: 'quiet' }] },
+      { method: 'updateCode', args: ['c1', { color: '#FF0000' }] },
+    ],
+  );
+  const old = page(() => null, { plugin: { getFileType: 'analyze' } });
+  await old.rpc('pluginConnected');
+  await assert.rejects(old.act('editCode', { codeId: 'c1', name: 'X' }), /needs a newer Yaqatw/);
+});
+
+// yaqatw's HostRpcServer as of its coding actions: every method Word's features need.
+const ALL_METHODS = [
+  'getCapabilities',
+  'getFileType',
+  'getCodeMenuItems',
+  'getHighlightDetails',
+  'getCategoryMenuItems',
+  'getCategoriesForCode',
+  'attachCategoryToCode',
+  'detachCategoryFromCode',
+  'createCategoryAndAttach',
+  'updateCode',
+  'getRelationshipMenu',
+  'getRelationshipsForCode',
+  'addCodeToInstance',
+  'removeCodeFromInstance',
+  'createRelationshipAndAttach',
+  'addInstanceWithCode',
+  'deleteHighlight',
+  'getCodeUsage',
+  'deprecateCode',
+  'mergeCode',
+  'removeCodeFromFile',
+  'deleteCode',
+  'showHighlightsForCode',
+  'addItemToInstance',
+  'addInstanceWithItem',
+  'createRelationshipWithItem',
+  'updateCategory',
+];
+
+/** A yaqatw that has every method, with the answers given (null for the rest). */
+function fullPlugin(answers) {
+  const plugin = Object.fromEntries(ALL_METHODS.map((m) => [m, null]));
+  return Object.assign(plugin, { getFileType: 'analyze', getCapabilities: { rpc: 1, methods: ALL_METHODS } }, answers);
+}
+
+test('what yaqatw can do: from its capabilities, kept in a document variable for the right-click menus', async () => {
+  const vars = new Map();
+  const word = (op, args) => {
+    if (op === 'getVariable') return vars.has(args.key) ? vars.get(args.key) : null;
+    if (op === 'setVariable') vars.set(args.key, args.value);
+    return null;
+  };
+  const p = page(word, { plugin: fullPlugin({}) });
+  await p.rpc('pluginConnected');
+  await new Promise((r) => setTimeout(r, 20));
+  const all = ['categories', 'editCode', 'editCategory', 'relationships', 'removeHighlight', 'manage', 'showPassages', 'relationshipCategories'];
+  assert.deepEqual(await p.act('features'), { features: all });
+  assert.equal(vars.get('yaqatw.features'), all.join(','));
+  // A yaqatw that lacks one method of a feature: not that feature.
+  const some = ALL_METHODS.filter((m) => m !== 'mergeCode' && m !== 'addInstanceWithCode');
+  const q = page(word, { plugin: fullPlugin({ getCapabilities: { rpc: 1, methods: some } }) });
+  await q.rpc('pluginConnected');
+  await new Promise((r) => setTimeout(r, 20));
+  const left = ['categories', 'editCode', 'editCategory', 'removeHighlight', 'showPassages', 'relationshipCategories'];
+  assert.deepEqual(await q.act('features'), { features: left });
+  assert.equal(vars.get('yaqatw.features'), left.join(','));
+  // Asked once, not at every action.
+  await q.act('features');
+  assert.equal(q.pluginCalls.filter((c) => c.method === 'getCapabilities').length, 1);
+});
+
+test("Highlight info: each code's categories and relationships, the project's categories", async () => {
+  const p = page(() => null, {
+    plugin: fullPlugin({
+      getHighlightDetails: { text: 'T', codes: [{ id: 'c1', name: 'Calm', color: '#4CAF50' }] },
+      getCategoriesForCode: [{ id: 'k1', name: 'Feelings', description: 'd' }],
+      getRelationshipsForCode: [{ relationshipId: 'r1', name: 'Trust', instanceId: 'i1', instanceName: 'Trust 1' }],
+      getCategoryMenuItems: [
+        { id: 'k1', name: 'Feelings' },
+        { id: 'k2', name: 'Space', parentId: 'k1' },
+      ],
+    }),
+  });
+  await p.rpc('pluginConnected');
+  const info = await p.act('highlightInfo', { hid: 'h1' });
+  assert.deepEqual(info.codes, [
+    {
+      id: 'c1',
+      name: 'Calm',
+      color: '#00FF00',
+      categories: [{ id: 'k1', name: 'Feelings', description: 'd' }],
+      relationships: [{ relationshipId: 'r1', name: 'Trust', instanceId: 'i1', instanceName: 'Trust 1' }],
+    },
+  ]);
+  assert.deepEqual(info.categories, [
+    { id: 'k1', name: 'Feelings' },
+    { id: 'k2', name: 'Space' },
+  ]);
+  assert.equal(info.features.length, 8);
+  // A category edited from its tag: only what is given, trimmed; an empty name refused.
+  await p.act('editCategory', { categoryId: 'k1', name: ' Moods ', description: ' how one feels ' });
+  await p.act('editCategory', { categoryId: 'k1', description: '' });
+  await assert.rejects(p.act('editCategory', { categoryId: 'k1', name: ' ' }), /needs a name/);
+  assert.deepEqual(
+    p.pluginCalls.filter((c) => c.method === 'updateCategory'),
+    [
+      { method: 'updateCategory', args: ['k1', { name: 'Moods', description: 'how one feels' }] },
+      { method: 'updateCategory', args: ['k1', { description: '' }] },
+    ],
+  );
+});
+
+test('a category added or taken out: the status line names the code and the category', async () => {
+  const p = page(() => null, {
+    plugin: fullPlugin({
+      getCodeMenuItems: [{ id: 'c1', name: 'Calm' }],
+      getCategoryMenuItems: [{ id: 'k1', name: 'Feelings' }],
+    }),
+  });
+  await p.rpc('pluginConnected');
+  assert.deepEqual(await p.act('addToCategory', { categoryId: 'k1', codeId: 'c1' }), { status: '“Calm” added to “Feelings”.' });
+  assert.deepEqual(await p.act('removeFromCategory', { categoryId: 'k1', codeId: 'c1' }), {
+    status: '“Calm” taken out of “Feelings”.',
+  });
+  // Names yaqatw does not list: plain words, the action done all the same.
+  assert.deepEqual(await p.act('addToCategory', { categoryId: 'k9', codeId: 'c9' }), { status: 'The code added to the category.' });
+});
+
+test('Add to relationship: each code with every relationship and its instances; ticks, new instance, new relationship', async () => {
+  const menu = [
+    { id: 'r1', name: 'Trust', instances: [{ id: 'i1', name: 'Trust 1', hasCode: true }] },
+    {
+      id: 'r2',
+      name: 'Cause',
+      description: 'x',
+      instances: [
+        { id: 'i2', name: 'Cause 1', hasCode: false },
+        { id: 'i3', name: 'Cause 2', hasCode: 1 },
+      ],
+    },
+  ];
+  const p = page(() => null, {
+    plugin: fullPlugin({
+      getHighlightDetails: { text: 'T', codes: [{ id: 'c1', name: 'Calm', color: '#4CAF50' }] },
+      getCodeMenuItems: [{ id: 'c1', name: 'Calm' }],
+      getRelationshipMenu: () => menu,
+      addCodeToInstance: { added: true },
+      addInstanceWithCode: { id: 'i4' },
+      createRelationshipAndAttach: { id: 'r3', instanceId: 'i5' },
+    }),
+  });
+  await p.rpc('pluginConnected');
+  // A code in no category: the code alone.
+  assert.deepEqual(await p.act('relationshipMenu', { hid: 'h1' }), {
+    items: [
+      {
+        kind: 'code',
+        id: 'c1',
+        name: 'Calm',
+        color: '#00FF00',
+        relationships: [
+          { id: 'r1', name: 'Trust', instances: [{ id: 'i1', name: 'Trust 1', holds: true }] },
+          {
+            id: 'r2',
+            name: 'Cause',
+            instances: [
+              { id: 'i2', name: 'Cause 1', holds: false },
+              { id: 'i3', name: 'Cause 2', holds: true },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  // A relationship with one instance is named alone; with several, with the instance.
+  assert.deepEqual(await p.act('addToRelationship', { relationshipId: 'r1', instanceId: 'i1', codeId: 'c1' }), {
+    status: '“Calm” added to “Trust”.',
+  });
+  assert.deepEqual(await p.act('removeFromRelationship', { relationshipId: 'r2', instanceId: 'i3', codeId: 'c1' }), {
+    status: '“Calm” taken out of “Cause › Cause 2”.',
+  });
+  assert.deepEqual(await p.act('newInstance', { relationshipId: 'r2', codeId: 'c1' }), {
+    status: 'A new instance of “Cause” holds “Calm”.',
+  });
+  assert.deepEqual(await p.act('newRelationship', { codeId: 'c1', name: ' Effect ', description: ' why ' }), { id: 'r3' });
+  await assert.rejects(p.act('newRelationship', { codeId: 'c1', name: ' ' }), /needs a name/);
+  assert.deepEqual(
+    p.pluginCalls.filter((c) =>
+      ['getRelationshipMenu', 'addCodeToInstance', 'removeCodeFromInstance', 'addInstanceWithCode', 'createRelationshipAndAttach'].includes(
+        c.method,
+      ) && !(c.method === 'getRelationshipMenu' && c.args.length === 0),
+    ),
+    [
+      { method: 'getRelationshipMenu', args: ['c1'] },
+      { method: 'addCodeToInstance', args: ['r1', 'i1', 'c1'] },
+      { method: 'removeCodeFromInstance', args: ['r2', 'i3', 'c1'] },
+      { method: 'addInstanceWithCode', args: ['r2', 'c1'] },
+      { method: 'createRelationshipAndAttach', args: ['Effect', 'why', 'c1'] },
+    ],
+  );
+});
+
+test("Add to relationship with categories: the codes' categories once each, a category put in, its parents in the window", async () => {
+  const p = page(() => null, {
+    plugin: fullPlugin({
+      getHighlightDetails: {
+        text: 'T',
+        codes: [
+          { id: 'c1', name: 'Calm', color: '#4CAF50' },
+          { id: 'c2', name: 'Place' },
+        ],
+      },
+      getCodeMenuItems: [{ id: 'c1', name: 'Calm' }],
+      getCategoriesForCode: (codeId) => (codeId === 'c1' ? [{ id: 'k1', name: 'Feelings' }] : [{ id: 'k1', name: 'Feelings' }, { id: 'k3', name: 'Space' }]),
+      getCategoryMenuItems: [
+        { id: 'k1', name: 'Feelings', parentId: 'k2' },
+        { id: 'k2', name: 'Emotions', parentId: 'k0' },
+        { id: 'k0', name: 'Inner life' },
+        { id: 'k3', name: 'Space' },
+      ],
+      getRelationshipMenu: (itemId) => [{ id: 'r1', name: 'Trust', instances: [{ id: 'i1', name: 'Trust 1', hasCode: itemId === 'k1' }] }],
+      addItemToInstance: { added: true },
+      addInstanceWithItem: { id: 'i2' },
+      createRelationshipWithItem: { id: 'r2', instanceId: 'i3' },
+    }),
+  });
+  await p.rpc('pluginConnected');
+  const menu = await p.act('relationshipMenu', { hid: 'h1' });
+  assert.deepEqual(
+    menu.items.map((it) => [it.kind, it.id, it.relationships[0].instances[0].holds]),
+    [
+      ['code', 'c1', false],
+      ['code', 'c2', false],
+      ['category', 'k1', true],
+      ['category', 'k3', false],
+    ],
+  );
+  // The window: each code, the categories it is in, their parents under them.
+  assert.deepEqual(
+    (await p.act('relateItems', { hid: 'h1' })).items.map((it) => `${'  '.repeat(it.depth)}${it.kind}:${it.name}`),
+    [
+      'code:Calm',
+      '  category:Feelings',
+      '    category:Emotions',
+      '      category:Inner life',
+      'code:Place',
+      '  category:Feelings',
+      '    category:Emotions',
+      '      category:Inner life',
+      '  category:Space',
+    ],
+  );
+  assert.deepEqual(await p.act('itemRelationships', { itemId: 'k1' }), {
+    relationships: [{ id: 'r1', name: 'Trust', instances: [{ id: 'i1', name: 'Trust 1', holds: true }] }],
+  });
+  const k1 = { itemId: 'k1', kind: 'category' };
+  assert.deepEqual(await p.act('addToRelationship', { relationshipId: 'r1', instanceId: 'i1', ...k1 }), {
+    status: 'The category “Feelings” added to “Trust”.',
+  });
+  assert.deepEqual(await p.act('removeFromRelationship', { relationshipId: 'r1', instanceId: 'i1', ...k1 }), {
+    status: 'The category “Feelings” taken out of “Trust”.',
+  });
+  assert.deepEqual(await p.act('newInstance', { relationshipId: 'r1', ...k1 }), {
+    status: 'A new instance of “Trust” holds the category “Feelings”.',
+  });
+  assert.deepEqual(await p.act('newRelationship', { name: 'Cause', description: '', ...k1 }), { id: 'r2' });
+  // A code given as an item is a code, as before.
+  await p.act('addToRelationship', { relationshipId: 'r1', instanceId: 'i1', itemId: 'c1', kind: 'code' });
+  assert.deepEqual(
+    p.pluginCalls.filter((c) =>
+      ['addItemToInstance', 'removeCodeFromInstance', 'addInstanceWithItem', 'createRelationshipWithItem', 'addCodeToInstance'].includes(c.method),
+    ),
+    [
+      { method: 'addItemToInstance', args: ['r1', 'i1', 'k1', 'CategoryXml'] },
+      { method: 'removeCodeFromInstance', args: ['r1', 'i1', 'k1'] },
+      { method: 'addInstanceWithItem', args: ['r1', 'k1', 'CategoryXml'] },
+      { method: 'createRelationshipWithItem', args: ['Cause', '', 'k1', 'CategoryXml'] },
+      { method: 'addCodeToInstance', args: ['r1', 'i1', 'c1'] },
+    ],
+  );
+  // A yaqatw that cannot put a category in a relationship: the codes alone, in the menu and the window.
+  const older = ALL_METHODS.filter((m) => !['addItemToInstance', 'addInstanceWithItem', 'createRelationshipWithItem'].includes(m));
+  const q = page(() => null, {
+    plugin: fullPlugin({
+      getCapabilities: { rpc: 1, methods: older },
+      getHighlightDetails: { text: 'T', codes: [{ id: 'c1', name: 'Calm' }] },
+      getCategoriesForCode: [{ id: 'k1', name: 'Feelings' }],
+      getRelationshipMenu: [],
+    }),
+  });
+  await q.rpc('pluginConnected');
+  assert.deepEqual((await q.act('relationshipMenu', { hid: 'h1' })).items.map((it) => it.id), ['c1']);
+  assert.deepEqual(await q.act('relateItems', { hid: 'h1' }), {
+    items: [{ kind: 'code', id: 'c1', name: 'Calm', color: '', depth: 0 }],
+    categories: false,
+  });
+});
+
+test('managing a code: its reach, then deprecate, merge, remove from this document, delete', async () => {
+  const p = page(() => null, {
+    plugin: fullPlugin({
+      getCodeUsage: { here: 4, elsewhere: '12', files: 3 },
+      mergeCode: (source, target) => ({ targetId: `${target}-end` }),
+      removeCodeFromFile: { removedHighlights: 1, updatedHighlights: 3, removedControls: 1, deletedCodes: 0 },
+    }),
+  });
+  await p.rpc('pluginConnected');
+  assert.deepEqual(await p.act('codeUsage', { codeId: 'c1' }), { here: 4, elsewhere: 12, files: 3 });
+  await p.act('deprecateCode', { codeId: 'c1', reason: ' unclear ' });
+  assert.deepEqual(await p.act('mergeCode', { codeId: 'c1', targetId: 'c2' }), { targetId: 'c2-end' });
+  await assert.rejects(p.act('mergeCode', { codeId: 'c1', targetId: 'c1' }), /another code/);
+  assert.deepEqual(await p.act('removeCodeFromFile', { codeId: 'c1' }), { removedHighlights: 1, updatedHighlights: 3 });
+  await p.act('deleteCode', { codeId: 'c1' });
+  assert.deepEqual(await p.act('removeHighlight', { hid: 'h1' }), { status: "Highlight removed: it is in Yaqatw's Trash." });
+  await p.act('showPassages', { codeId: 'c1' });
+  assert.deepEqual(
+    p.pluginCalls.filter((c) =>
+      ['getCodeUsage', 'deprecateCode', 'mergeCode', 'removeCodeFromFile', 'deleteCode', 'deleteHighlight', 'showHighlightsForCode'].includes(
+        c.method,
+      ),
+    ),
+    [
+      { method: 'getCodeUsage', args: ['c1'] },
+      { method: 'deprecateCode', args: ['c1', 'unclear'] },
+      { method: 'mergeCode', args: ['c1', 'c2'] },
+      { method: 'removeCodeFromFile', args: ['c1'] },
+      { method: 'deleteCode', args: ['c1'] },
+      { method: 'deleteHighlight', args: ['h1'] },
+      { method: 'showHighlightsForCode', args: ['c1'] },
+    ],
+  );
+  // An older yaqatw: said plainly.
+  const old = page(() => null, { plugin: { getFileType: 'analyze' } });
+  await old.rpc('pluginConnected');
+  await assert.rejects(old.act('removeHighlight', { hid: 'h1' }), /needs a newer Yaqatw/);
+  await assert.rejects(old.act('codeUsage', { codeId: 'c1' }), /needs a newer Yaqatw/);
+});
+
+test('Highlight info: a writing document says why; an older yaqatw asks for a newer one', async () => {
+  const w = page(() => null, { plugin: { getFileType: 'write', getHighlightDetails: null } });
+  await w.rpc('pluginConnected');
+  await new Promise((r) => setTimeout(r, 20));
+  await assert.rejects(w.act('highlightInfo', { hid: 'h1' }), /writing document/);
+  const old = page(() => null, { plugin: { getFileType: 'analyze' } });
+  await old.rpc('pluginConnected');
+  await assert.rejects(old.act('highlightInfo', { hid: 'h1' }), /needs a newer Yaqatw/);
 });
 
 test("yaqatw's own refusal comes back as the action's error", async () => {
@@ -581,7 +1047,7 @@ test('writing actions go to yaqatw in a writing document, and are refused elsewh
   await p.act('insertCite', { source: 'highlights', id: 'h1', option: 'block' });
   await p.act('refreshCitations');
   await p.act('unlinkCitations');
-  const sent = p.pluginCalls.filter((c) => c.method !== 'getFileType');
+  const sent = p.pluginCalls.filter((c) => c.method !== 'getFileType' && c.method !== 'getCapabilities');
   assert.deepEqual(sent.slice(1), [
     { method: 'insertCiteSource', args: ['highlights', 'h1', 'block'] },
     { method: 'refreshAllCitations', args: [] },

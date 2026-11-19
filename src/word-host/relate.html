@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Add to relationship</title>
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body class="relate">
+    <section>
+      <div class="cols">
+        <div class="col">
+          <span class="label">Put in a relationship</span>
+          <ul id="items" class="pick" role="listbox" aria-label="Codes and categories of the passage"></ul>
+        </div>
+        <div class="col">
+          <span class="label" id="rels-for">Relationships</span>
+          <ul id="rels" aria-labelledby="rels-for"></ul>
+          <fieldset class="new-rel">
+            <legend>New relationship</legend>
+            <input id="name" type="text" placeholder="Relationship name" aria-label="Relationship name" autocomplete="off" />
+            <textarea id="desc" rows="2" placeholder="Description (optional)" aria-label="Description"></textarea>
+            <div class="row">
+              <button type="button" id="create" class="primary">Create</button>
+              <span class="muted" id="create-for"></span>
+            </div>
+          </fieldset>
+        </div>
+      </div>
+    </section>
+    <p id="msg" role="status" hidden></p>
+    <footer>
+      <button id="full" class="link">Open Yaqatw</button>
+      <button id="close">Close</button>
+    </footer>
+    <script src="colors.js"></script>
+    <script src="relate.js"></script>
+  </body>
+</html>

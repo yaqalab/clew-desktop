@@ -385,6 +385,70 @@ async function run(win, ses, server, tools, folder, db, api) {
       }
       insertWin?.destroy();
 
+      // Highlight info (ribbon, right-click): its window loads, asks yaqatw for the passage and
+      // says why there is nothing (the fake document has no type); a bad id is refused first.
+      const badInfo = await programPost(`${base}/v1/word/action`, { session, action: 'openPicker', args: { mode: 'info', hid: '../x' } }, auth);
+      const info = await programPost(`${base}/v1/word/action`, { session, action: 'openPicker', args: { mode: 'info', hid: 'h-smoke' } }, auth);
+      let infoWin = null;
+      for (let i = 0; i < 40 && !infoWin; i++) {
+        infoWin = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('clew-word://bridge/info.html'));
+        if (!infoWin) await wait(250);
+      }
+      const infoErrors = [];
+      infoWin?.webContents.on('console-message', (event) => {
+        if (event.level === 'error') infoErrors.push(event.message);
+      });
+      let infoMsg = '';
+      for (let i = 0; i < 40 && infoWin && (!infoMsg || infoMsg === 'Loading…'); i++) {
+        await wait(250);
+        infoMsg = await infoWin.webContents.executeJavaScript("document.getElementById('msg').textContent");
+      }
+      const infoUrl = infoWin?.webContents.getURL() ?? '';
+      infoWin?.destroy();
+
+      // Add to relationship › More… (the window): it loads and says why there is nothing.
+      const relate = await programPost(`${base}/v1/word/action`, { session, action: 'openPicker', args: { mode: 'relate', hid: 'h-smoke' } }, auth);
+      let relateWin = null;
+      for (let i = 0; i < 40 && !relateWin; i++) {
+        relateWin = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('clew-word://bridge/relate.html?hid=h-smoke'));
+        if (!relateWin) await wait(250);
+      }
+      const relateErrors = [];
+      relateWin?.webContents.on('console-message', (event) => {
+        if (event.level === 'error') relateErrors.push(event.message);
+      });
+      let relateMsg = '';
+      for (let i = 0; i < 40 && relateWin && (!relateMsg || relateMsg === 'Loading…'); i++) {
+        await wait(250);
+        relateMsg = await relateWin.webContents.executeJavaScript("document.getElementById('msg').textContent");
+      }
+      relateWin?.destroy();
+
+      // New category and New relationship (right-click › Add to category / Add to relationship):
+      // the form window, titled for its kind, for a code.
+      const forms = {};
+      for (const kind of ['category', 'relationship']) {
+        const opened = await programPost(`${base}/v1/word/action`, { session, action: 'openPicker', args: { mode: kind, code: 'c-smoke' } }, auth);
+        let formWin = null;
+        for (let i = 0; i < 40 && !formWin; i++) {
+          formWin = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().includes(`form.html?kind=${kind}&code=c-smoke`));
+          if (!formWin) await wait(250);
+        }
+        const errors = [];
+        formWin?.webContents.on('console-message', (event) => {
+          if (event.level === 'error') errors.push(event.message);
+        });
+        let state = null;
+        for (let i = 0; i < 40 && formWin && !state?.heading; i++) {
+          await wait(250);
+          state = await formWin.webContents.executeJavaScript(
+            "({ heading: document.getElementById('heading').textContent, button: document.getElementById('create').textContent, focused: document.activeElement.id })",
+          );
+        }
+        formWin?.destroy();
+        forms[kind] = { ok: opened.body?.ok === true, found: Boolean(formWin), state, errors };
+      }
+
       wordWin.destroy();
       for (let i = 0; i < 20 && !closed; i++) await wait(250);
       closed = true;
@@ -401,7 +465,25 @@ async function run(win, ses, server, tools, folder, db, api) {
       assert(insertState.source === 'highlights', `insert window searches ${insertState.source}`);
       assert(/type first|writing|Nothing/.test(insertState.msg), `insert window says "${insertState.msg}"`);
       assert(insertErrors.length === 0, `insert window errors: ${insertErrors.join(' | ')}`);
-      return `ops from yaqatw: ${[...new Set(ops)].join(', ')}; codes action ok (${codes.body.value.codes.length}); picker "${list}"; insert window "${insertState.msg}"${status ? `; status "${status}"` : ''}`;
+      assert(badInfo.body?.ok === false, `openPicker info with a bad id: ${JSON.stringify(badInfo.body)}`);
+      assert(info.body?.ok === true, `openPicker info: ${JSON.stringify(info.body)}`);
+      assert(infoWin, 'no Highlight info window');
+      assert(infoUrl.endsWith('info.html?hid=h-smoke'), `Highlight info window at ${infoUrl}`);
+      assert(/type first|writing|no record/.test(infoMsg), `Highlight info window says "${infoMsg}"`);
+      assert(infoErrors.length === 0, `Highlight info window errors: ${infoErrors.join(' | ')}`);
+      assert(relate.body?.ok === true && relateWin, `openPicker relate: ${JSON.stringify(relate.body)}`);
+      assert(/type first|writing|no record/.test(relateMsg), `Add to relationship window says "${relateMsg}"`);
+      assert(relateErrors.length === 0, `Add to relationship window errors: ${relateErrors.join(' | ')}`);
+      for (const [kind, heading] of [
+        ['category', 'New category'],
+        ['relationship', 'New relationship'],
+      ]) {
+        const f = forms[kind];
+        assert(f.ok && f.found, `openPicker ${kind}: ${JSON.stringify(f)}`);
+        assert(f.state?.heading === heading && f.state.focused === 'name', `${heading} window: ${JSON.stringify(f.state)}`);
+        assert(f.errors.length === 0, `${heading} window errors: ${f.errors.join(' | ')}`);
+      }
+      return `ops from yaqatw: ${[...new Set(ops)].join(', ')}; codes action ok (${codes.body.value.codes.length}); picker "${list}"; insert window "${insertState.msg}"; info window "${infoMsg}"${status ? `; status "${status}"` : ''}`;
     });
 
     await check('external requests reach the network with Origin/Referer as a browser sends them', async () => {

@@ -212,3 +212,406 @@ footer {
   padding-left: 36px;
   color: #3b6fd8;
 }
+
+/* Highlight info (info.html): a form of label | field rows; the codes as chips of their colour. */
+.info [hidden] {
+  display: none !important;
+}
+
+.info section {
+  overflow: auto;
+  padding-bottom: 4px;
+}
+
+.info .fields {
+  display: grid;
+  grid-template-columns: 8.5em minmax(0, 1fr);
+  gap: 12px 12px;
+  align-items: start;
+}
+
+.info .label {
+  padding-top: 7px;
+  color: #444;
+}
+
+.info .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.info blockquote {
+  margin: 0;
+  padding: 7px 9px;
+  max-height: 9em;
+  overflow: auto;
+  border-left: 3px solid #ccc;
+  background: #f7f7f7;
+  border-radius: 0 6px 6px 0;
+  white-space: pre-wrap;
+}
+
+.info textarea {
+  resize: vertical;
+  min-height: 3em;
+}
+
+.info select {
+  font: inherit;
+  padding: 6px;
+  border: 1px solid #bbb;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.info .field .row select {
+  flex: 1;
+}
+
+.info #codes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.info #codes:empty {
+  display: none;
+}
+
+.info .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #bbb;
+  border-left: 6px solid var(--code);
+  background: #fafafa;
+}
+
+.info .chip button {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: #666;
+}
+
+.info .chip button:hover {
+  color: #c62828;
+}
+
+.info footer .row {
+  gap: 8px;
+}
+
+/* Busy: everything waits but Close. */
+body.busy button:not(#close),
+body.busy select,
+body.busy textarea {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* A code's chip: its name opens its editor (so does a right-click); the × button detaches it. */
+.info .chip button.name {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  padding: 0;
+}
+
+.info .chip button.name:hover {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.info .chip.editing {
+  outline: 2px solid #3b6fd8;
+  outline-offset: 1px;
+}
+
+.info .edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.info .edit legend,
+.info .manage legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: #666;
+}
+
+/* One item per code: chip and its actions, its categories as tags, its relationships, Manage. */
+.info #codes {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.info .code {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info .code .head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.info .code .acts {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.info .tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-left: 10px;
+}
+
+.info .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 8px;
+  border-radius: 10px;
+  border: 1px solid #cfd8ea;
+  background: #eef2fa;
+  font-size: 12px;
+}
+
+.info .tag button {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: #666;
+}
+
+.info .tag button:hover {
+  color: #c62828;
+}
+
+/* A tag's name edits the category. */
+.info .tag button.name {
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+.info .tag button.name:hover {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.info .tag.editing {
+  outline: 2px solid #3b6fd8;
+  outline-offset: 1px;
+}
+
+.info select.add-cat {
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
+.info .rels {
+  margin: 0;
+  padding-left: 10px;
+  font-size: 12px;
+  color: #666;
+}
+
+.info .manage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding: 8px 10px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.info .manage .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.info .manage .explain {
+  margin: 0;
+}
+
+.info .pick {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 10em;
+  overflow: auto;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.info .pick li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.info .pick li[aria-selected='true'] {
+  background: #e5edfb;
+}
+
+/* Add to relationship (relate.html): the passage's codes and categories | their relationships. */
+.relate [hidden] {
+  display: none !important;
+}
+
+.relate section {
+  overflow: auto;
+}
+
+.relate .cols {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.relate .col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.relate .label {
+  color: #444;
+}
+
+.relate .pick {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.relate .pick li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.relate .pick li[aria-selected='true'] {
+  background: #e5edfb;
+}
+
+.relate .kind {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #667;
+  border: 1px solid #cfd8ea;
+  background: #eef2fa;
+  border-radius: 8px;
+  padding: 0 5px;
+}
+
+.relate #rels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.relate .rel {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.relate .rel button {
+  font-weight: normal;
+  font-size: 12px;
+}
+
+.relate .inst {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+}
+
+.relate .new-rel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 8px 10px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.relate .new-rel legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: #666;
+}
+
+.relate .new-rel .row {
+  align-items: center;
+}
+
+body.busy input[type='checkbox'] {
+  pointer-events: none;
+}
+
+/* What cannot be undone in Word: red. */
+button.danger {
+  color: #c62828;
+  border-color: #e0b4b4;
+}
+
+button.primary.danger {
+  background: #c62828;
+  border-color: #c62828;
+  color: #fff;
+}
+
+button.link.danger {
+  border: none;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

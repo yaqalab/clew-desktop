@@ -740,6 +740,12 @@ const WORD_HOST_FILES = {
   'picker.css': 'text/css',
   'insert.html': 'text/html',
   'insert.js': 'text/javascript',
+  'info.html': 'text/html',
+  'info.js': 'text/javascript',
+  'form.html': 'text/html',
+  'form.js': 'text/javascript',
+  'relate.html': 'text/html',
+  'relate.js': 'text/javascript',
 };
 const WORD_HOST_URL = `${WORD_SCHEME}://bridge/index.html`;
 /** session id → its window; webContents id → session id. */
@@ -753,7 +759,8 @@ const wordActions = new Map();
 let nextWordAction = 1;
 const WORD_ACTION_MS = 60000;
 // Refreshing or unlinking every citation of a long document takes longer.
-const WORD_LONG_ACTIONS = new Set(['refreshCitations', 'unlinkCitations']);
+// So does a translation (an AI provider's answer).
+const WORD_LONG_ACTIONS = new Set(['refreshCitations', 'unlinkCitations', 'translateHighlight']);
 const WORD_LONG_ACTION_MS = 300000;
 
 const wordBridge = createWordBridge({
@@ -798,8 +805,28 @@ function wordAction(s, action, args) {
     return null;
   }
   if (action === 'openPicker') {
-    openPicker(s, ['new', 'insert'].includes(args.mode) ? args.mode : 'find', args.source);
+    const forCode = FORM_MODES.has(args.mode);
+    const forPassage = PASSAGE_MODES.has(args.mode);
+    if (forPassage && !ENTRY_ID.test(String(args.hid ?? ''))) throw new Error('No coded passage at the cursor.');
+    if (forCode && !ENTRY_ID.test(String(args.code ?? ''))) throw new Error(`No code for the new ${args.mode}.`);
+    const mode = ['new', 'insert', ...PASSAGE_MODES, ...FORM_MODES].includes(args.mode) ? args.mode : 'find';
+    // A new relationship may hold a category (args.item "category") instead of the code.
+    const source = forPassage ? String(args.hid) : forCode ? String(args.code) : args.source;
+    openPicker(s, mode, source, { category: forCode && args.item === 'category' });
     return null;
+  }
+  // Highlight info › a code's relationships: Add to relationship's window takes its place.
+  if (action === 'openRelate') {
+    if (!ENTRY_ID.test(String(args.hid ?? ''))) throw new Error('No coded passage.');
+    openPicker(s, 'relate', String(args.hid));
+    return null;
+  }
+  // Show passages (Highlight info): yaqatw opens the code's passages, then its window comes up.
+  if (action === 'showPassages') {
+    return hostAction(s.id, action, args).then((value) => {
+      openWordWindow(s, true);
+      return value;
+    });
   }
   return hostAction(s.id, action, args);
 }
@@ -925,20 +952,36 @@ function openWordWindow(s, show = true) {
   if (show) win.focus();
 }
 
-const PICKER_TITLES = { new: 'New code', find: 'Apply a code', insert: 'Insert' };
+const PICKER_TITLES = {
+  new: 'New code',
+  find: 'Apply a code',
+  insert: 'Insert',
+  info: 'Highlight info',
+  category: 'New category',
+  relationship: 'New relationship',
+  relate: 'Add to relationship',
+};
+/** The small forms (form.html) that create something for a code: `source` is the code's id. */
+const FORM_MODES = new Set(['category', 'relationship']);
+/** The windows about a coded passage: `source` is its highlight id. */
+const PASSAGE_MODES = new Set(['info', 'relate']);
+/** A yaqatw id: a highlight's as Word's tags hold it (or Word's own number for a control), a code's. */
+const ENTRY_ID = /^[\w.:-]{1,120}$/;
 const INSERT_SOURCES = new Set(['all', 'highlights', 'artifacts', 'notes', 'tables', 'figures']);
 
 /**
  * The small window of a session, in front, one per document: the code picker (Find code… / New
- * code…) or the insert window (a quote, an artifact… found and inserted, `source` what it
- * searches first).
+ * code…), the insert window (a quote, an artifact… found and inserted, `source` what it
+ * searches first), a coded passage's Highlight info or Add to relationship (`source` its
+ * highlight id) or a new category or relationship for a code (`source` the code's id, form.html;
+ * `category`: the relationship is for a category of that id instead).
  */
-function openPicker(s, mode, source) {
+function openPicker(s, mode, source, { category = false } = {}) {
   const known = pickerWindows.get(s.id);
   if (known && !known.isDestroyed()) known.destroy();
   const win = new BrowserWindow({
-    width: mode === 'insert' ? 560 : 440,
-    height: 520,
+    width: mode === 'relate' ? 680 : mode === 'insert' || mode === 'info' ? 560 : 440,
+    height: mode === 'info' ? 640 : FORM_MODES.has(mode) ? 360 : 520,
     minWidth: 320,
     minHeight: 300,
     title: `${PICKER_TITLES[mode]} – ${s.title}`,
@@ -964,9 +1007,13 @@ function openPicker(s, mode, source) {
     pickerSessionByContents.delete(contentsId);
   });
   win.loadURL(
-    mode === 'insert'
-      ? `${WORD_SCHEME}://bridge/insert.html?source=${INSERT_SOURCES.has(source) ? source : 'all'}`
-      : `${WORD_SCHEME}://bridge/picker.html?mode=${mode}`,
+    PASSAGE_MODES.has(mode)
+      ? `${WORD_SCHEME}://bridge/${mode === 'info' ? 'info' : 'relate'}.html?hid=${encodeURIComponent(source)}`
+      : mode === 'insert'
+        ? `${WORD_SCHEME}://bridge/insert.html?source=${INSERT_SOURCES.has(source) ? source : 'all'}`
+        : FORM_MODES.has(mode)
+          ? `${WORD_SCHEME}://bridge/form.html?kind=${mode}&code=${encodeURIComponent(source)}${category ? '&item=category' : ''}`
+          : `${WORD_SCHEME}://bridge/picker.html?mode=${mode}`,
   );
   win.focus();
 }
@@ -987,9 +1034,9 @@ function wordSessionOf(event) {
   return isWordHostPage(event) ? wordSessionByContents.get(event.sender.id) : null;
 }
 
-/** The session of a code picker or insert window, or null for anyone else. */
+/** The session of a code picker, insert, Highlight info or form window, or null for anyone else. */
 function pickerSessionOf(event) {
-  if (!fromWordScheme(event, 'picker.html') && !fromWordScheme(event, 'insert.html')) return null;
+  if (!['picker.html', 'insert.html', 'info.html', 'form.html', 'relate.html'].some((page) => fromWordScheme(event, page))) return null;
   return pickerSessionByContents.get(event.sender.id) ?? null;
 }
 
@@ -1007,8 +1054,47 @@ ipcMain.handle('word:call', (event, op, args) => {
   return wordBridge.call(id, op, args && typeof args === 'object' && !Array.isArray(args) ? args : {});
 });
 
-/** The small windows' few actions: the codes, apply one, a new one; find and insert; the full window. */
-const PICKER_ACTIONS = new Set(['codes', 'applyCode', 'newCode', 'searchCites', 'insertCite', 'showWindow']);
+/**
+ * The small windows' few actions: the codes, apply one, a new one; find and insert; a coded
+ * passage's details, its codes (editing one, its categories, managing it), its translation,
+ * removing it; a new category or relationship; its codes and categories in relationships
+ * (relate.html); the full window.
+ */
+const PICKER_ACTIONS = new Set([
+  'codes',
+  'features',
+  'applyCode',
+  'newCode',
+  'searchCites',
+  'insertCite',
+  'highlightInfo',
+  'saveHighlightInfo',
+  'removeHighlight',
+  'detachCode',
+  'attachCode',
+  'editCode',
+  'addToCategory',
+  'removeFromCategory',
+  'editCategory',
+  'openRelate',
+  'newCategory',
+  'newRelationship',
+  'categories',
+  'relateItems',
+  'itemRelationships',
+  'addToRelationship',
+  'removeFromRelationship',
+  'newInstance',
+  'codeUsage',
+  'deprecateCode',
+  'mergeCode',
+  'removeCodeFromFile',
+  'deleteCode',
+  'showPassages',
+  'translateProviders',
+  'translateHighlight',
+  'showWindow',
+]);
 
 ipcMain.handle('word:picker-action', async (event, action, args) => {
   const id = pickerSessionOf(event);
