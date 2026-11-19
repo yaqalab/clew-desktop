@@ -4,6 +4,7 @@ Windows build from `serve`'s options, which the audio server's tray passes (docs
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from dataclasses import dataclass, field
 
@@ -23,7 +24,15 @@ def split_list(raw: str) -> list[str]:
 
 
 def default_models_dir() -> str:
-    base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    """The audio server's default too (platform.h, default_stt_models_dir), though it always
+    passes --models-dir."""
+    home = os.path.expanduser("~")
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+    elif sys.platform == "darwin":
+        base = os.path.join(home, "Library", "Application Support")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
     return os.path.join(base, "clew-stt", "models")
 
 
