@@ -4,7 +4,7 @@
     {
       "name": "clew",
       "host": "clew.alefa.net",
-      "repo": "https://github.com/yaqalab/tadidy.git",
+      "repo": "https://github.com/yaqalab/clew.git",
       "ref": "main",
       "envFile": ".env",
       "installCommand": "npm ci",

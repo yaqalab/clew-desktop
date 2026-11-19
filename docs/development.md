@@ -13,7 +13,7 @@ output and packages the installer. Nothing has to be checked out by hand.
 
 | App | Repo | Ref | Build | Output |
 |---|---|---|---|---|
-| Clew | `yaqalab/tadidy` | `main` | `npm run build:hub` | `apps/hub/dist` |
+| Clew | `yaqalab/clew` | `main` | `npm run build:hub` | `apps/hub/dist` |
 | yaqatw | `yaqalab/yaqatw` | `main` | `npm run build` (webpack) | `addin` |
 
 All of it is in [sites.config.json](../sites.config.json). A third app is one more entry there.
