@@ -1,14 +1,12 @@
 # The dictation server for macOS and Linux, on GitHub's machines (Windows is built by hand with
 # tools/stt-server/build_exe.ps1). Run from the Actions tab or `gh workflow run dictation.yml`.
 #
-# Each system: build it from the Clew source (tools/stt-server/build_dist.sh), run its tests,
+# Each system: build it from this repository (tools/stt-server/build_dist.sh), run its tests,
 # pack it (`npm run package:dictation`), install that package the way the app does and check the
 # installed server answers (`npm run smoke:dictation -- --release`). Then one job merges the
 # packages with the live dictation.json of the clew-tools release of the same version, into the
 # artifact `dictation-release`. Nothing is published: those files are attached to the
 # yaqalab/clew-tools release by hand (`gh release upload v<version> … --clobber`).
-#
-# Secret: GIT_TOKEN (read-only access to the private Clew repository, for `npm run sources`).
 name: Dictation for macOS and Linux
 
 on:
@@ -31,8 +29,6 @@ jobs:
             runner: ubuntu-24.04
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    env:
-      GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,16 +40,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Clew's source
-        run: |
-          test -n "$GIT_TOKEN" || { echo "::error::secret GIT_TOKEN is missing"; exit 1; }
-          npm run sources -- clew
-
       - name: Build
-        run: sh .sources/clew/tools/stt-server/build_dist.sh
+        run: sh tools/stt-server/build_dist.sh
 
       - name: Tests
-        working-directory: .sources/clew/tools/stt-server
+        working-directory: tools/stt-server
         run: |
           python -m venv "$RUNNER_TEMP/stt-test"
           "$RUNNER_TEMP/stt-test/bin/python" -m pip install --quiet --disable-pip-version-check -e ".[local,test]"
@@ -82,7 +73,7 @@ jobs:
 
       - name: The server's signature (macOS)
         if: runner.os == 'macOS'
-        run: codesign -dv .sources/clew/tools/stt-server/dist/clew-stt-server/clew-stt-server
+        run: codesign -dv tools/stt-server/dist/clew-stt-server/clew-stt-server
 
       - uses: actions/upload-artifact@v4
         with:

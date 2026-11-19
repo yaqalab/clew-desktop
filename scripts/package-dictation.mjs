@@ -11,16 +11,15 @@
 // package to dictation.json. Then attach every file to the release `v<version>` of
 // yaqalab/clew-tools (this script publishes nothing).
 //
-// The version is tools/VERSION of the Clew source; the default folder is that source's
-// tools/stt-server/dist/clew-stt-server. Its THIRD-PARTY-NOTICES.txt travels inside the package.
+// The version is tools/VERSION; the default folder is tools/stt-server/dist/clew-stt-server
+// (`TOOLS_PATH=<dir>`: another tools folder). Its THIRD-PARTY-NOTICES.txt travels inside the package.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { ROOT, fail, loadSites } from './lib.mjs';
+import { ROOT, fail, toolsDir } from './lib.mjs';
 
-const [clew] = loadSites(['clew']);
-const tools = process.env.TOOLS_PATH || join(clew.dir, 'tools');
+const tools = toolsDir();
 const dist = process.argv[2] || join(tools, 'stt-server', 'dist', 'clew-stt-server');
 const program = process.platform === 'win32' ? 'clew-stt-server.exe' : 'clew-stt-server';
 if (basename(dist) !== 'clew-stt-server' || !existsSync(join(dist, program))) {
