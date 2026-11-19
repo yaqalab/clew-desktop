@@ -1,7 +1,7 @@
 {
   "name": "clew-desktop",
   "productName": "Clew",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Clew: a thread through your research. Clew and yaqatw as one desktop app, served under their real origins.",
   "license": "MIT",
