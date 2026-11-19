@@ -14,13 +14,12 @@ when you turn a folder of them on.
 You need [R](https://cran.r-project.org) (4.0 or later). Nothing else: the commands use base R and
 `MASS`, which comes with R.
 
-**On Windows**, tick **Analysis** in the Clew audio server's installer: the engine is packed with
-Python inside it (`build_exe.ps1`, about 18 MB), and the settings window's **Analysis** tab starts
-it, shows which R it found, and keeps its key (encrypted for your Windows account). Elsewhere:
+**Clew Desktop** ships the engine packed with Python (`build_exe.ps1` on Windows,
+`npm run build:tools` everywhere, about 18 MB): the audio server starts it as a child process, and
+Settings › Analysis shows which program it found and keeps its key. By hand, from this folder:
 
 ```
-clew-analysis-server            # installed with pipx as part of clew-tools
-python -m clew_analysis         # or from this folder
+python -m clew_analysis
 ```
 
 The first start makes a key and prints it. In Clew, open **Analysis**, then **Start › On this
@@ -41,7 +40,7 @@ readable by you only.
 | `--timeout 120` | Seconds a run may take before it is stopped |
 | `--allow-origin URL` | Another address Clew is served from (`https://clew.alefa.net` is allowed) |
 | `--check` | Lists what it found and the commands, then stops |
-| `--key-stdin` | Reads the key from the first line of standard input (how the Windows tray starts it) |
+| `--key-stdin` | Reads the key from the first line of standard input (how the audio server starts it) |
 
 ## The programs
 

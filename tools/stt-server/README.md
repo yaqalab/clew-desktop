@@ -1,17 +1,17 @@
 # clew-stt-server — dictation on this computer
 
-> **TL;DR** The stt.alefa.net speech server (`docs/27`), run on the researcher's Windows PC
-> with faster-whisper on the CPU instead of a Hailo-8 on the Pi (`docs/28`). Same protocol, so
-> Clew talks to it unchanged. It listens on 127.0.0.1 only: the audio never leaves the computer.
-> The audio server's tray starts and stops it (its **Dictation** tab); you rarely run it by hand.
-> Adapted from the author's stt.alefa.net server (`docs/provenance.md`), which runs on a
-> Raspberry Pi with a Hailo-8 and keeps its own copy.
+> **TL;DR** The stt.alefa.net speech server, run on the researcher's own computer with
+> faster-whisper on the CPU instead of a Hailo-8 on a Raspberry Pi. Same protocol, so Clew talks
+> to it unchanged. It listens on 127.0.0.1 only: the audio never leaves the computer. The audio
+> server starts and stops it as a child process (Clew Desktop: Settings › Dictation); you rarely
+> run it by hand. Adapted from the author's own stt.alefa.net server, which runs on a Raspberry
+> Pi with a Hailo-8 and keeps its own copy of this code.
 
 ## What it adds to the Pi's server
 
 - **Engine `whisper`:** faster-whisper, int8, Whisper's own 30 s window (a sentence is never cut).
 - **Languages:** `?language=` on `/v1/listen` and `language` on `/v1/audio/transcriptions`;
-  `/api/me` lists what the model knows (or only the one the tray fixed with `--language`).
+  `/api/me` lists what the model knows (or only the one fixed with `--language`).
 - **Spelling hints:** `?prompt=` (and `prompt` for files), given to Whisper as its
   `initial_prompt`, ended like a sentence so Whisper keeps its punctuation. Capped at 400
   characters. The Pi's server ignores it.
@@ -20,17 +20,18 @@
   and decodes with PyAV (FFmpeg's libraries, already a faster-whisper dependency), so no ffmpeg
   program is needed.
 - **`serve --key-stdin`:** one key, `stt.<name>.<secret>`, read from the first line of stdin and
-  held in memory. The tray makes it, seals it with DPAPI and hands it over at each start.
+  held in memory. The audio server makes it, keeps it sealed (DPAPI on Windows) and hands it
+  over at each start.
 - **`download <model>` / `models`:** models live in `<models-dir>/<name>/`; the default folder
   is `%LOCALAPPDATA%\clew-stt\models` (macOS: `~/Library/Application Support/clew-stt/models`,
   Linux: `$XDG_DATA_HOME` or `~/.local/share`, then `clew-stt/models`). A download writes `<name>.part` and renames it when
   complete, resumes file by file, and prints `total <bytes>`, then `progress N` once per percent,
   then `done <folder>` or `error <reason>`. `ALEFA_STT_HUB` points it at another address that
-  answers like Hugging Face (the tray's tests).
+  answers like Hugging Face (the audio server's tests).
 - **`--device auto|cpu|cuda`:** `auto` uses an NVIDIA GPU when CUDA sees one (int8 with
   float16), else the processor (int8). A GPU whose libraries (cuBLAS, cuDNN) do not load falls
   back to the processor with a log line. `/api/me` says which (`device`). `system` prints
-  `cuda N`, which the tray reads to grey out models that need a GPU.
+  `cuda N`, which the settings read to grey out models that need a GPU.
 
 | Model | Download | Use | Source |
 |---|---|---|---|
@@ -40,19 +41,19 @@
 | `large-v3-turbo` | 1.62 GB | files; about 8–10 s a sentence on a laptop processor | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` |
 | `distil-large-v3` | 1.52 GB | files, English only | `Systran/faster-distil-whisper-large-v3` |
 | `large-v3` | 3.09 GB | an NVIDIA GPU | `Systran/faster-whisper-large-v3` |
-| `small.en` | 486 MB | English only; no better than `small` here (`28` §2); not in the tray's list | `Systran/faster-whisper-small.en` |
+| `small.en` | 486 MB | English only; no better than `small` here; not in the settings' list | `Systran/faster-whisper-small.en` |
 
-## Words with their times (clew docs/30 §8)
+## Words with their times
 
 `POST /v1/words` (JSON, the dictation key as `Authorization: Bearer`): the words of one stretch
 of a recording, each with its time in the recording, for a training cut placed between two words
-(clew-tools 1.4). Body: `source` `"folder"` (with `path`, in the audio server's folder, checked
+(tools 1.4). Body: `source` `"folder"` (with `path`, in the audio server's folder, checked
 like `/v1/transcribe`'s) or `"url"` (the audio server's link), `start` and `end` in seconds (at
 most 600 apart), `language`. Answer: `{ language, start, words: [{ word, start, end }] }`. Whisper
 runs with word timestamps and **no prompt**: given the typed text, it repeats it instead of
 listening. An engine without word times answers 501.
 
-## Live transcription (clew docs/29)
+## Live transcription
 
 `/v1/transcribe` (WebSocket): a recording's turns with their voices, worked through as fast as
 the machine allows. `source=upload` (the client sends the file, held in memory) or
@@ -84,9 +85,9 @@ sh tools/stt-server/build_dist.sh                                          # mac
 ```
 
 Result: `tools/stt-server/dist/clew-stt-server/` (`--onedir`; about 200 MB on Windows, 420 MB
-on Linux), with `THIRD-PARTY-NOTICES.txt` for that system (`third_party_notices.py`). The
-native audio server's Windows installer ships it as an optional component; Clew Desktop
-downloads it on demand from the clew-tools release. No model is inside. A Linux build
+on Linux), with `THIRD-PARTY-NOTICES.txt` for that system (`third_party_notices.py`).
+`npm run package:dictation` packs it for the release Clew Desktop downloads it from on demand
+(`docs/development.md`). No model is inside. A Linux build
 runs on systems with a glibc at least as new as the build machine's.
 
 **Dependencies** (`[local]`): `faster-whisper` (the engine; brings CTranslate2, tokenizers,
@@ -101,5 +102,7 @@ imports.
 ```
 
 `tests/test_local.py` covers the local additions with the fake engine; the Pi's tests run
-unchanged. Real models were checked by hand (`28` §8). Spelling hints are ended like a
+unchanged. Real models were checked by hand; `npm run smoke:dictation` checks a built server
+with the tiny model, and `.github/workflows/tools-python.yml` runs these tests on every push that
+changes them. Spelling hints are ended like a
 sentence before Whisper sees them, because a bare list made it drop its full stops.

@@ -12,9 +12,13 @@ before.
 **The native audio server is built and tested on Linux and macOS on every change** (GitHub
 Actions in this repository). Building it on Linux for the first time found two faults, both fixed:
 stopping the server hung there, and with no ffmpeg chosen nothing was converted (on macOS and Linux
-an ffmpeg beside the program or on PATH is now used, as the Python server does). Windows is
-unchanged. The Windows program is still the one to install; on macOS and Linux the Python server
-remains the one with a window.
+an ffmpeg beside the program or on PATH is now used, as the Python server did). Windows is
+unchanged.
+
+**The tools live in Clew Desktop's repository** (`tools/`), which builds and ships them on
+Windows, macOS and Linux. The Python audio server, the `clew-tools` pipx package and the
+standalone Windows installer are retired: Clew Desktop replaces them. The dictation server builds
+on macOS and Linux too.
 
 ## 1.4.0 — 2026-11-16
 

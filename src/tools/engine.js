@@ -1,8 +1,8 @@
 'use strict';
 /**
  * The audio server (Clew's tools: audio files, dictation, analysis) as a hidden child process,
- * driven over its `--control` pipe: one JSON object per line each way (tools/native's
- * core/control.h in the Clew repository).
+ * driven over its `--control` pipe: one JSON object per line each way
+ * (tools/native/src/core/control.h).
  *
  * - `call(cmd, args)` sends one request and resolves with its result (rejects with its error).
  * - Events: 'hello', 'status' (the latest is in `.status`), 'log', 'state' (this side's own:
