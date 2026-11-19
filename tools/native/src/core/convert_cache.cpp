@@ -145,7 +145,9 @@ bool ConvertCache::needs(const fs::path& path) {
 fs::path ConvertCache::target_of(const fs::path& path, const fs::path& dir) const {
     std::error_code ec;
     auto size = fs::file_size(path, ec);
-    auto mtime = fs::last_write_time(path, ec).time_since_epoch().count();
+    // long long: macOS's libc++ counts file times in __int128, which std::to_string does not take.
+    // Elsewhere the count is a 64-bit integer already, so the key, and the cached copies, stay the same.
+    auto mtime = static_cast<long long>(fs::last_write_time(path, ec).time_since_epoch().count());
     std::string key = path_to_utf8(path) + "\n" + std::to_string(mtime) + "\n" + std::to_string(size) + "\n" +
                       std::to_string(kConvertKbps) + "\nsystem-codec-1";
     return dir / (hex(sha256(key), 16) + ".mp3");
