@@ -1,0 +1,54 @@
+name: Something does not work
+description: Report a problem with Clew Desktop (the app, Yaqatw for Word, the tools, updates).
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying the beta. Please **do not paste research data, names or keys** here:
+        this page is public. A security problem goes through
+        [Report a vulnerability](https://github.com/yaqalab/clew-desktop/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Opened a transcript in Clew
+        2. Pressed Ctrl+Q while typing
+        3. The last sentence was gone after restarting
+    validations:
+      required: true
+  - type: textarea
+    id: about
+    attributes:
+      label: About Clew
+      description: In the app, **Help › About Clew**, then Ctrl+C in that window and paste here.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Clew (the main window)
+        - yaqatw inside Clew
+        - Yaqatw for Word
+        - Audio server, dictation or analysis
+        - Installing, updating or uninstalling
+        - Settings
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Windows 10 or 11, and the Word version if it is about Yaqatw for Word.
+      placeholder: Windows 11 24H2, Word for Microsoft 365
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: A screenshot (with nothing private in it), or what you tried already.

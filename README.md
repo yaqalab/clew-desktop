@@ -108,6 +108,8 @@ Worth knowing before you rely on it:
 - Camera, microphone, screen sharing and notifications are allowed to Clew and yaqatw only.
 - The app makes its own certificate for `clew.alefa.net` and `yaqatw.alefa.net` and trusts it
   only inside its own window. Nothing is added to your computer's certificate store.
+- Found a security problem? Report it privately, as [SECURITY.md](SECURITY.md) explains, not in
+  a public issue.
 
 ## Uninstall
 
@@ -127,3 +129,7 @@ Clew (ISC), Clew's local tools (MIT, with the third-party notices in their folde
 
 How the app works and how to build it:
 [docs/development.md](docs/development.md).
+
+The installer is built from this repository together with the sources of Clew and yaqatw, which
+are private: without access to them, `npm run dist` stops at `npm run sources`. Problems and
+suggestions are welcome in [Issues](https://github.com/yaqalab/clew-desktop/issues).
