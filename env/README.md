@@ -7,7 +7,7 @@ kept out of Git: everything in this folder except this README is ignored.
 
 | File | App | Variables |
 |---|---|---|
-| `clew.env` | Clew (`yaqalab/tadidy`) | `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_API_KEY`, `VITE_GOOGLE_APP_ID`, `VITE_DROPBOX_APP_KEY`, `VITE_DROPBOX_APP_KEY_FULL`, `VITE_BUNDLED_SIGNALING_URL`, `VITE_BUNDLED_SIGNALING_TOKEN`, `VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`, `VITE_FEEDBACK_URL`, … |
+| `clew.env` | Clew (`yaqalab/clew`) | `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_API_KEY`, `VITE_GOOGLE_APP_ID`, `VITE_DROPBOX_APP_KEY`, `VITE_DROPBOX_APP_KEY_FULL`, `VITE_BUNDLED_SIGNALING_URL`, `VITE_BUNDLED_SIGNALING_TOKEN`, `VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`, `VITE_FEEDBACK_URL`, … |
 | `yaqatw.env` | yaqatw | `GOOGLE_DRIVE_CLIENT_ID`, `DROPBOX_CLIENT_ID`, `ONEDRIVE_CLIENT_ID`, `YAQATW_BUNDLED_SIGNALING_URL`, `YAQATW_BUNDLED_SIGNALING_TOKEN` |
 
 The simplest source is your own checkout: `cp ../ariadne/.env env/clew.env`. Elsewhere, point at
