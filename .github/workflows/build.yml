@@ -1,0 +1,114 @@
+# macOS and Linux builds, on GitHub's machines (Windows is built by hand: the Word template's
+# build needs Word). Run from the Actions tab or `gh workflow run build.yml [-f release=v0.4.1]`.
+#
+# Secrets: GIT_TOKEN (read-only access to the private Clew and yaqatw repositories, for
+# `npm run sources`), CLEW_ENV and YAQATW_ENV (the apps' build-time settings, as env/README.md
+# describes).
+name: Build macOS and Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release tag to attach the packages to (empty for build artifacts only)
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mac-arm64
+            runner: macos-15
+            builder: --mac --arm64
+          - name: mac-x64
+            runner: macos-15-intel
+            builder: --mac --x64
+          - name: linux-x64
+            runner: ubuntu-24.04
+            builder: --linux --x64
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+      CLEW_TOOLS_POSIX: '1'
+      # No Developer ID: the Mac app is signed ad hoc (identity "-" below), never with a
+      # certificate found on the machine.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Linux libraries (Electron, the smoke run's display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libnss3 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxtst6 libsecret-1-0 libnotify4
+          # Ubuntu 24.04 restricts unprivileged user namespaces, which Chromium's sandbox needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Build-time settings
+        env:
+          CLEW_ENV: ${{ secrets.CLEW_ENV }}
+          YAQATW_ENV: ${{ secrets.YAQATW_ENV }}
+        run: |
+          test -n "$GIT_TOKEN" || { echo "::error::secret GIT_TOKEN is missing"; exit 1; }
+          test -n "$CLEW_ENV" || { echo "::error::secret CLEW_ENV is missing"; exit 1; }
+          test -n "$YAQATW_ENV" || { echo "::error::secret YAQATW_ENV is missing"; exit 1; }
+          printf '%s\n' "$CLEW_ENV" > env/clew.env
+          printf '%s\n' "$YAQATW_ENV" > env/yaqatw.env
+
+      - run: npm ci
+      - run: npm run sources
+      - run: npm run build:sites
+      - run: npm run build:tools
+
+      - name: Tests
+        run: npm test
+
+      - name: Smoke run, with the local tools
+        env:
+          CLEW_SMOKE_TOOLS: '1'
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a npm run smoke
+          else
+            npm run smoke
+          fi
+
+      - name: Package
+        run: npx electron-builder ${{ matrix.builder }} --publish never -c.mac.identity=-
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clew-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/latest-linux.yml
+
+      - name: Attach to the release
+        if: inputs.release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(release/*.dmg release/*.zip release/*.AppImage release/*.deb release/latest-linux.yml)
+          gh release upload "${{ inputs.release }}" "${files[@]}" --clobber
