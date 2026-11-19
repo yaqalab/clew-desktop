@@ -339,12 +339,88 @@
     }
   }
 
+  // ─── Yaqatw's AI requests, reviewed by Clew ────────────────────────────────────────────────
+  // Before Yaqatw sends an AI request that carries text, it asks here (yaqatw:
+  // src/service/ai/aiGate.ts). A model on this computer passes: nothing leaves. Anything else is
+  // shown in a window in front (review.html, through the main process) once per run, and goes
+  // only on Send. A Word document has no Clew names list, so nothing is replaced: the review says
+  // so, and the answer comes back untouched (aiGate_restore).
+
+  /** Keys whose values are a request's settings, not its text: left out of the review. */
+  const SETTING_KEYS = new Set([
+    'role', 'model', 'type', 'format', 'response_format', 'mime_type', 'mimeType',
+    'source_lang', 'target_lang', 'source', 'target', 'tool_choice', 'stop', 'id', 'object',
+  ]);
+
+  /** The text a request carries: every string but its settings, longest first. */
+  function contentOf(payload) {
+    const out = [];
+    const walk = (v) => {
+      if (typeof v === 'string') {
+        if (v.trim()) out.push(v);
+      } else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') {
+        for (const [k, x] of Object.entries(v)) if (!SETTING_KEYS.has(k)) walk(x);
+      }
+    };
+    walk(payload);
+    return out.sort((a, b) => b.length - a.length);
+  }
+
+  /** localhost, 127.0.0.0/8 or ::1: a model on this computer. */
+  function isLocalEndpoint(endpoint) {
+    try {
+      const host = new URL(endpoint).hostname.replace(/^\[|\]$/g, '');
+      return host === 'localhost' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  // Each run's answer: asked once, shared by its requests that arrive while it is asked.
+  const reviewedRuns = new Map();
+
+  async function reviewAi(request) {
+    const r = request && typeof request === 'object' ? request : {};
+    if (typeof r.endpoint !== 'string' || !r.endpoint) {
+      return { allow: false, reason: 'Clew could not read this AI request, so it was not sent.' };
+    }
+    if (isLocalEndpoint(r.endpoint)) return { allow: true, payload: r.payload };
+    const runId = typeof r.runId === 'string' ? r.runId : '';
+    let answer = runId ? reviewedRuns.get(runId) : undefined;
+    if (!answer) {
+      let host = r.endpoint;
+      try {
+        host = new URL(r.endpoint).host;
+      } catch (_err) {
+        // shown as given
+      }
+      answer = word.review({
+        feature: typeof r.feature === 'string' ? r.feature : 'AI request',
+        provider: typeof r.provider === 'string' ? r.provider : '',
+        model: typeof r.model === 'string' ? r.model : '',
+        host,
+        kind: r.kind === 'audio' ? 'audio' : 'json',
+        bytes: r.kind === 'audio' && r.payload && typeof r.payload.bytes === 'number' ? r.payload.bytes : 0,
+        texts: r.kind === 'audio' ? [] : contentOf(r.payload),
+      });
+      if (runId) reviewedRuns.set(runId, answer);
+    }
+    // A run cancelled once stays cancelled: its next requests are not asked about again.
+    return (await answer) ? { allow: true, payload: r.payload } : { allow: false, cancelled: true };
+  }
+
   // ─── The table ─────────────────────────────────────────────────────────────────────────────
 
   const handlers = {
     // Handshake: yaqatw announces itself; Word is there already.
     pluginConnected: () => {
       emit('ready');
+      // Clew reviews Yaqatw's AI requests before they go (aiGate_review below). An older
+      // yaqatw refuses the call and sends as it always did.
+      if (typeof word.review === 'function') {
+        callPlugin('setHostFeatures', { name: 'Clew', aiGate: true }).catch(() => {});
+      }
       // A yaqatw loaded again may answer other methods: ask it again.
       capabilities = undefined;
       if (markReady) {
@@ -354,6 +430,11 @@
         syncFileType().then(ready, ready);
       }
     },
+
+    // Yaqatw's AI requests, reviewed before they go (reviewAi below). Nothing is replaced in a
+    // Word document, so the answer comes back as it is.
+    aiGate_review: (request) => reviewAi(request),
+    aiGate_restore: (_token, answer) => answer,
 
     // Custom XML parts: where yaqatw keeps its entities, inside the document.
     readXmlPart: (ns, root) => op('readXmlPart', { ns, root }),

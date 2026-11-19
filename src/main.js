@@ -746,6 +746,8 @@ const WORD_HOST_FILES = {
   'form.js': 'text/javascript',
   'relate.html': 'text/html',
   'relate.js': 'text/javascript',
+  'review.html': 'text/html',
+  'review.js': 'text/javascript',
 };
 const WORD_HOST_URL = `${WORD_SCHEME}://bridge/index.html`;
 /** session id → its window; webContents id → session id. */
@@ -1102,6 +1104,85 @@ ipcMain.handle('word:picker-action', async (event, action, args) => {
   const s = wordBridge.get(id);
   if (!s) throw new Error('The Word document was closed.');
   return wordAction(s, action, args && typeof args === 'object' && !Array.isArray(args) ? args : {});
+});
+
+// ---------------------------------------------------------------------------------------------
+// Yaqatw's AI requests, reviewed before they go (yaqatw: src/service/ai/aiGate.ts). The host page
+// of a Word window asks; a window in front shows the request (review.html) and answers Send or
+// Cancel. Closing it, or the Word window going away, is Cancel: nothing is sent unseen.
+
+/** Open reviews by the review window's webContents id: what it shows, and how it answers. */
+const reviews = new Map();
+
+/** What a review window may show: the fields it reads, each a plain value, the text bounded. */
+function reviewData(data, title) {
+  const d = data && typeof data === 'object' ? data : {};
+  const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const texts = Array.isArray(d.texts) ? d.texts.filter((x) => typeof x === 'string').slice(0, 50) : [];
+  return {
+    feature: str(d.feature, 80) || 'AI request',
+    provider: str(d.provider, 80),
+    model: str(d.model, 120),
+    host: str(d.host, 200),
+    kind: d.kind === 'audio' ? 'audio' : 'json',
+    bytes: typeof d.bytes === 'number' ? d.bytes : 0,
+    texts: texts.map((x) => x.slice(0, 20000)),
+    title,
+  };
+}
+
+ipcMain.handle('word:review', (event, data) => {
+  const id = wordSessionOf(event);
+  if (!id) throw new Error('not allowed');
+  const s = wordBridge.get(id);
+  const shown = reviewData(data, s?.title ?? '');
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      width: 620,
+      height: 560,
+      minWidth: 360,
+      minHeight: 320,
+      title: `Send to ${shown.host || 'an AI model'}? – ${shown.title}`,
+      autoHideMenuBar: true,
+      alwaysOnTop: true,
+      minimizable: false,
+      maximizable: false,
+      webPreferences: {
+        session: appSession,
+        preload: path.join(WORD_HOST_DIR, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    const contentsId = win.webContents.id;
+    let done = false;
+    const finish = (send) => {
+      if (done) return;
+      done = true;
+      reviews.delete(contentsId);
+      resolve(send === true);
+      if (!win.isDestroyed()) win.close();
+    };
+    reviews.set(contentsId, { data: shown, finish });
+    // The Word window closing takes its question with it.
+    event.sender.once('destroyed', () => finish(false));
+    win.webContents.on('will-navigate', (e) => e.preventDefault());
+    win.on('page-title-updated', (e) => e.preventDefault());
+    win.on('closed', () => finish(false));
+    win.loadURL(`${WORD_SCHEME}://bridge/review.html`);
+    win.focus();
+  });
+});
+
+ipcMain.handle('word:review-data', (event) => {
+  if (!fromWordScheme(event, 'review.html')) throw new Error('not allowed');
+  return reviews.get(event.sender.id)?.data ?? null;
+});
+
+ipcMain.on('word:review-answer', (event, send) => {
+  if (!fromWordScheme(event, 'review.html')) return;
+  reviews.get(event.sender.id)?.finish(send === true);
 });
 
 ipcMain.on('word:picker-close', (event) => {

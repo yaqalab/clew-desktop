@@ -406,6 +406,35 @@ async function run(win, ses, server, tools, folder, db, api) {
       const infoUrl = infoWin?.webContents.getURL() ?? '';
       infoWin?.destroy();
 
+      // An AI request yaqatw is about to send (its AI gate): the review window shows it in front;
+      // Send answers true, Cancel false.
+      const askReview = () =>
+        wordWin.webContents.executeJavaScript(
+          "window.clewWord.review({ feature: 'Translate', provider: 'openai', model: 'gpt', host: 'api.openai.com', kind: 'json', texts: ['I wrote to them one by one.'] })",
+        );
+      const findReview = async () => {
+        for (let i = 0; i < 40; i++) {
+          const w = BrowserWindow.getAllWindows().find((x) => !x.isDestroyed() && x.webContents.getURL().startsWith('clew-word://bridge/review.html'));
+          if (w) {
+            for (let j = 0; j < 40; j++) {
+              const text = await w.webContents.executeJavaScript("document.getElementById('texts').textContent").catch(() => '');
+              if (text) return { w, text };
+              await wait(150);
+            }
+          }
+          await wait(250);
+        }
+        return { w: null, text: '' };
+      };
+      const sending = askReview();
+      const firstReview = await findReview();
+      await firstReview.w?.webContents.executeJavaScript("document.getElementById('send').click()");
+      const reviewSent = await sending;
+      const cancelling = askReview();
+      const secondReview = await findReview();
+      await secondReview.w?.webContents.executeJavaScript("document.getElementById('cancel').click()");
+      const reviewCancelled = await cancelling;
+
       // Add to relationship › More… (the window): it loads and says why there is nothing.
       const relate = await programPost(`${base}/v1/word/action`, { session, action: 'openPicker', args: { mode: 'relate', hid: 'h-smoke' } }, auth);
       let relateWin = null;
@@ -471,6 +500,10 @@ async function run(win, ses, server, tools, folder, db, api) {
       assert(infoUrl.endsWith('info.html?hid=h-smoke'), `Highlight info window at ${infoUrl}`);
       assert(/type first|writing|no record/.test(infoMsg), `Highlight info window says "${infoMsg}"`);
       assert(infoErrors.length === 0, `Highlight info window errors: ${infoErrors.join(' | ')}`);
+      assert(firstReview.w, 'no review window for an AI request');
+      assert(/one by one/.test(firstReview.text), `review window shows "${firstReview.text}"`);
+      assert(reviewSent === true, `Send answered ${reviewSent}`);
+      assert(secondReview.w && reviewCancelled === false, `Cancel answered ${reviewCancelled}`);
       assert(relate.body?.ok === true && relateWin, `openPicker relate: ${JSON.stringify(relate.body)}`);
       assert(/type first|writing|no record/.test(relateMsg), `Add to relationship window says "${relateMsg}"`);
       assert(relateErrors.length === 0, `Add to relationship window errors: ${relateErrors.join(' | ')}`);

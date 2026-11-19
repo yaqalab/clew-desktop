@@ -615,3 +615,17 @@ button:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+/* The text an AI request carries, in the review before it goes (review.html). */
+.review-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 10rem;
+  overflow: auto;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.9em;
+}

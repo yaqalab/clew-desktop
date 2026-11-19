@@ -18,7 +18,7 @@ const YAQATW = 'https://yaqatw.alefa.net';
 
 /** The page with `word(op, args)` answering operations; rpc(method, ...args) → yaqatw's reply. */
 // `plugin` plays yaqatw's HostRpcServer: method -> answer (or a function of the args).
-function page(word, { open = true, plugin = {} } = {}) {
+function page(word, { open = true, plugin = {}, review } = {}) {
   const calls = [];
   const posted = [];
   const pluginCalls = [];
@@ -83,6 +83,8 @@ function page(word, { open = true, plugin = {} } = {}) {
       onAction: (handler) => {
         actionHandler = handler;
       },
+      // The review window of an AI request (main.js): absent in an older preload.
+      ...(review ? { review } : {}),
     },
     addEventListener: (name, fn) => {
       if (name === 'message') onMessage = fn;
@@ -1062,4 +1064,74 @@ test('a yaqatw without the writing methods: the insert window says it needs a ne
   const p = page((op) => (op === 'getVariable' ? 'write' : null), { plugin: { getFileType: 'write' } });
   await p.rpc('pluginConnected');
   await assert.rejects(p.act('searchCites', { query: 'calm' }), /needs a newer Yaqatw/);
+});
+// --- Yaqatw's AI requests, reviewed by Clew (yaqatw: src/service/ai/aiGate.ts) ---------------
+
+const chat = (content) => ({ model: 'gpt', messages: [{ role: 'user', content }] });
+const aiAsk = (over = {}) => ({
+  feature: 'Code Agent',
+  runId: 'run-1',
+  provider: 'openai',
+  model: 'gpt',
+  endpoint: 'https://api.openai.com/v1/chat/completions',
+  kind: 'json',
+  payload: chat('I wrote to them one by one.'),
+  ...over,
+});
+
+test('on connect, Yaqatw is told Clew reviews its AI requests (when this window can show them)', async () => {
+  const p = page(() => null, { review: async () => true, plugin: { setHostFeatures: (f) => f } });
+  await p.rpc('pluginConnected');
+  await settle();
+  const told = p.pluginCalls.find((c) => c.method === 'setHostFeatures');
+  assert.deepEqual(told && told.args[0], { name: 'Clew', aiGate: true });
+  const older = page(() => null, { plugin: { setHostFeatures: (f) => f } });
+  await older.rpc('pluginConnected');
+  await settle();
+  assert.equal(older.pluginCalls.some((c) => c.method === 'setHostFeatures'), false);
+});
+
+test('a model on this computer passes without a review', async () => {
+  const shown = [];
+  const p = page(() => null, { review: async (d) => (shown.push(d), true) });
+  const r = await p.rpc('aiGate_review', aiAsk({ endpoint: 'http://localhost:11434/api/chat' }));
+  assert.equal(r.result.allow, true);
+  assert.equal(shown.length, 0);
+});
+
+test('a cloud request is shown once per run, its text without the settings, and sent as it is', async () => {
+  const shown = [];
+  const p = page(() => null, { review: async (d) => (shown.push(JSON.parse(JSON.stringify(d))), true) });
+  const first = await p.rpc('aiGate_review', aiAsk());
+  const second = await p.rpc('aiGate_review', aiAsk({ payload: chat('Again.') }));
+  assert.equal(shown.length, 1);
+  assert.deepEqual(shown[0], {
+    feature: 'Code Agent',
+    provider: 'openai',
+    model: 'gpt',
+    host: 'api.openai.com',
+    kind: 'json',
+    bytes: 0,
+    texts: ['I wrote to them one by one.'],
+  });
+  assert.deepEqual(first.result, { allow: true, payload: chat('I wrote to them one by one.') });
+  assert.deepEqual(second.result.payload, chat('Again.'));
+  await p.rpc('aiGate_review', aiAsk({ runId: 'run-2' }));
+  assert.equal(shown.length, 2);
+});
+
+test('Cancel sends nothing, quietly, for the whole run; an unreadable request is refused', async () => {
+  let asked = 0;
+  const p = page(() => null, { review: async () => (asked++, false) });
+  assert.deepEqual((await p.rpc('aiGate_review', aiAsk())).result, { allow: false, cancelled: true });
+  assert.deepEqual((await p.rpc('aiGate_review', aiAsk())).result, { allow: false, cancelled: true });
+  assert.equal(asked, 1);
+  const bad = await p.rpc('aiGate_review', { nope: true });
+  assert.equal(bad.result.allow, false);
+});
+
+test("the answer comes back untouched: nothing was replaced in a Word document", async () => {
+  const p = page(() => null, { review: async () => true });
+  const r = await p.rpc('aiGate_restore', 'g1', { text: 'Tanaka agrees' });
+  assert.deepEqual(r.result, { text: 'Tanaka agrees' });
 });
