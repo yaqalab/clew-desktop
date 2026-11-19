@@ -103,6 +103,27 @@ jobs:
         if: failure() && runner.os == 'macOS'
         run: find release -maxdepth 9 -path '*Python.framework*' -exec ls -ld {} + 2>/dev/null | head -40 || true
 
+      # The package itself, as people get it: its signature (macOS), then the smoke run with the
+      # tools from inside it (the tools, the sites and the app as packed and signed).
+      - name: The packaged app's signature (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app=$(ls -d release/mac*/Clew.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --verify --strict "$app/Contents/Resources/tools/clew-audio-server"
+          codesign --verify --strict "$app/Contents/Resources/tools/clew-analysis-server/clew-analysis-server"
+
+      - name: Smoke run of the packaged app, with its tools
+        env:
+          CLEW_SMOKE_TOOLS: '1'
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a release/linux-unpacked/clew --smoke
+          else
+            app=$(ls -d release/mac*/Clew.app | head -1)
+            "$app/Contents/MacOS/Clew" --smoke
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: clew-${{ matrix.name }}
