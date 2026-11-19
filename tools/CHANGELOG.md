@@ -1,0 +1,95 @@
+# Changes
+
+Each section is the text of that version's release on GitHub.
+
+## Unreleased
+
+**One secret is enough when you switch audio servers.** If you used the Python audio server and
+then install the Windows program, the secret Clew already has keeps working: the program checks it
+against the hash the Python server keeps, and never stores or shows it. Its own secret works as
+before.
+
+**The native audio server is built and tested on Linux and macOS on every change** (GitHub
+Actions in this repository). Building it on Linux for the first time found two faults, both fixed:
+stopping the server hung there, and with no ffmpeg chosen nothing was converted (on macOS and Linux
+an ffmpeg beside the program or on PATH is now used, as the Python server does). Windows is
+unchanged. The Windows program is still the one to install; on macOS and Linux the Python server
+remains the one with a window.
+
+## 1.4.0 — 2026-11-16
+
+**Probably the last release of Clew tools on their own.** The same audio server, analysis engine
+and dictation are now part of **Clew Desktop**, one installable app with Clew inside; that is
+where they will be updated from now on.
+
+**Cuts for training, placed by the words heard.** The dictation server has a new call,
+`POST /v1/words`: the words of one stretch of a recording in the audio server's folder, each with
+its time. Clew's Training view uses it: **Next turn to look at** on a turn longer than the limit
+now puts the caret on the word after the best pause and plays from just before it, so you only
+listen and confirm with **Cut here** (or `/x`). Measured on public English interviews, the cut
+lands within about 0.15 s of the real pause in most cases, and within a second 95% of the time.
+Without this version, Clew keeps suggesting the cut from the recording's loudness, as before.
+
+## 1.3.0 — 2026-10-20
+
+**The analysis engine** (`analysis-server/`, `clew-analysis-server`): runs regressions, exact and
+rank tests and Cronbach's alpha for Clew in your own statistics program, as a translator: Clew
+sends one neutral command with the data and gets one result back, with the script that ran.
+Standard library only. Four programs:
+
+- **R**: base R (and `MASS`, which comes with it).
+- **Python** from a Conda environment with pandas, scipy and statsmodels: the same tables and the
+  same numbers as R.
+- **PSPP**: its own tables; no ordinal regression (PSPP has none).
+- **SPSS**, through its Python plug-in: not yet tried with a real SPSS.
+
+Your own R or Python scripts can be added with `--scripts`.
+
+**Windows: the Analysis tab.** The installer has a new optional part, **Analysis** (about 18 MB;
+no statistics program is included). The settings window's new **Analysis** tab chooses the
+program and shows whether it was found (or lets you choose it), starts and stops the engine,
+keeps its key (encrypted for your Windows account, with Show, Copy and New), and takes a folder
+of your own scripts, a port and a time limit. The tray menu gains "Analysis: start/stop" and
+"Copy the analysis key". The engine runs as a child of the tray program: it ends with it, and
+the statistics program runs inside the same memory limit.
+
+## 1.2.0 — 2026-10-19
+
+**macOS and Linux.** The Python audio server becomes a package you install with
+[pipx](https://pipx.pypa.io), with the same features as the Windows program:
+
+```
+pipx install "clew-tools @ git+https://github.com/yaqalab/clew-tools"
+clew-audio-server --gui
+```
+
+- **A settings window** (optional; `--gui`): folders with on/off, connection, secret, conversion,
+  dictation and updates, in English or Japanese. Without it, the server runs in a terminal as
+  before.
+- **The secret can be shown again:** it is kept in the macOS Keychain, the Linux desktop's keyring,
+  or a file only you can read. `--show-secret` prints it.
+- **Start at login:** `--autostart on` (no window) or `--autostart gui`; `--autostart off` undoes it.
+- **Dictation on your computer:** install with the `dictation` extra (see the README); download a
+  model from the window or with `--download-model small`.
+- **New versions:** a daily check you can turn off; it tells you, and `pipx upgrade clew-tools`
+  updates.
+- `https://clew.alefa.net` is allowed on a first start, as on Windows.
+
+The Windows program is unchanged in this version.
+
+## 1.1.0 — 2026-10-19
+
+The first public release.
+
+- **Updates from the program.** A new **Updates** tab checks once a day for a new version (you can
+  turn this off). Nothing is installed until you press **Install**; the installer must match the
+  release's size and SHA-256 fingerprint and carry the same YaqaLab signature, or it is deleted.
+- **Works with clew.alefa.net from the start.** The hosted Clew is allowed on a first install;
+  before, its address had to be added by hand. It can be removed under *Other Clew addresses*.
+- **Several audio folders**, each with a tick box to pause it, also from the tray's menu.
+- **Dictation on this computer** (optional part of the installer): Whisper models from `tiny` to
+  `large-v3`, greyed out when the computer cannot run them; an NVIDIA graphics card is used when
+  there is one. Live transcription of recordings tells speakers apart.
+- Licences: the code is under the MIT licence; `THIRD-PARTY-NOTICES.txt` lists what the
+  dictation part brings with it.
+- The Japanese setup-type names in the installer showed stray characters; fixed.
