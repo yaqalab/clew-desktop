@@ -630,11 +630,13 @@ async function run(win, ses, server, tools, folder, db, api) {
         // The programs connected to Clew: in a smoke run, the fake Word of the Word window check.
         const clients = await sw.webContents.executeJavaScript("document.getElementById('clients').textContent");
         assert(clients.length > 0, 'no list of connected programs');
-        // Developer tools: always on in a development run, so the switch is ticked and locked.
+        // Developer tools: always on in a development run, so the switch is ticked and locked; in
+        // the packaged app (a smoke run of a built package) off by default, and free to change.
+        const want = app.isPackaged ? 'c.checked === false && c.disabled === false' : 'c.checked && c.disabled';
         const devtools = await sw.webContents.executeJavaScript(
-          "window.tools.appPrefs().then((p) => { const c = document.getElementById('devtools'); return c.checked && c.disabled ? '' : `checked ${c.checked}, disabled ${c.disabled}, prefs ${JSON.stringify(p)}`; })",
+          `window.tools.appPrefs().then((p) => { const c = document.getElementById('devtools'); return ${want} ? '' : \`checked \${c.checked}, disabled \${c.disabled}, prefs \${JSON.stringify(p)}\`; })`,
         );
-        assert(!devtools, `the developer tools switch is not shown as always on: ${devtools}`);
+        assert(!devtools, `the developer tools switch is not as expected (packaged: ${app.isPackaged}): ${devtools}`);
         // Clew's folder: shown, and not movable in a smoke run (a throwaway folder).
         const folderRow = await sw.webContents.executeJavaScript(
           "window.tools.folder().then(() => [document.getElementById('folder-root').textContent, document.getElementById('folder-move').disabled])",
