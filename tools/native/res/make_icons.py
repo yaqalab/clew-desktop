@@ -1,6 +1,7 @@
 """
-Composes the native server's icons (res/icons/*.ico) from Clew's own brand files
-(packages/kit/brand, the source of truth; nothing is drawn here):
+Composes the native server's icons (res/icons/*.ico) from Clew's own brand files (res/brand:
+favicon.ico and favicon-dark.ico, copied from the Clew web app's packages/kit/brand, the source of
+truth; copy them again when the brand changes; nothing is drawn here):
 
 - app.ico (the program, its window, the Start menu, the installer): the "c" mark on the tile's cream,
   at every size, which stays visible on a light or a dark background. (The full labyrinth tile was
@@ -17,7 +18,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageOps
 
 HERE = Path(__file__).resolve().parent
-BRAND = HERE.parents[2] / "packages" / "kit" / "brand"
+BRAND = HERE / "brand"
 OUT = HERE / "icons"
 
 CREAM = (0xF7, 0xF2, 0xE9)
