@@ -45,7 +45,13 @@ async function download(url, to, { size, sha256, signal, fetchImpl = fetch, onPr
     if (received !== size) throw new Error('the download is incomplete');
     if (hash.digest('hex') !== sha256) throw new Error('the download does not match its SHA-256');
   } catch (err) {
-    out.destroy();
+    // The file may still be opening (a download refused at its first chunk): removed before it
+    // is closed, it would come back, empty, once the open completes.
+    await new Promise((resolve) => {
+      if (out.closed) return resolve();
+      out.once('close', resolve);
+      out.destroy();
+    });
     fs.rmSync(to, { force: true });
     throw err;
   }
