@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // `npm run package:dictation [-- <dist folder>]`: packs a built dictation server
-// (tools/stt-server's build_exe.ps1 output, `dist/clew-stt-server/`) into what Clew Desktop
+// (the output of tools/stt-server's build_exe.ps1 on Windows, build_dist.sh on macOS and Linux:
+// `dist/clew-stt-server/`) into what Clew Desktop
 // fetches on demand (src/tools/dictation-install.js), for the public clew-tools release:
 //
 //   release-dictation/clew-stt-server-<version>-<platform>-<arch>.tar.gz
@@ -23,7 +24,7 @@ const tools = process.env.TOOLS_PATH || join(clew.dir, 'tools');
 const dist = process.argv[2] || join(tools, 'stt-server', 'dist', 'clew-stt-server');
 const program = process.platform === 'win32' ? 'clew-stt-server.exe' : 'clew-stt-server';
 if (basename(dist) !== 'clew-stt-server' || !existsSync(join(dist, program))) {
-  fail(`no built dictation server at ${dist} (expected clew-stt-server/${program}); run tools/stt-server/build_exe.ps1`);
+  fail(`no built dictation server at ${dist} (expected clew-stt-server/${program}); run tools/stt-server/${process.platform === 'win32' ? 'build_exe.ps1' : 'build_dist.sh'}`);
 }
 const version = readFileSync(join(tools, 'VERSION'), 'utf8').trim();
 const key = `${process.platform}-${process.arch}`;

@@ -1,0 +1,122 @@
+# The dictation server for macOS and Linux, on GitHub's machines (Windows is built by hand with
+# tools/stt-server/build_exe.ps1). Run from the Actions tab or `gh workflow run dictation.yml`.
+#
+# Each system: build it from the Clew source (tools/stt-server/build_dist.sh), run its tests,
+# pack it (`npm run package:dictation`), install that package the way the app does and check the
+# installed server answers (`npm run smoke:dictation -- --release`). Then one job merges the
+# packages with the live dictation.json of the clew-tools release of the same version, into the
+# artifact `dictation-release`. Nothing is published: those files are attached to the
+# yaqalab/clew-tools release by hand (`gh release upload v<version> … --clobber`).
+#
+# Secret: GIT_TOKEN (read-only access to the private Clew repository, for `npm run sources`).
+name: Dictation for macOS and Linux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mac-arm64
+            runner: macos-15
+          - name: mac-x64
+            runner: macos-15-intel
+          - name: linux-x64
+            runner: ubuntu-24.04
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Clew's source
+        run: |
+          test -n "$GIT_TOKEN" || { echo "::error::secret GIT_TOKEN is missing"; exit 1; }
+          npm run sources -- clew
+
+      - name: Build
+        run: sh .sources/clew/tools/stt-server/build_dist.sh
+
+      - name: Tests
+        working-directory: .sources/clew/tools/stt-server
+        run: |
+          python -m venv "$RUNNER_TEMP/stt-test"
+          "$RUNNER_TEMP/stt-test/bin/python" -m pip install --quiet --disable-pip-version-check -e ".[local,test]"
+          "$RUNNER_TEMP/stt-test/bin/python" -m pytest -q
+
+      - name: Pack
+        run: npm run package:dictation
+
+      # Spoken words to check the transcript: macOS's `say`, espeak-ng on Linux. Without them
+      # (Ubuntu's mirrors fail now and then), a tone: every library still has to load and answer.
+      - name: Install the package as the app does, and check the server
+        run: |
+          words="The quick brown fox jumps over the lazy dog."
+          if [ "$RUNNER_OS" = macOS ]; then
+            say -o "$RUNNER_TEMP/speech.wav" --file-format=WAVE --data-format=LEI16@16000 "$words"
+          else
+            sudo apt-get install -y -qq -o Acquire::Retries=5 espeak-ng > /dev/null \
+              && espeak-ng -s 140 -w "$RUNNER_TEMP/speech.wav" "$words" \
+              || echo "::warning::no espeak-ng: checking with a tone, not words"
+          fi
+          if [ -f "$RUNNER_TEMP/speech.wav" ]; then
+            npm run smoke:dictation -- --release release-dictation --wav "$RUNNER_TEMP/speech.wav" --expect fox
+          else
+            npm run smoke:dictation -- --release release-dictation
+          fi
+
+      - name: The server's signature (macOS)
+        if: runner.os == 'macOS'
+        run: codesign -dv .sources/clew/tools/stt-server/dist/clew-stt-server/clew-stt-server
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dictation-${{ matrix.name }}
+          if-no-files-found: error
+          path: release-dictation/*
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dictation-*
+          path: built
+
+      # The live manifest keeps the systems built elsewhere (Windows); the new packages are added.
+      - name: Merge with the live dictation.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./built/dictation-linux-x64/dictation.json').version")
+          gh release download "v$version" -R yaqalab/clew-tools -p dictation.json -D live
+          node scripts/merge-dictation.mjs dictation-release live built/dictation-*
+          cat dictation-release/dictation.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dictation-release
+          if-no-files-found: error
+          path: dictation-release/*

@@ -21,7 +21,8 @@
     "dev": "node scripts/dev.mjs",
     "smoke": "node scripts/electron.mjs --smoke",
     "test": "node --test test/*.test.js",
-    "package:dictation": "node scripts/package-dictation.mjs"
+    "package:dictation": "node scripts/package-dictation.mjs",
+    "smoke:dictation": "node scripts/smoke-dictation.mjs"
   },
   "devDependencies": {
     "electron": "45.3.2",
