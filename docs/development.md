@@ -139,6 +139,7 @@ cp ../yaqatw/.env  env/yaqatw.env
 | `npm run smoke` | Opens the app hidden and checks origin, local serving, iframe, network passthrough, CORS, redirects, permissions, service worker (`CLEW_SMOKE_TOOLS=1`: the tools, tray and settings window too) |
 | `npm run dist` | `sources` → `build:sites` → `build:tools` → electron-builder: the installer for this OS in `release/` |
 | `npm run package:dictation` | Packs a built dictation server for the clew-tools release (see below) |
+| `npm run smoke:dictation` | Checks a built (or packed) dictation server: models, a file, live transcription (see below) |
 
 `npm run build:sites -- clew` builds one app; `--install` forces `npm ci` in a local checkout, `--no-install` skips it wherever `node_modules` exists (e.g. while `npm run dev` is using it).
 
@@ -329,18 +330,29 @@ touched) or `TOOLS_PATH=<dir>`.
 macOS and Linux (`CLEW_TOOLS_POSIX=1`): a C++17 compiler, CMake (Ninja when it is there, Make
 otherwise) and Python 3.10+ with `venv`. On Linux (Ubuntu 24.04) the tools build, `npm test`
 passes and the smoke run passes with the tools (`CLEW_SMOKE_TOOLS=1`); `electron-builder --linux`
-makes an AppImage and a deb. macOS has not been built. On both, the audio server keeps its secret
+makes an AppImage and a deb; macOS (arm64, x64) builds the same way on GitHub's machines
+(`.github/workflows/build.yml`). On both, the audio server keeps its secret
 in its settings file, readable by the user only, and converts with FFmpeg.
 
 For development: `CLEW_STT_PROGRAM=<…/clew-stt-server.exe>` uses a dictation server you built,
 `CLEW_TOOLS_CONFIG=<file>` another settings file, `CLEW_TOOLS_DIR=<dir>` other tool binaries.
 
-**Publishing dictation** (once per release and system): build `tools/stt-server` (its
-`build_exe.ps1`), then `npm run package:dictation`. It writes
+**Publishing dictation** (once per release and system): build `tools/stt-server`
+(`build_exe.ps1` on Windows, `build_dist.sh` on macOS and Linux), then
+`npm run package:dictation`. It writes
 `release-dictation/clew-stt-server-<version>-<platform>-<arch>.tar.gz` and adds it to
 `release-dictation/dictation.json`; attach both to the `v<version>` release of
 `yaqalab/clew-tools`. The package carries the dictation server's `THIRD-PARTY-NOTICES.txt` (its
-GPL parts; Clew docs/32, section 2).
+GPL parts; Clew docs/32, section 2). `npm run smoke:dictation` checks a built server (the tiny
+model, a file, live transcription with voices); `-- --release release-dictation` installs the
+package first, as the app does.
+
+macOS and Linux are built on GitHub's machines by `.github/workflows/dictation.yml` (dispatch;
+secret `GIT_TOKEN`): build, the server's tests, pack, the smoke from the installed package, then
+the artifact `dictation-release`: the new packages and the release's live `dictation.json` with
+them added ([scripts/merge-dictation.mjs](../scripts/merge-dictation.mjs)). Attach its files to
+the clew-tools release by hand. A Linux package runs on systems with a glibc at least as new as
+the build machine's (Ubuntu 24.04).
 
 ## The Word template (`word-plugin/`)
 
