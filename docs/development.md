@@ -241,14 +241,25 @@ installer.
 - The installer is unsigned, so the updater checks the SHA-512 only, not a publisher.
 - A private repository's releases cannot be read without a token: the check then fails quietly
   (Settings shows "no release found").
+- **macOS: tell only.** The Mac app is signed ad hoc, without a Developer ID, and macOS refuses
+  to install an update over it. It asks GitHub's API for the latest release instead and Settings
+  says "Version x is out: download it", linking to the release. Nothing is downloaded.
+- Linux: the AppImage updates itself (`latest-linux.yml`); the deb is installed by hand.
 
-**Releasing** (Windows):
+**Releasing**:
 
 1. Bump `version` in `package.json` and merge to `main`.
-2. `npm run dist`: `release/Clew-Setup-<version>.exe`, its `.blockmap` and `latest.yml`.
-3. `gh release create v<version> --title "Clew <version>" --notes-file <notes>` with the three
-   files. All three are needed: `latest.yml` is what installed apps read, the `.blockmap` makes
-   the next update a partial download.
+2. Windows, here: `npm run dist` gives `release/Clew-Setup-<version>.exe`, its `.blockmap` and
+   `latest.yml`. `gh release create v<version> --title "Clew Desktop <version>" --notes-file
+   <notes>` with the three files. All three are needed: `latest.yml` is what installed apps read,
+   the `.blockmap` makes the next update a partial download.
+3. macOS and Linux, on GitHub's machines: `gh workflow run build.yml -f release=v<version>`
+   ([.github/workflows/build.yml](../.github/workflows/build.yml)). It builds the Mac app for
+   Apple silicon and Intel (`Clew-<version>-mac-arm64.dmg`, `…-mac-x64.dmg`, and their zips)
+   and the Linux AppImage and deb, runs `npm test` and the smoke run with the tools on each, and
+   attaches the packages and `latest-linux.yml` to the release. Without `-f release=…` it only
+   keeps them as the run's artifacts. Its secrets: `GIT_TOKEN` (read-only access to the private
+   Clew and yaqatw repositories), `CLEW_ENV` and `YAQATW_ENV` (as in [env/README.md](../env/README.md)).
 
 ## Dev mode
 

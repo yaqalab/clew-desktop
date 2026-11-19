@@ -12,7 +12,7 @@ const permissions = require('./permissions');
 const screenPicker = require('./screen-picker');
 const { createSettler } = require('./settle');
 const { Tools } = require('./tools');
-const { createAppUpdater } = require('./app-update');
+const { createAppUpdater, githubLatestRelease } = require('./app-update');
 const databases = require('./db');
 const localApi = require('./local-api');
 const { createWordPlugin } = require('./word-plugin');
@@ -24,6 +24,20 @@ const PARTITION = 'persist:alefa';
 const WORD_SCHEME = 'clew-word';
 protocol.registerSchemesAsPrivileged([{ scheme: WORD_SCHEME, privileges: { standard: true, secure: true } }]);
 const SMOKE = process.argv.includes('--smoke');
+// A smoke run has a profile of its own: the default one is the installed app's (`%APPDATA%\Clew`),
+// with the person's vaults in its storage, and is locked while that app runs. Older smoke
+// profiles go; one still in use by another run stays (its files are held open).
+if (SMOKE && !app.commandLine.hasSwitch('user-data-dir')) {
+  const tmp = require('node:os').tmpdir();
+  for (const name of fs.readdirSync(tmp).filter((n) => n.startsWith('clew-smoke-profile-'))) {
+    try {
+      fs.rmSync(path.join(tmp, name), { recursive: true, force: true, maxRetries: 0 });
+    } catch {
+      // held by a run still going
+    }
+  }
+  app.setPath('userData', path.join(tmp, `clew-smoke-profile-${process.pid}`));
+}
 // Started at login: the tray only, no window until asked for.
 const HIDDEN = process.argv.includes('--hidden');
 // The tools (tray, audio server) stay out of the smoke run unless asked for: it would bind the
@@ -455,7 +469,15 @@ function activateSiteUpdates() {
 const lastCheck = { at: null, results: {} };
 let checking = null;
 
-const appUpdater = createAppUpdater({ enabled: APP_UPDATES, onChange: () => updatesChanged() });
+const appUpdater = createAppUpdater({
+  enabled: APP_UPDATES,
+  onChange: () => updatesChanged(),
+  // macOS builds carry no Developer ID signature, so they cannot install an update: they say
+  // which release is the latest, and the person downloads it (src/app-update.js, "tell only").
+  ...(process.platform === 'darwin'
+    ? { currentVersion: app.getVersion(), latestRelease: () => githubLatestRelease('yaqalab/clew-desktop', net.fetch) }
+    : {}),
+});
 
 /** What Settings › General shows. */
 function updatesSnapshot() {

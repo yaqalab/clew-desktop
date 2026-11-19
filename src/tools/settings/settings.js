@@ -620,6 +620,19 @@ function appUpdateText(a) {
   return '';
 }
 
+/** Tell only (macOS): a newer release, to download from its page. */
+function appAvailableLink(a) {
+  if (a.status !== 'available' || !a.url) return null;
+  const line = textEl('div', `Version ${a.version} is out: `, 'muted');
+  const link = document.createElement('a');
+  link.href = a.url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = 'download it';
+  line.append(link);
+  return line;
+}
+
 function renderUpdates(u) {
   if (!u) return;
   if (u.releasesUrl) {
@@ -629,7 +642,9 @@ function renderUpdates(u) {
   const appOn = Boolean(u.app?.enabled);
   setTip(
     $('updates-tip'),
-    `Clew Desktop updates itself from its releases, Clew and yaqatw from their websites: checked when Clew starts and every ${u.intervalHours} hours.`,
+    u.app?.tellOnly
+      ? `Clew and yaqatw update themselves from their websites; Clew Desktop says when a new version is out, to download from its releases (on macOS it cannot install one itself). Checked when Clew starts and every ${u.intervalHours} hours.`
+      : `Clew Desktop updates itself from its releases, Clew and yaqatw from their websites: checked when Clew starts and every ${u.intervalHours} hours.`,
   );
   const grid = $('update-sites');
   grid.replaceChildren();
@@ -639,6 +654,8 @@ function renderUpdates(u) {
     cell.append(textEl('div', `Version ${u.app.current}`));
     const more = appUpdateText(u.app);
     if (more) cell.append(textEl('div', more, 'muted'));
+    const available = appAvailableLink(u.app);
+    if (available) cell.append(available);
     grid.append(cell);
   }
   for (const s of u.sites) {
@@ -673,7 +690,9 @@ function renderUpdates(u) {
       ? u.enabled || appOn
         ? 'Not checked yet'
         : 'Off in this run (development or test)'
-      : `Checked ${when(checkedAt)}${ready ? ' · update ready' : failed ? '' : ' · up to date'}`;
+      : `Checked ${when(checkedAt)}${
+          ready ? ' · update ready' : u.app?.status === 'available' ? ' · a new version is out' : failed ? '' : ' · up to date'
+        }`;
 }
 
 $('check-updates').addEventListener('click', async () => {

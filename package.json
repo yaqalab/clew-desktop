@@ -84,6 +84,7 @@
         "zip"
       ],
       "category": "public.app-category.education",
+      "artifactName": "Clew-${version}-mac-${arch}.${ext}",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
