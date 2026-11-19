@@ -22,7 +22,8 @@
 - **`serve --key-stdin`:** one key, `stt.<name>.<secret>`, read from the first line of stdin and
   held in memory. The tray makes it, seals it with DPAPI and hands it over at each start.
 - **`download <model>` / `models`:** models live in `<models-dir>/<name>/`; the default folder
-  is `%LOCALAPPDATA%\clew-stt\models`. A download writes `<name>.part` and renames it when
+  is `%LOCALAPPDATA%\clew-stt\models` (macOS: `~/Library/Application Support/clew-stt/models`,
+  Linux: `$XDG_DATA_HOME` or `~/.local/share`, then `clew-stt/models`). A download writes `<name>.part` and renames it when
   complete, resumes file by file, and prints `total <bytes>`, then `progress N` once per percent,
   then `done <folder>` or `error <reason>`. `ALEFA_STT_HUB` points it at another address that
   answers like Hugging Face (the tray's tests).
@@ -72,14 +73,21 @@ clew-stt-server download small
 clew-stt-server stream http://127.0.0.1:47822 talk.wav --key stt.local.… --language ja --prompt "協働学習, 第二言語"
 ```
 
-## Build the Windows program
+## Build the program
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/stt-server/build_exe.ps1
+powershell -ExecutionPolicy Bypass -File tools/stt-server/build_exe.ps1   # Windows
 ```
 
-Result: `tools/stt-server/dist/clew-stt-server/` (about 200 MB, `--onedir`). The native audio
-server's installer ships it as an optional component. No model is inside.
+```sh
+sh tools/stt-server/build_dist.sh                                          # macOS, Linux
+```
+
+Result: `tools/stt-server/dist/clew-stt-server/` (`--onedir`; about 200 MB on Windows, 420 MB
+on Linux), with `THIRD-PARTY-NOTICES.txt` for that system (`third_party_notices.py`). The
+native audio server's Windows installer ships it as an optional component; Clew Desktop
+downloads it on demand from the clew-tools release. No model is inside. A Linux build
+runs on systems with a glibc at least as new as the build machine's.
 
 **Dependencies** (`[local]`): `faster-whisper` (the engine; brings CTranslate2, tokenizers,
 huggingface_hub) and `av` (decoding without ffmpeg). Left out of the build: `onnxruntime`

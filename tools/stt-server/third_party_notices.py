@@ -1,11 +1,12 @@
-"""Writes THIRD-PARTY-NOTICES.txt for the Windows build of the dictation server.
+"""Writes THIRD-PARTY-NOTICES.txt for a build of the dictation server (Windows, macOS, Linux).
 
     python third_party_notices.py <output file>
 
-Run with the build environment's Python (build_exe.ps1 does): it walks what `alefa-stt[local]`
-installs, package by package, and copies each one's licence text from its metadata. PyAV's wheel
-also carries FFmpeg and the libraries FFmpeg was built with, as DLLs; those are listed by name
-with where their source is, since they are not Python packages.
+Run with the build environment's Python (build_exe.ps1 and build_dist.sh do): it walks what
+`alefa-stt[local]` installs, package by package, and copies each one's licence text from its
+metadata. PyAV's wheel also carries FFmpeg and the libraries FFmpeg was built with, and other
+wheels carry native libraries too; those are listed by name, from each wheel's file list, with
+where their source or licence is, since they are not Python packages.
 """
 
 from __future__ import annotations
@@ -13,26 +14,34 @@ from __future__ import annotations
 import importlib.metadata as md
 import re
 import sys
+import textwrap
 from pathlib import Path
 
 from packaging.requirements import Requirement
 
 ROOT = "alefa-stt"
 EXTRAS = {"local"}
-# Left out of the build by build_exe.ps1 (--exclude-module), so not shipped.
+# Left out of the build by build_exe.ps1 / build_dist.sh (--exclude-module), so not shipped.
 EXCLUDED = {"onnxruntime", "hf-xet"}
 CONTACT = "alefa-support@googlegroups.com"
+SYSTEM = {"win32": "Windows", "darwin": "macOS"}.get(sys.platform, "Linux")
 
+# A shared library, not a Python extension module (those are the packages' own code).
+NATIVE = re.compile(r"\.(dll|dylib)$|\.so(\.\d+)*$", re.IGNORECASE)
+EXTENSION = re.compile(r"\.(cpython-|abi3\.|pyd$)", re.IGNORECASE)
+# The hash the wheel repair tools (delvewheel, auditwheel) add to a bundled library's name.
+REPAIR_HASH = re.compile(r"-[0-9a-f]{8,32}(?=\.)")
+
+# Its first two paragraphs are filled to the page width once the names are in (ffmpeg_section).
 FFMPEG_NOTE = """\
-PyAV's wheel for Windows (av {av}) ships FFmpeg's libraries (avcodec, avformat, avutil,
-swresample, swscale, avfilter, avdevice) and the libraries that FFmpeg build links to, as DLLs in
-av.libs. The dictation server uses them only to decode audio. FFmpeg reports its licence as:
-"{ffmpeg_licence}". Among the bundled libraries, x264 and x265 are under the GNU General Public
-License, version 2 or later; the others under the LGPL (libiconv), BSD-style licences (libvpx,
-dav1d, SVT-AV1, libwebp, libopus), the zlib licence (zlib), or the GCC Runtime Library Exception
-(the MinGW runtime: libgcc, libstdc++, libwinpthread).
+PyAV's wheel for {system} (av {av}) ships FFmpeg's libraries (avcodec, avformat, avutil, \
+swresample, swscale, avfilter, avdevice) and the libraries that FFmpeg build links to. The \
+dictation server uses them only to decode audio. FFmpeg reports its licence as: \
+"{ffmpeg_licence}". Among the bundled libraries, x264 and x265 are under the GNU General Public \
+License, version 2 or later; the others under the LGPL (such as libiconv), BSD-style licences \
+(such as libvpx, dav1d, SVT-AV1, libwebp, libopus) or the zlib licence (zlib).{system_note}
 
-DLLs in this build: {dlls}
+Libraries in this build: {libs}
 
 Source code:
   - how that FFmpeg build is made, with the source of each library:
@@ -51,17 +60,36 @@ The GNU LGPL v2.1: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
 The GNU LGPL v3: https://www.gnu.org/licenses/lgpl-3.0.txt
 """
 
+SYSTEM_NOTE = {
+    "Windows": " The MinGW runtime (libgcc, libstdc++, libwinpthread) is under the GCC Runtime "
+               "Library Exception.",
+    "macOS": "",
+    "Linux": (
+        " The Linux wheels also carry system libraries of the image they were built in "
+        "(manylinux, AlmaLinux or CentOS), each under its own licence; their source: "
+        "https://vault.almalinux.org/ and https://vault.centos.org/."
+    ),
+}
+
 NATIVE_NOTE = """\
 Native libraries inside Python packages (their licences are in the package's own texts below,
 except where named here):
 {native}
-  - cudnn64_9.dll (inside CTranslate2's wheel): NVIDIA cuDNN, redistributed under the NVIDIA
-    cuDNN Software License Agreement, https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html
-  - libiomp5md.dll (inside CTranslate2's wheel): the Intel OpenMP runtime, redistributed under the
-    Intel Simplified Software License, https://www.intel.com/content/www/us/en/developer/articles/license/end-user-license-agreement.html
-  - onnxruntime.dll (inside sherpa-onnx's wheel): ONNX Runtime, MIT licence,
-    https://github.com/microsoft/onnxruntime
 """
+
+# Libraries a wheel carries that are not that project's own work: (name pattern, note).
+KNOWN = [
+    (r"cudnn", "NVIDIA cuDNN, redistributed under the NVIDIA cuDNN Software License Agreement, "
+               "https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html"),
+    (r"iomp5", "the Intel OpenMP runtime, redistributed under the Intel Simplified Software License, "
+               "https://www.intel.com/content/www/us/en/developer/articles/license/end-user-license-agreement.html"),
+    (r"^libgomp", "the GNU OpenMP runtime (GCC), GPL-3.0 with the GCC Runtime Library Exception, "
+                  "https://www.gnu.org/licenses/gcc-exception-3.1.html"),
+    (r"^libomp", "the LLVM OpenMP runtime, Apache-2.0 with LLVM exceptions, "
+                 "https://github.com/llvm/llvm-project/blob/main/openmp/LICENSE.TXT"),
+    (r"onnxruntime", "ONNX Runtime, MIT licence, https://github.com/microsoft/onnxruntime"),
+    (r"^libasound", "ALSA's library (alsa-lib), LGPL-2.1-or-later, https://github.com/alsa-project/alsa-lib"),
+]
 
 LICENCE_FILE = re.compile(r"(^|/)(LICEN[CS]E|COPYING|NOTICE)[^/]*$", re.IGNORECASE)
 
@@ -78,7 +106,7 @@ def walk() -> list[md.Distribution]:
         try:
             dist = md.distribution(name)
         except md.PackageNotFoundError:
-            continue  # an optional dependency not installed on Windows
+            continue  # an optional dependency not installed on this system
         key = norm(dist.metadata["Name"])
         if key in seen and not extras:
             continue
@@ -117,36 +145,66 @@ def licence_name(dist: md.Distribution) -> str:
     return first[0][:80] if first else "see the licence text below"
 
 
+def native_libs(package: str) -> list[Path]:
+    """The shared libraries a package installed, from its file list (wherever the wheel put
+    them: av.libs, av/.dylibs, sherpa_onnx/lib...), skipping import libraries and the
+    package's own extension modules."""
+    try:
+        dist = md.distribution(package)
+    except md.PackageNotFoundError:
+        return []
+    out = []
+    for f in dist.files or []:
+        name = str(f).replace("\\", "/").rsplit("/", 1)[-1]
+        if NATIVE.search(name) and not EXTENSION.search(name) and not str(f).startswith(".."):
+            out.append(Path(f.locate()))
+    return out
+
+
+def short(path: Path) -> str:
+    return REPAIR_HASH.sub("", path.name)
+
+
 def ffmpeg_section() -> str:
     av = md.distribution("av")
-    libs = Path(av.locate_file("av.libs"))
-    dlls = sorted({re.split(r"-[0-9a-f]{32}", p.name)[0] for p in libs.glob("*.dll")})
+    libs = native_libs("av")
     licence = "unknown"
-    for p in libs.glob("avutil-*.dll"):
-        found = re.search(rb"license: ([A-Za-z0-9 .+]+)", p.read_bytes())
-        if found:
-            licence = "license: " + found.group(1).decode("ascii")
-    return FFMPEG_NOTE.format(av=av.version, ffmpeg_licence=licence, dlls=", ".join(dlls), contact=CONTACT)
+    for p in libs:
+        if p.name.lower().startswith(("avutil", "libavutil")):
+            found = re.search(rb"license: ([A-Za-z0-9 .+]+)", p.read_bytes())
+            if found:
+                licence = "license: " + found.group(1).decode("ascii")
+    text = FFMPEG_NOTE.format(
+        system=SYSTEM, av=av.version, ffmpeg_licence=licence, system_note=SYSTEM_NOTE[SYSTEM],
+        libs=", ".join(sorted({short(p) for p in libs}, key=str.lower)), contact=CONTACT,
+    )
+    paragraphs = text.split("\n\n")
+    for i in (0, 1):
+        paragraphs[i] = textwrap.fill(paragraphs[i], 96, break_long_words=False, break_on_hyphens=False)
+    return "\n\n".join(paragraphs)
 
 
 def native_section() -> str:
-    lines = []
-    for package, folder in (("ctranslate2", "ctranslate2"), ("sherpa-onnx", "sherpa_onnx/lib")):
-        try:
-            where = Path(md.distribution(package).locate_file(folder))
-        except md.PackageNotFoundError:
-            continue
-        names = sorted(p.name for p in where.glob("*.dll"))
+    lines, named = [], []
+    for package in ("ctranslate2", "sherpa-onnx", "sherpa-onnx-core"):
+        names = sorted({short(p) for p in native_libs(package)})
         if names:
             lines.append(f"  - {package}: {', '.join(names)}")
-    return NATIVE_NOTE.format(native="\n".join(lines))
+        for name in names:
+            for pattern, note in KNOWN:
+                if re.search(pattern, name, re.IGNORECASE):
+                    named.append(textwrap.fill(
+                        f"{name} (inside {package}'s wheel): {note}", 96, initial_indent="  - ",
+                        subsequent_indent="    ", break_long_words=False, break_on_hyphens=False))
+    return NATIVE_NOTE.format(native="\n".join(lines + named))
 
 
 def main() -> None:
     out = Path(sys.argv[1])
+    title = f"Third-party software in the Clew dictation server ({SYSTEM} build)"
     parts = [
-        "Third-party software in the Clew dictation server (Windows build)",
-        "=" * 66,
+        title,
+        "=" * len(title),
         "",
         "The dictation server's own code is under the MIT licence (LICENSE in",
         "https://github.com/yaqalab/clew-tools). It is packed with Python and the packages",
