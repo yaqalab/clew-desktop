@@ -12,7 +12,7 @@ const permissions = require('./permissions');
 const screenPicker = require('./screen-picker');
 const { createSettler } = require('./settle');
 const { Tools } = require('./tools');
-const { createAppUpdater } = require('./app-update');
+const { createAppUpdater, githubLatestRelease } = require('./app-update');
 const databases = require('./db');
 const localApi = require('./local-api');
 const { createWordPlugin } = require('./word-plugin');
@@ -469,7 +469,15 @@ function activateSiteUpdates() {
 const lastCheck = { at: null, results: {} };
 let checking = null;
 
-const appUpdater = createAppUpdater({ enabled: APP_UPDATES, onChange: () => updatesChanged() });
+const appUpdater = createAppUpdater({
+  enabled: APP_UPDATES,
+  onChange: () => updatesChanged(),
+  // macOS builds carry no Developer ID signature, so they cannot install an update: they say
+  // which release is the latest, and the person downloads it (src/app-update.js, "tell only").
+  ...(process.platform === 'darwin'
+    ? { currentVersion: app.getVersion(), latestRelease: () => githubLatestRelease('yaqalab/clew-desktop', net.fetch) }
+    : {}),
+});
 
 /** What Settings › General shows. */
 function updatesSnapshot() {

@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { createAppUpdater, shortError } = require('../src/app-update');
+const { createAppUpdater, shortError, newerThan, githubLatestRelease } = require('../src/app-update');
 
 /** An autoUpdater double: `checkForUpdates` plays the events electron-updater would. */
 function fakeUpdater(script) {
@@ -90,6 +90,68 @@ test('off: never touches the updater', async () => {
   });
   assert.equal((await up.check()).status, 'idle');
   assert.equal(up.install(), false);
+});
+
+test('tell only (macOS): says a newer release is out, downloads and installs nothing', async () => {
+  let latest = { version: '0.5.0', url: 'https://github.com/o/r/releases/tag/v0.5.0' };
+  const up = createAppUpdater({
+    enabled: true,
+    onChange: () => {},
+    currentVersion: '0.4.0',
+    latestRelease: async () => latest,
+    updater: {
+      get checkForUpdates() {
+        throw new Error('electron-updater touched');
+      },
+    },
+  });
+  const found = await up.check();
+  assert.equal(found.tellOnly, true);
+  assert.equal(found.status, 'available');
+  assert.equal(found.version, '0.5.0');
+  assert.equal(found.url, latest.url);
+  assert.equal(up.ready(), false);
+  assert.equal(up.install(), false);
+
+  latest = { version: '0.4.0', url: 'x' };
+  assert.equal((await up.check()).status, 'up-to-date');
+});
+
+test('tell only: a failed check is said, not thrown', async () => {
+  const up = createAppUpdater({
+    enabled: true,
+    onChange: () => {},
+    currentVersion: '0.4.0',
+    latestRelease: async () => {
+      throw new Error('could not read the latest release (403)');
+    },
+  });
+  const s = await up.check();
+  assert.equal(s.status, 'error');
+  assert.match(s.error, /403/);
+});
+
+test('versions compare by number, ignoring v and a pre-release', () => {
+  assert.equal(newerThan('0.10.0', '0.9.9'), true);
+  assert.equal(newerThan('v0.4.1', '0.4.0'), true);
+  assert.equal(newerThan('0.4.0', '0.4.0'), false);
+  assert.equal(newerThan('0.4.0-beta.1', '0.4.0'), false);
+  assert.equal(newerThan('0.3.9', '0.4.0'), false);
+});
+
+test("the latest release is read from GitHub's API", async () => {
+  let asked = null;
+  const fake = async (url) => {
+    asked = url;
+    return { ok: true, json: async () => ({ tag_name: 'v0.4.1', html_url: 'https://h/v0.4.1' }) };
+  };
+  assert.deepEqual(await githubLatestRelease('yaqalab/clew-desktop', fake), {
+    version: '0.4.1',
+    url: 'https://h/v0.4.1',
+  });
+  assert.equal(asked, 'https://api.github.com/repos/yaqalab/clew-desktop/releases/latest');
+  const refused = async () => ({ ok: false, status: 404 });
+  await assert.rejects(githubLatestRelease('o/r', refused), /404/);
 });
 
 test('error text keeps its first line', () => {
