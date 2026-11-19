@@ -525,12 +525,31 @@ async function run(win, ses, server, tools, folder, db, api) {
           for (let i = 0; i < 40 && !document.getElementById('wipe-dialog').open; i++) await new Promise((r) => setTimeout(r, 100));
           const r = { open: document.getElementById('wipe-dialog').open,
             items: document.querySelectorAll('#wipe-items li').length,
-            kept: document.querySelectorAll('#wipe-kept li').length,
+            kept: document.querySelectorAll('#wipe-kept span').length,
             go: document.getElementById('wipe-go').disabled };
+          document.getElementById('wipe-cancel').click();
+          r.afterCancel = document.getElementById('wipe-dialog').open;
           document.getElementById('wipe-dialog').close();
           return r;
         })()`);
-        assert(wipeShown.open && wipeShown.items === 2 && wipeShown.kept >= 2 && wipeShown.go, `wipe dialog: ${JSON.stringify(wipeShown)}`);
+        assert(
+          wipeShown.open && wipeShown.items === 2 && wipeShown.kept >= 2 && wipeShown.go && !wipeShown.afterCancel,
+          `wipe dialog: ${JSON.stringify(wipeShown)}`,
+        );
+        // The analysis key: masked, shown on Show (to select and copy), masked again on Hide.
+        const keyShown = await sw.webContents.executeJavaScript(`(async () => {
+          const value = () => document.getElementById('ana-key').textContent;
+          const masked = value();
+          document.getElementById('ana-key-show').click();
+          for (let i = 0; i < 40 && value() === masked; i++) await new Promise((r) => setTimeout(r, 100));
+          const shown = value();
+          document.getElementById('ana-key-show').click();
+          return { masked, shown, hidden: value() };
+        })()`);
+        assert(
+          /^•+$/.test(keyShown.masked) && keyShown.shown.length >= 16 && !/•/.test(keyShown.shown) && keyShown.hidden === keyShown.masked,
+          `analysis key: ${JSON.stringify({ ...keyShown, shown: keyShown.shown.length })}`,
+        );
         assert(text, 'no server state shown');
         assert(errors.length === 0, errors.join(' | '));
         sw.destroy();

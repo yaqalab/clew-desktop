@@ -7,7 +7,6 @@ const $ = (id) => document.getElementById(id);
 let settings = null; // settings.get
 let snap = null; // tools:snapshot (state, problem, status, dictationProgram, installing…)
 let models = null; // dictation.models
-let secretShown = false;
 
 const BACKENDS = [
   { id: 'r', name: 'R', key: 'analysisRscript', pick: 'Choose Rscript' },
@@ -43,6 +42,43 @@ function el(tag, attrs = {}, ...children) {
   for (const c of children) e.append(c);
   return e;
 }
+
+// Explanations sit behind an (i) button (`.info`, its text in data-tip), shown on hover or focus
+// in one floating tip. In an open modal dialog the tip moves into the dialog: the dialog is in the
+// top layer, above anything in the page.
+const tip = el('div', { class: 'tip', role: 'tooltip' });
+tip.hidden = true;
+
+function setTip(button, text) {
+  button.dataset.tip = text;
+  button.setAttribute('aria-label', text);
+}
+
+function showTip(button) {
+  if (!button.dataset.tip) return;
+  (button.closest('dialog[open]') ?? document.body).append(tip);
+  tip.textContent = button.dataset.tip;
+  tip.hidden = false;
+  const r = button.getBoundingClientRect();
+  const { offsetWidth: w, offsetHeight: h } = tip;
+  tip.style.left = `${Math.max(8, Math.min(r.left - 8, innerWidth - w - 8))}px`;
+  tip.style.top = `${r.bottom + 6 + h > innerHeight - 8 ? r.top - 6 - h : r.bottom + 6}px`;
+}
+const hideTip = () => (tip.hidden = true);
+
+for (const b of document.querySelectorAll('.info[data-tip]')) setTip(b, b.dataset.tip);
+document.addEventListener('mouseover', (e) => {
+  const b = e.target.closest?.('.info');
+  if (b) showTip(b);
+});
+document.addEventListener('mouseout', (e) => {
+  if (e.target.closest?.('.info') && document.activeElement !== e.target.closest('.info')) hideTip();
+});
+// Focus from the keyboard only: a dialog focusing its first button on opening shows nothing.
+document.addEventListener('focusin', (e) => (e.target.matches('.info:focus-visible') ? showTip(e.target) : hideTip()));
+document.addEventListener('focusout', hideTip);
+document.addEventListener('keydown', (e) => e.key === 'Escape' && hideTip());
+document.addEventListener('scroll', hideTip, true);
 
 function setState(node, text, kind) {
   node.textContent = text;
@@ -87,9 +123,9 @@ function renderAll() {
         ? 'The audio server is not installed with this copy of Clew. Reinstall Clew.'
         : `The audio server is ${snap.state}${snap.problem ? `: ${snap.problem}` : ''}.`;
   } else banner.hidden = true;
-  for (const b of document.querySelectorAll('main button, main input, main select')) {
-    // The app's own rows (`data-app`) do not depend on the audio server.
-    if (b.id !== 'open-app' && b.id !== 'login' && !b.closest('[data-app]')) b.disabled = snap.state !== 'running';
+  for (const b of document.querySelectorAll('main button:not(.info), main input, main select')) {
+    // The app's own rows (`data-app`) do not depend on the audio server; explanations never do.
+    if (!b.closest('[data-app]')) b.disabled = snap.state !== 'running';
   }
   renderSettings();
   renderStatus();
@@ -241,15 +277,15 @@ function renderModels() {
           }),
         ),
         el('td', {}, m.name + (m.englishOnly ? ' (English only)' : '')),
-        el('td', {}, mb(m.bytes)),
+        el('td', { class: 'nowrap' }, mb(m.bytes)),
         el('td', {}, use[m.use] + note),
         el('td', {}, action),
       ),
     );
   }
-  $('dict-models-note').textContent =
-    `small suits most computers. Models are kept in ${models.modelsDir}.` +
-    (d?.downloadProblem ? ` Last download failed: ${d.downloadProblem}` : '');
+  setTip($('dict-models-tip'), `small suits most computers. Models are kept in ${models.modelsDir}.`);
+  $('dict-models-note').textContent = d?.downloadProblem ? `Last download failed: ${d.downloadProblem}` : '';
+  $('dict-models-note').hidden = !d?.downloadProblem;
 }
 
 function renderBackends() {
@@ -281,7 +317,7 @@ function renderBackends() {
             on: { change: () => apply({ analysisBackend: b.id }) },
           }),
         ),
-        el('td', {}, b.name),
+        el('td', { class: 'nowrap' }, b.name),
         el('td', { title: settings[b.key] || '' }, settings[b.key] ? `chosen: ${settings[b.key]}` : found),
         el(
           'td',
@@ -327,32 +363,57 @@ $('folder-add').addEventListener('click', async () => {
 $('server-toggle').addEventListener('click', () =>
   run(() => window.tools.call(snap.status?.server.running ? 'server.stop' : 'server.start')),
 );
-$('secret-show').addEventListener('click', async () => {
-  if (secretShown) {
-    $('secret').textContent = '••••••••••••••••';
-    $('secret-show').textContent = 'Show';
-    secretShown = false;
-    return;
-  }
-  const r = await run(() => window.tools.call('secret.get'));
-  if (!r) return;
-  $('secret').textContent = r.secret;
-  $('secret-show').textContent = 'Hide';
-  secretShown = true;
+/**
+ * A value to paste elsewhere (the secret, the dictation and analysis keys): masked until Show,
+ * then selectable; Copy; New makes another one at once (`<id>`, `<id>-show`, `-copy`, `-new`).
+ */
+function bindMasked(id, { get, reset, pick, name, ask }) {
+  const MASK = '••••••••••••••••';
+  let shown = false;
+  const read = async () => {
+    const r = await run(() => window.tools.call(get));
+    return r && pick(r);
+  };
+  $(`${id}-show`).addEventListener('click', async () => {
+    const value = shown ? null : await read();
+    if (!shown && !value) return;
+    shown = !shown;
+    $(id).textContent = shown ? value : MASK;
+    $(`${id}-show`).textContent = shown ? 'Hide' : 'Show';
+  });
+  $(`${id}-copy`).addEventListener('click', async () => {
+    const value = await read();
+    if (!value) return;
+    await window.tools.copy(value);
+    toast(`${name} copied`);
+  });
+  $(`${id}-new`).addEventListener('click', async () => {
+    if (!confirm(ask)) return;
+    if (!(await run(() => window.tools.call(reset)))) return;
+    if (shown) $(id).textContent = (await read()) ?? MASK;
+    toast(`A new ${name.toLowerCase()} was made`);
+  });
+}
+bindMasked('secret', {
+  get: 'secret.get',
+  reset: 'secret.reset',
+  pick: (r) => r.secret,
+  name: 'Secret',
+  ask: 'Make a new secret? The old one stops working at once; Clew will ask for the new one.',
 });
-$('secret-copy').addEventListener('click', async () => {
-  const r = await run(() => window.tools.call('secret.get'));
-  if (r) {
-    await window.tools.copy(r.secret);
-    toast('Secret copied');
-  }
+bindMasked('stt-key', {
+  get: 'sttKey.get',
+  reset: 'sttKey.reset',
+  pick: (r) => r.key,
+  name: 'Dictation key',
+  ask: 'Make a new dictation key? The old one stops working at once.',
 });
-$('secret-new').addEventListener('click', async () => {
-  if (!confirm('Make a new secret? The old one stops working at once; Clew will ask for the new one.')) return;
-  const r = await run(() => window.tools.call('secret.reset'));
-  if (!r) return;
-  if (secretShown) $('secret').textContent = r.secret;
-  toast('A new secret was made');
+bindMasked('ana-key', {
+  get: 'analysisKey.get',
+  reset: 'analysisKey.reset',
+  pick: (r) => r.key,
+  name: 'Analysis key',
+  ask: 'Make a new analysis key? The old one stops working at once.',
 });
 $('address-copy').addEventListener('click', async () => {
   await window.tools.copy($('address').textContent);
@@ -380,17 +441,6 @@ $('dict-uninstall').addEventListener('click', async () => {
 $('dict-toggle').addEventListener('click', () =>
   run(() => window.tools.call(snap.status?.dictation.wanted ? 'dictation.stop' : 'dictation.start')),
 );
-$('stt-key-copy').addEventListener('click', async () => {
-  const r = await run(() => window.tools.call('sttKey.get'));
-  if (r) {
-    await window.tools.copy(r.key);
-    toast('Dictation key copied');
-  }
-});
-$('stt-key-new').addEventListener('click', async () => {
-  if (!confirm('Make a new dictation key? The old one stops working at once.')) return;
-  if (await run(() => window.tools.call('sttKey.reset'))) toast('A new dictation key was made');
-});
 
 $('ana-toggle').addEventListener('click', () =>
   run(() => window.tools.call(snap.status?.analysis.wanted ? 'analysis.stop' : 'analysis.start')),
@@ -401,17 +451,6 @@ $('scripts-pick').addEventListener('click', async () => {
   if (p) await apply({ analysisScripts: p });
 });
 $('scripts-clear').addEventListener('click', () => apply({ analysisScripts: '' }));
-$('ana-key-copy').addEventListener('click', async () => {
-  const r = await run(() => window.tools.call('analysisKey.get'));
-  if (r) {
-    await window.tools.copy(r.key);
-    toast('Analysis key copied');
-  }
-});
-$('ana-key-new').addEventListener('click', async () => {
-  if (!confirm('Make a new analysis key? The old one stops working at once.')) return;
-  if (await run(() => window.tools.call('analysisKey.reset'))) toast('A new analysis key was made');
-});
 
 $('login').addEventListener('change', async () => {
   $('login').checked = await window.tools.setLoginItem($('login').checked);
@@ -438,14 +477,20 @@ function renderWipePlan(p) {
       box.disabled = !item.exists;
       li.append(box);
     }
-    const text = el('span', { class: 'grow', title: item.path }, `${item.label} — ${item.path}`);
-    li.append(text, el('span', { class: 'muted' }, item.exists ? size(item.bytes) : 'not there'));
+    const where = el('button', { type: 'button', class: 'info' }, 'i');
+    setTip(where, item.path);
+    li.append(el('span', { class: 'grow' }, item.label), where);
+    li.append(el('span', { class: 'muted size' }, item.exists ? size(item.bytes) : 'not there'));
     list.append(li);
   }
-  $('wipe-kept').replaceChildren(...p.kept.map((k) => el('li', {}, k)));
+  $('wipe-kept').replaceChildren(...p.kept.map((k) => el('span', {}, k.label)));
+  setTip($('wipe-kept-tip'), p.kept.map((k) => k.detail).join('\n'));
   $('wipe-word').hidden = !p.word;
-  $('wipe-pass-rule').textContent =
-    `At least ${p.minPassphrase} characters: letters without accents, digits, spaces and punctuation (other characters open differently in different archivers).`;
+  $('wipe-pass').placeholder = `at least ${p.minPassphrase} characters`;
+  setTip(
+    $('wipe-pass-tip'),
+    `At least ${p.minPassphrase} characters: letters without accents, digits, spaces and punctuation (other characters open differently in different archivers).`,
+  );
 }
 
 function wipeBackupShown() {
@@ -468,8 +513,9 @@ $('wipe-open').addEventListener('click', async () => {
   $('wipe-dialog').showModal();
 });
 $('wipe-backup').addEventListener('change', wipeBackupShown);
-$('wipe-cancel').addEventListener('click', (e) => {
-  if (wiping) e.preventDefault();
+// Cancel is a plain button: the form's submit handler below only ever runs the removal.
+$('wipe-cancel').addEventListener('click', () => {
+  if (!wiping) $('wipe-dialog').close();
 });
 $('wipe-dialog').addEventListener('cancel', (e) => {
   if (wiping) e.preventDefault();
@@ -547,6 +593,7 @@ function renderAppPrefs(p) {
   $('devtools').checked = p.devTools || p.devToolsAlways;
   $('devtools').disabled = p.devToolsAlways;
   if (p.devToolsAlways) $('devtools-note').textContent = 'Always shown in a development run.';
+  $('devtools-note').hidden = !p.devToolsAlways;
 }
 $('devtools').addEventListener('change', async () => {
   renderAppPrefs(await run(() => window.tools.setDevTools($('devtools').checked)));
@@ -580,23 +627,23 @@ function renderUpdates(u) {
     $('releases-note').hidden = false;
   }
   const appOn = Boolean(u.app?.enabled);
-  $('updates-note').textContent =
-    u.enabled || appOn
-      ? `Clew Desktop updates itself from its releases, Clew and yaqatw from their websites: checked when Clew starts and every ${u.intervalHours} hours.`
-      : 'Updates are off in this run (development or test).';
+  setTip(
+    $('updates-tip'),
+    `Clew Desktop updates itself from its releases, Clew and yaqatw from their websites: checked when Clew starts and every ${u.intervalHours} hours.`,
+  );
   const grid = $('update-sites');
   grid.replaceChildren();
   if (u.app) {
-    grid.append(textEl('span', 'Clew Desktop'));
-    const cell = textEl('div');
+    grid.append(textEl('span', 'Clew Desktop', 'label'));
+    const cell = textEl('div', '', 'wide');
     cell.append(textEl('div', `Version ${u.app.current}`));
     const more = appUpdateText(u.app);
     if (more) cell.append(textEl('div', more, 'muted'));
     grid.append(cell);
   }
   for (const s of u.sites) {
-    grid.append(textEl('span', SITE_NAMES[s.name] ?? s.name));
-    const cell = textEl('div');
+    grid.append(textEl('span', SITE_NAMES[s.name] ?? s.name, 'label'));
+    const cell = textEl('div', '', 'wide');
     const date = s.committedAt || s.builtAt;
     cell.append(
       textEl('div', `${short(s.commit)}${date ? ` · ${when(date)}` : ''} · ${s.from === 'update' ? 'updated' : 'from the installer'}`),
@@ -625,7 +672,7 @@ function renderUpdates(u) {
     : !checkedAt
       ? u.enabled || appOn
         ? 'Not checked yet'
-        : ''
+        : 'Off in this run (development or test)'
       : `Checked ${when(checkedAt)}${ready ? ' · update ready' : failed ? '' : ' · up to date'}`;
 }
 
@@ -648,50 +695,41 @@ const WORD_KIND = 'word-template';
 function renderWord(w) {
   if (!w) return;
   const { plugin, clients } = w;
-  $('word-section').hidden = !(plugin.available || plugin.installed);
-  const grid = $('word-plugin');
+  // One form: Yaqatw for Word first (its connection in its own row), then the other programs.
+  const grid = $('clients');
   grid.replaceChildren();
-  grid.append(textEl('span', 'Yaqatw for Word'));
-  const cell = textEl('div', '', 'row');
-  cell.append(
-    textEl(
-      'span',
-      plugin.installed
-        ? plugin.connected
-          ? 'Installed and connected: Word shows the Yaqatw tab.'
-          : 'Installed, not connected yet.'
-        : 'Not installed.',
-    ),
-  );
-  const button = el(
-    'button',
-    {
-      on: {
-        click: async () => {
-          button.disabled = true;
-          const next = await run(() => (plugin.installed ? window.tools.removeWord() : window.tools.installWord()));
-          renderWord(next ?? (await window.tools.word()));
+  const wordClient = plugin.installed ? clients.find((c) => c.kind === WORD_KIND) : null;
+  if (plugin.available || plugin.installed) {
+    const button = el(
+      'button',
+      {
+        on: {
+          click: async () => {
+            button.disabled = true;
+            const next = await run(() => (plugin.installed ? window.tools.removeWord() : window.tools.installWord()));
+            renderWord(next ?? (await window.tools.word()));
+          },
         },
       },
-    },
-    plugin.installed ? 'Remove…' : 'Install',
-  );
-  if (!plugin.available && !plugin.installed) button.disabled = true;
-  cell.append(button);
-  grid.append(cell);
-
-  const list = $('clients');
-  list.replaceChildren();
-  if (!clients.length) {
-    list.append(textEl('span', 'None.', 'muted'));
-    return;
+      plugin.installed ? 'Remove…' : 'Install',
+    );
+    const status =
+      (!plugin.installed
+        ? 'Not installed'
+        : plugin.connected
+          ? `Installed · connected${wordClient ? ` ${when(wordClient.pairedAt)}` : ''}`
+          : 'Installed, not connected yet') +
+      // Word holds the template while it runs: the new one goes in once Word is closed.
+      (plugin.waiting ? ' · an update is waiting: close Word to install it' : '');
+    grid.append(textEl('span', 'Yaqatw for Word', 'label'), textEl('span', status), el('span', { class: 'actions' }, button));
   }
-  for (const c of clients) {
-    list.append(textEl('span', c.name));
-    const row = textEl('div', '', 'row');
-    row.append(textEl('span', `Connected ${when(c.pairedAt)}`, 'muted'));
+  const others = clients.filter((c) => c !== wordClient);
+  if (!grid.children.length && !others.length) grid.append(textEl('span', 'None', 'lead muted'));
+  for (const c of others) {
+    grid.append(textEl('span', c.name, 'label'), textEl('span', `Connected ${when(c.pairedAt)}`, 'muted'));
     if (c.kind === WORD_KIND) {
-      row.append(textEl('span', '· installed with Clew: Remove above takes it away', 'muted'));
+      // A Word template paired earlier: removing Yaqatw for Word takes it away, not this list.
+      grid.append(textEl('span', 'installed with Clew', 'muted actions'));
     } else {
       const forget = el(
         'button',
@@ -706,9 +744,8 @@ function renderWord(w) {
         },
         'Disconnect',
       );
-      row.append(forget);
+      grid.append(el('span', { class: 'actions' }, forget));
     }
-    list.append(row);
   }
 }
 

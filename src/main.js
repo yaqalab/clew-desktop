@@ -214,10 +214,16 @@ function wipeWhere() {
 
 /** What Settings shows before asking: what goes, with sizes, and what stays. */
 async function wipePlan() {
-  const kept = ['Your Word documents and other files of your own'];
+  /** A short label each, shown in one line; the detail goes in that line's tooltip. */
+  const kept = [{ label: 'your own files', detail: 'Your Word documents and other files of your own.' }];
   const toolsSettings = tools?.snapshot().settingsFile;
-  if (toolsSettings) kept.push(`The audio server’s settings, shared with the standalone Clew tools: ${toolsSettings}`);
-  kept.push('The app itself: uninstall it from the system’s settings');
+  if (toolsSettings) {
+    kept.push({
+      label: 'the audio server’s settings',
+      detail: `The audio server’s settings, shared with the standalone Clew tools: ${toolsSettings}`,
+    });
+  }
+  kept.push({ label: 'the app itself', detail: 'The app itself: uninstall it from the system’s settings.' });
   return {
     items: await wipe.plan(wipeWhere()),
     kept,

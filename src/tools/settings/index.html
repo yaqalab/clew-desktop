@@ -18,70 +18,71 @@
       <button role="tab" data-tab="general">General</button>
     </nav>
 
+    <!-- Each section is a form of rows (`.rows`): a label, its value, then its buttons on the right.
+         Explanations sit behind an (i) (`.info`, settings.js `showTip`). -->
     <main>
       <p id="engine-problem" class="banner" hidden></p>
 
       <!-- Audio ------------------------------------------------------------------------------ -->
       <section role="tabpanel" id="audio">
-        <h2>Audio server</h2>
-        <p class="muted">Lets Clew list and play the recordings in your folders. Nothing is uploaded.</p>
-        <div class="row">
+        <h2>Audio server <button type="button" class="info" data-tip="Lets Clew list and play the recordings in your folders. Nothing is uploaded.">i</button></h2>
+        <div class="rows">
+          <span class="label">Server</span>
           <span id="server-state" class="state"></span>
-          <button id="server-toggle"></button>
-        </div>
+          <span class="actions"><button id="server-toggle"></button></span>
 
-        <h3>Folders</h3>
-        <p class="muted">Clew lists and plays the audio files of each ticked folder (subfolders too).</p>
-        <ul id="folders" class="list"></ul>
-        <button id="folder-add">Add…</button>
+          <label class="label" for="port">Port</label>
+          <input id="port" class="wide" type="number" min="1024" max="65535" />
 
-        <h3>Secret</h3>
-        <p class="muted">Paste it in Clew under <em>From the audio server…</em>. A new secret stops the old one at once.</p>
-        <div class="row">
+          <span class="label">Address</span>
+          <code id="address"></code>
+          <span class="actions"><button id="address-copy">Copy</button></span>
+
+          <label class="label" for="linkHours">Play links last</label>
+          <span class="row wide"><input id="linkHours" type="number" min="1" max="168" /> hours</span>
+
+          <span class="label">Secret <button type="button" class="info" data-tip="Paste it in Clew under From the audio server…. A new secret stops the old one at once.">i</button></span>
           <code id="secret" class="secret">••••••••••••••••</code>
-          <button id="secret-show">Show</button>
-          <button id="secret-copy">Copy</button>
-          <button id="secret-new">New secret</button>
+          <span class="actions"><button id="secret-show">Show</button> <button id="secret-copy">Copy</button> <button id="secret-new">New secret</button></span>
         </div>
 
-        <h3>Connection</h3>
-        <div class="grid">
-          <label for="port">Port</label>
-          <div class="row"><input id="port" type="number" min="1024" max="65535" /> <code id="address"></code> <button id="address-copy">Copy</button></div>
-          <label for="linkHours">Play links last (hours)</label>
-          <input id="linkHours" type="number" min="1" max="168" />
-        </div>
+        <h3>Folders <button type="button" class="info" data-tip="Clew lists and plays the audio files of each ticked folder (subfolders too).">i</button></h3>
+        <ul id="folders" class="list"></ul>
+        <p class="actions"><button id="folder-add">Add…</button></p>
 
-        <h3>Other Clew addresses</h3>
-        <p class="muted">A Clew on the web that may call this server (the secret is still needed). A Clew on this computer is always allowed.</p>
+        <h3>Other Clew addresses <button type="button" class="info" data-tip="A Clew on the web that may call this server (the secret is still needed). A Clew on this computer is always allowed.">i</button></h3>
         <ul id="origins" class="list"></ul>
-        <div class="row"><input id="origin-new" type="url" placeholder="https://…" /> <button id="origin-add">Add</button></div>
+        <p class="row"><input id="origin-new" class="grow" type="url" placeholder="https://…" /> <button id="origin-add">Add</button></p>
       </section>
 
       <!-- Conversion ------------------------------------------------------------------------- -->
       <section role="tabpanel" id="conversion" hidden>
-        <h2>Conversion</h2>
-        <p class="muted">.wma, .amr and long variable-bit-rate .mp3 are converted so that every browser plays and seeks them. Converted copies stay beside your recordings, in a <code>.clew-converted</code> folder; your files are never changed.</p>
-        <label class="check"><input id="convert" type="checkbox" /> Convert what browsers cannot play</label>
-        <label class="check"><input id="prepare" type="checkbox" /> Prepare those in the background, as soon as Clew lists the folder</label>
-        <label class="check"><input id="systemCodecs" type="checkbox" /> Use the system's own codecs</label>
-        <div class="grid">
-          <label for="cacheMb">Cache limit (MB, per folder)</label>
-          <input id="cacheMb" type="number" min="256" />
-          <label>ffmpeg (optional)</label>
-          <div class="row"><code id="ffmpeg" class="path"></code> <button id="ffmpeg-pick">Choose…</button> <button id="ffmpeg-clear">Clear</button></div>
+        <h2>Conversion <button type="button" class="info" data-tip=".wma, .amr and long variable-bit-rate .mp3 are converted so that every browser plays and seeks them. Converted copies stay beside your recordings, in a .clew-converted folder; your files are never changed.">i</button></h2>
+        <div class="rows">
+          <span class="label">Convert</span>
+          <label class="check wide"><input id="convert" type="checkbox" /> <span>What browsers cannot play</span></label>
+          <label class="check wide"><input id="prepare" type="checkbox" /> <span>Ahead of time, as soon as Clew lists the folder</span></label>
+          <label class="check wide"><input id="systemCodecs" type="checkbox" /> <span>With the system’s own codecs</span></label>
+
+          <label class="label" for="cacheMb">Cache limit</label>
+          <span class="row wide"><input id="cacheMb" type="number" min="256" /> MB per folder</span>
+
+          <span class="label">ffmpeg <button type="button" class="info" data-tip="Optional: the ffmpeg program used for conversion.">i</button></span>
+          <code id="ffmpeg" class="path"></code>
+          <span class="actions"><button id="ffmpeg-pick">Choose…</button> <button id="ffmpeg-clear">Clear</button></span>
+
+          <p id="converting" class="muted wide"></p>
         </div>
-        <p id="converting" class="muted"></p>
       </section>
 
       <!-- Dictation -------------------------------------------------------------------------- -->
       <section role="tabpanel" id="dictation" hidden>
-        <h2>Dictation</h2>
-        <p class="muted">Speech to text with Whisper, on this computer: dictation while writing, transcription of recordings.</p>
+        <h2>Dictation <button type="button" class="info" data-tip="Speech to text with Whisper, on this computer: dictation while writing, transcription of recordings.">i</button></h2>
 
-        <div id="dict-missing" hidden>
-          <p>The speech server is not installed yet (about 200 MB, downloaded once).</p>
-          <button id="dict-install">Install dictation</button>
+        <div id="dict-missing" class="rows" hidden>
+          <span class="label">Speech server</span>
+          <span>Not installed yet (about 200 MB, downloaded once)</span>
+          <span class="actions"><button id="dict-install">Install dictation</button></span>
         </div>
         <div id="dict-installing" hidden>
           <p id="dict-install-text"></p>
@@ -89,108 +90,121 @@
         </div>
 
         <div id="dict-ready" hidden>
-          <div class="row">
+          <div class="rows">
+            <span class="label">Speech server</span>
             <span id="dict-state" class="state"></span>
-            <button id="dict-toggle"></button>
-          </div>
-          <div id="dict-update" class="row" hidden>
-            <span id="dict-update-text"></span>
-            <button id="dict-update-button">Update dictation</button>
-          </div>
-          <label class="check"><input id="sttEnabled" type="checkbox" /> Start dictation with the audio server</label>
+            <span class="actions"><button id="dict-toggle"></button></span>
 
-          <h3>Model</h3>
-          <p class="muted" id="dict-models-note"></p>
+            <div class="r" id="dict-update" hidden>
+              <span class="label">Update</span>
+              <span id="dict-update-text"></span>
+              <span class="actions"><button id="dict-update-button">Update dictation</button></span>
+            </div>
+
+            <label class="check wide"><input id="sttEnabled" type="checkbox" /> <span>Start with the audio server</span></label>
+
+            <label class="label" for="sttLanguage">Language</label>
+            <select id="sttLanguage" class="wide">
+              <option value="">Clew chooses, per session</option>
+              <option value="en">English</option>
+              <option value="ja">Japanese</option>
+              <option value="fr">French</option>
+              <option value="mg">Malagasy</option>
+            </select>
+
+            <label class="label" for="sttPort">Port</label>
+            <input id="sttPort" class="wide" type="number" min="1024" max="65535" />
+
+            <span class="label">Key <button type="button" class="info" data-tip="Paste it in Clew under Settings › Dictation › This computer.">i</button></span>
+            <code id="stt-key" class="secret">••••••••••••••••</code>
+            <span class="actions"><button id="stt-key-show">Show</button> <button id="stt-key-copy">Copy</button> <button id="stt-key-new">New key</button></span>
+          </div>
+
+          <h3>Model <button type="button" class="info" id="dict-models-tip">i</button></h3>
+          <p class="muted" id="dict-models-note" hidden></p>
           <table id="models" class="models"></table>
 
-          <h3>Language</h3>
-          <select id="sttLanguage">
-            <option value="">Clew chooses, per session</option>
-            <option value="en">English</option>
-            <option value="ja">Japanese</option>
-            <option value="fr">French</option>
-            <option value="mg">Malagasy</option>
-          </select>
-
-          <h3>Key</h3>
-          <p class="muted">Paste it in Clew under <em>Settings › Dictation › This computer</em>.</p>
-          <div class="row"><button id="stt-key-copy">Copy the key</button> <button id="stt-key-new">New key</button></div>
-
-          <div class="grid">
-            <label for="sttPort">Port</label>
-            <input id="sttPort" type="number" min="1024" max="65535" />
+          <div class="rows">
+            <span class="lead muted">Downloaded models stay.</span>
+            <span class="actions"><button id="dict-uninstall">Remove the speech server…</button></span>
           </div>
-          <p class="muted"><button id="dict-uninstall" class="link">Remove the speech server</button> (the models stay)</p>
         </div>
       </section>
 
       <!-- Analysis --------------------------------------------------------------------------- -->
       <section role="tabpanel" id="analysis" hidden>
-        <h2>Analysis</h2>
-        <p class="muted">Runs Clew's survey analyses in your own statistics program.</p>
-        <div class="row">
+        <h2>Analysis <button type="button" class="info" data-tip="Runs Clew’s survey analyses in your own statistics program.">i</button></h2>
+        <div class="rows">
+          <span class="label">Engine</span>
           <span id="ana-state" class="state"></span>
-          <button id="ana-toggle"></button>
+          <span class="actions"><button id="ana-toggle"></button></span>
+
+          <label class="check wide"><input id="analysisEnabled" type="checkbox" /> <span>Start with the audio server</span></label>
+
+          <label class="label" for="analysisPort">Port</label>
+          <input id="analysisPort" class="wide" type="number" min="1024" max="65535" />
+
+          <label class="label" for="analysisTimeout">One run may take</label>
+          <span class="row wide"><input id="analysisTimeout" type="number" min="10" /> seconds</span>
+
+          <span class="label">Key <button type="button" class="info" data-tip="Paste it in Clew under Analysis › Start › On this computer › Connect.">i</button></span>
+          <code id="ana-key" class="secret">••••••••••••••••</code>
+          <span class="actions"><button id="ana-key-show">Show</button> <button id="ana-key-copy">Copy</button> <button id="ana-key-new">New key</button></span>
         </div>
-        <label class="check"><input id="analysisEnabled" type="checkbox" /> Start analysis with the audio server</label>
 
         <h3>Statistics program</h3>
         <table id="backends" class="models"></table>
-        <button id="ana-look">Look again</button>
+        <p class="actions"><button id="ana-look">Look again</button></p>
 
-        <h3>Your own R scripts (optional)</h3>
-        <div class="row"><code id="analysisScripts" class="path"></code> <button id="scripts-pick">Choose…</button> <button id="scripts-clear">Clear</button></div>
-
-        <h3>Key</h3>
-        <p class="muted">Paste it in Clew under <em>Analysis › Start › On this computer › Connect</em>.</p>
-        <div class="row"><button id="ana-key-copy">Copy the key</button> <button id="ana-key-new">New key</button></div>
-
-        <div class="grid">
-          <label for="analysisPort">Port</label>
-          <input id="analysisPort" type="number" min="1024" max="65535" />
-          <label for="analysisTimeout">One run may take (seconds)</label>
-          <input id="analysisTimeout" type="number" min="10" />
+        <div class="rows">
+          <span class="label">Your R scripts <button type="button" class="info" data-tip="Optional: a folder of your own R scripts.">i</button></span>
+          <code id="analysisScripts" class="path"></code>
+          <span class="actions"><button id="scripts-pick">Choose…</button> <button id="scripts-clear">Clear</button></span>
         </div>
       </section>
 
-      <!-- General ---------------------------------------------------------------------------- -->
-      <section role="tabpanel" id="general" hidden>
+      <!-- General: the app's own settings, none of which needs the audio server (`data-app`) -->
+      <section role="tabpanel" id="general" data-app hidden>
         <h2>General</h2>
-        <label class="check"><input id="login" type="checkbox" /> Start Clew when I sign in (in the tray, without a window)</label>
-        <p><button id="open-app">Open Clew</button></p>
-        <h3>Clew’s folder</h3>
-        <p class="muted">Where Clew keeps an encrypted copy of each vault on this computer.</p>
-        <div class="row" data-app>
+        <div class="rows">
+          <span class="label">Clew</span>
+          <label class="check"><input id="login" type="checkbox" /> <span>Start when I sign in</span> <button type="button" class="info" data-tip="In the tray, without a window.">i</button></label>
+          <span class="actions"><button id="open-app">Open Clew</button></span>
+
+          <span class="label">Clew’s folder <button type="button" class="info" data-tip="Where Clew keeps an encrypted copy of each vault on this computer.">i</button></span>
           <code id="folder-root" class="path"></code>
-          <button id="folder-open">Open</button>
-          <button id="folder-move">Move…</button>
+          <span class="actions"><button id="folder-open">Open</button> <button id="folder-move">Move…</button></span>
+          <p class="muted wide" id="folder-note" hidden></p>
+
+          <span class="label">Developer tools <button type="button" class="info" data-tip="They show everything an open vault holds to anyone at this computer: leave them off on a shared computer.">i</button></span>
+          <label class="check wide"><input id="devtools" type="checkbox" /> <span>Show <em>Toggle Developer Tools</em> in the View menu</span></label>
+          <p class="muted wide" id="devtools-note" hidden></p>
         </div>
-        <p class="muted" id="folder-note" hidden></p>
-        <div id="word-section" hidden>
-          <h3>Word</h3>
-          <div class="grid" id="word-plugin"></div>
-        </div>
-        <h3>Programs connected to Clew</h3>
-        <p class="muted">Programs on this computer allowed to use Clew. Disconnect one you no longer use.</p>
-        <div class="grid" id="clients"></div>
-        <h3>Updates</h3>
-        <p class="muted" id="updates-note"></p>
-        <div class="grid" id="update-sites"></div>
-        <p class="row">
-          <button id="check-updates">Check for updates</button>
-          <button id="restart-update" hidden>Restart to update</button>
+
+        <h3>Programs connected to Clew <button type="button" class="info" data-tip="Programs on this computer allowed to use Clew. Disconnect one you no longer use; Yaqatw for Word goes with Remove.">i</button></h3>
+        <div class="rows" id="clients"></div>
+
+        <h3>Updates <button type="button" class="info" id="updates-tip">i</button></h3>
+        <div class="rows">
+          <div class="r" id="update-sites"></div>
+          <span class="label">Status</span>
           <span class="muted" id="update-state" role="status"></span>
-        </p>
-        <p class="muted" id="releases-note" hidden>If updates stop working, the latest installer is always on <a id="releases-link" target="_blank" rel="noopener">the releases page</a>: install it over this one, your data stays.</p>
-        <h3>Developer tools</h3>
-        <label class="check" data-app><input id="devtools" type="checkbox" /> Show <em>Toggle Developer Tools</em> in the View menu</label>
-        <p class="muted" id="devtools-note">They show everything an open vault holds to anyone at this computer: leave them off on a shared computer.</p>
+          <span class="actions"><button id="restart-update" hidden>Restart to update</button> <button id="check-updates">Check for updates</button></span>
+          <div class="r" id="releases-note" hidden>
+            <span class="label">If updates fail</span>
+            <span class="wide"><a id="releases-link" target="_blank" rel="noopener">Get the latest installer</a> <button type="button" class="info" data-tip="Install it over this one: your data stays.">i</button></span>
+          </div>
+        </div>
+
         <h3>Activity</h3>
         <pre id="log" class="log"></pre>
         <p class="muted" id="about"></p>
-        <h3>Remove all Clew data</h3>
-        <p class="muted">For a shared or borrowed computer: deletes the vaults, yaqatw’s storage and Clew’s folder from this computer, with a backup first if you want one.</p>
-        <p data-app><button id="wipe-open" class="danger">Remove all Clew data from this computer…</button></p>
+
+        <h3>Remove all Clew data <button type="button" class="info" data-tip="Deletes the vaults, yaqatw’s storage and Clew’s folder from this computer, with a backup first if you want one.">i</button></h3>
+        <div class="rows">
+          <span class="lead">For a shared or borrowed computer</span>
+          <span class="actions"><button id="wipe-open" class="danger">Remove all Clew data…</button></span>
+        </div>
       </section>
     </main>
 
@@ -199,20 +213,21 @@
         <h2 id="wipe-title">Remove all Clew data from this computer</h2>
         <p class="muted">Deleted once Clew has closed:</p>
         <ul id="wipe-items" class="list"></ul>
-        <p class="muted">Kept:</p>
-        <ul id="wipe-kept" class="kept"></ul>
+        <p class="muted kept">Kept: <span id="wipe-kept"></span> <button type="button" class="info" id="wipe-kept-tip">i</button></p>
         <p id="wipe-word" class="muted" hidden>Yaqatw for Word is removed from Word too. Close Word first.</p>
 
-        <label class="check"><input id="wipe-backup" type="checkbox" checked /> Make an encrypted backup first</label>
+        <label class="check">
+          <input id="wipe-backup" type="checkbox" checked /> <span>Make an encrypted backup first</span>
+          <button type="button" class="info" data-tip="A zip file protected by a passphrase (AES-256): 7-Zip, WinZip and most archivers open it.">i</button>
+        </label>
         <div id="wipe-backup-fields">
-          <p class="muted">A zip file protected by a passphrase (AES-256; 7-Zip, WinZip and most archivers open it). Without the passphrase nobody can open it, you included: write it down.</p>
-          <div class="grid">
-            <label for="wipe-pass">Passphrase</label>
+          <div class="rows">
+            <span class="label"><label for="wipe-pass">Passphrase</label> <button type="button" class="info" id="wipe-pass-tip">i</button></span>
             <input id="wipe-pass" type="password" autocomplete="new-password" />
-            <label for="wipe-pass2">Again</label>
+            <label class="label" for="wipe-pass2">Again</label>
             <input id="wipe-pass2" type="password" autocomplete="new-password" />
+            <p class="muted wide">Write it down: without it nobody can open the backup, you included.</p>
           </div>
-          <p class="muted" id="wipe-pass-rule"></p>
         </div>
 
         <p id="wipe-problem" class="banner" hidden></p>
@@ -220,8 +235,8 @@
           <p id="wipe-progress-text"></p>
           <progress id="wipe-progress-bar" max="1"></progress>
         </div>
-        <p class="row actions">
-          <button id="wipe-cancel" value="cancel" formnovalidate>Cancel</button>
+        <p class="actions">
+          <button id="wipe-cancel" type="button" autofocus>Cancel</button>
           <button id="wipe-go" class="danger" value="go">Remove…</button>
         </p>
       </form>
