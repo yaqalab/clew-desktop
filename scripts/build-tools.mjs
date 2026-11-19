@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// `npm run build:tools`: builds Clew's local tools from the Clew source (the `clew` site's
-// repository, `tools/`) into `tools-dist/`, which the installer ships as `resources/tools/`:
+// `npm run build:tools`: builds Clew's local tools (this repository's `tools/`) into
+// `tools-dist/`, which the installer ships as `resources/tools/`:
 //
 //   tools-dist/clew-audio-server(.exe)           the audio server, run hidden with --control
 //   tools-dist/clew-analysis-server/…            the analysis engine (PyInstaller, ~19 MB)
@@ -9,10 +9,11 @@
 // Dictation is not built here: the app downloads it on demand (src/tools/dictation-install.js).
 //
 // Where the tools come from:
-//   - `TOOLS_PATH=<dir>`: that `tools/` folder as it is;
-//   - `TOOLS_REF=<ref>`: `tools/` at that ref of the Clew repository, exported with `git archive`
-//     into `.sources/tools-export/` (the checkout itself is not touched);
-//   - otherwise: `tools/` of the Clew source in use (`.sources/clew` or the local checkout).
+//   - `TOOLS_PATH=<dir>`: that tools folder as it is;
+//   - `TOOLS_REF=<ref>`: `tools/` at that ref of this repository, exported with `git archive`
+//     into `.sources/tools-export/` (the working tree is not touched);
+//   - otherwise: `tools/` as it is in the working tree (the commit is marked "dirty" in
+//     build-info.json when `tools/` has uncommitted changes).
 //
 // Needs, on Windows: Visual Studio (or Build Tools) with the C++ workload, which brings CMake and
 // Ninja; Python 3.10+ for the analysis engine. macOS and Linux: a C++17 compiler, CMake and
@@ -21,24 +22,25 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, fail, git, loadSites, run, upperDrive } from './lib.mjs';
+import { ROOT, fail, git, run, toolsDir } from './lib.mjs';
 
 const win = process.platform === 'win32';
 const OUT = join(ROOT, 'tools-dist');
 
 async function toolsSource() {
-  if (process.env.TOOLS_PATH) return { dir: upperDrive(process.env.TOOLS_PATH), ref: 'path', commit: '' };
-  const [clew] = loadSites(['clew']);
-  if (!existsSync(join(clew.dir, '.git'))) fail(`no Clew source at ${clew.dir}: run "npm run sources" first`);
+  if (process.env.TOOLS_PATH) return { dir: toolsDir(), ref: 'path', commit: '' };
+  // A source archive (no .git): the folder as it is.
+  if (!existsSync(join(ROOT, '.git'))) return { dir: toolsDir(), ref: 'unknown', commit: '' };
   const ref = process.env.TOOLS_REF;
   if (!ref) {
+    const dirty = git(['status', '--porcelain', '--', 'tools'], ROOT) !== '';
     return {
-      dir: join(clew.dir, 'tools'),
-      ref: clew.local ? git(['rev-parse', '--abbrev-ref', 'HEAD'], clew.dir) : clew.ref,
-      commit: git(['rev-parse', 'HEAD'], clew.dir),
+      dir: toolsDir(),
+      ref: git(['rev-parse', '--abbrev-ref', 'HEAD'], ROOT),
+      commit: git(['rev-parse', 'HEAD'], ROOT) + (dirty ? '-dirty' : ''),
     };
   }
-  const commit = git(['rev-parse', `${ref}^{commit}`], clew.dir);
+  const commit = git(['rev-parse', `${ref}^{commit}`], ROOT);
   const dest = join(ROOT, '.sources', 'tools-export');
   // Keep the build folders between runs (fast rebuilds); replace everything else.
   if (existsSync(dest)) {
@@ -47,12 +49,12 @@ async function toolsSource() {
       if (entry !== 'build') rmSync(join(dest, 'native', entry), { recursive: true, force: true });
   }
   mkdirSync(dest, { recursive: true });
-  console.log(`[tools] exporting tools/ at ${ref} (${commit.slice(0, 12)}) from ${clew.dir}`);
+  console.log(`[tools] exporting tools/ at ${ref} (${commit.slice(0, 12)})`);
   // git archive → tar, unpacked with the system's tar (Windows 10+ ships bsdtar).
   // Windows' own tar (bsdtar): Git's GNU tar, often first on PATH, reads "C:" as a host name.
   const tar = win ? `"${join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')}"` : 'tar';
   await run(`git archive --format=tar ${commit} tools | ${tar} -x -f - -C "${dest}" --strip-components=1`, {
-    cwd: clew.dir,
+    cwd: ROOT,
   });
   return { dir: dest, ref, commit };
 }
@@ -106,13 +108,8 @@ if (!win && process.env.CLEW_TOOLS_POSIX !== '1') {
 }
 
 const source = await toolsSource();
+if (!existsSync(join(source.dir, 'VERSION'))) fail(`[tools] no tools at ${source.dir} (no VERSION file)`);
 const version = readFileSync(join(source.dir, 'VERSION'), 'utf8').trim();
-if (!existsSync(join(source.dir, 'native', 'src', 'core', 'control.cpp'))) {
-  fail(
-    `tools/ at ${source.ref} has no --control mode (native/src/core/control.cpp). ` +
-      'Merge feat/desktop-control in the Clew repository, or build with TOOLS_REF=feat/desktop-control.',
-  );
-}
 console.log(`[tools] building Clew tools ${version} from ${source.dir}`);
 let built;
 try {

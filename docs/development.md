@@ -134,7 +134,7 @@ cp ../yaqatw/.env  env/yaqatw.env
 | `npm run build:sites` | For each app: `.env` from `env/`, `npm ci`, its build, output copied to `sites/<name>/` with `.build-info.json` |
 | `npm start` | Run the app against the already-built `sites/` |
 | `npm run dev` | Each app's dev server with hot reload, behind the real origins, then Electron |
-| `npm run build:tools` | Builds Clew's local tools (audio server, analysis) from the Clew source into `tools-dist/` |
+| `npm run build:tools` | Builds Clew's local tools (audio server, analysis) from `tools/` into `tools-dist/` |
 | `npm test` | Unit tests (resolver, local server, certificate, tools engine, dictation install, site updates) |
 | `npm run smoke` | Opens the app hidden and checks origin, local serving, iframe, network passthrough, CORS, redirects, permissions, service worker (`CLEW_SMOKE_TOOLS=1`: the tools, tray and settings window too) |
 | `npm run dist` | `sources` → `build:sites` → `build:tools` → electron-builder: the installer for this OS in `release/` |
@@ -287,12 +287,17 @@ as it does outside the desktop app.
 The desktop app includes what used to be the separate "Clew tools" download: **one install, one
 tray icon, one settings window.**
 
-- **The audio server** (`clew-audio-server`, C++, from the Clew repository's `tools/native`) runs
+Their sources are in [tools/](../tools/) ([tools/README.md](../tools/README.md)), with their own
+version (`tools/VERSION`) and tests.
+
+- **The audio server** (`clew-audio-server`, C++, [tools/native](../tools/native/)) runs
   hidden as a child of the app: `clew-audio-server --control`, driven over its stdin/stdout, one
-  JSON object per line (its `core/control.h` documents the commands). It ends when its stdin
+  JSON object per line (its `src/core/control.h` documents the commands). It ends when its stdin
   closes, so it never outlives the app. [src/tools/engine.js](../src/tools/engine.js) is the client.
-- **Analysis** (`clew-analysis-server`, ~19 MB) ships beside it and is started by it.
-- **Dictation** (`clew-stt-server`, ~200 MB) is **downloaded on demand**, the first time someone
+- **Analysis** (`clew-analysis-server`, ~19 MB, [tools/analysis-server](../tools/analysis-server/))
+  ships beside it and is started by it.
+- **Dictation** (`clew-stt-server`, ~200 MB, [tools/stt-server](../tools/stt-server/)) is
+  **downloaded on demand**, the first time someone
   presses *Install dictation* in Settings ([src/tools/dictation-install.js](../src/tools/dictation-install.js)):
   `dictation.json` from the latest public `yaqalab/clew-tools` release, the package address built
   from its version (never read from the file), size and SHA-256 checked, unpacked into
@@ -323,9 +328,12 @@ tray icon, one settings window.**
   A development run always has them.
 
 Building the tools needs, on Windows, Visual Studio or Build Tools with the C++ workload (CMake
-and Ninja come with it) and Python 3.10+. Where they come from: `tools/` of the Clew source in
-use, `TOOLS_REF=<ref>` (exported from the Clew repository with `git archive`; the checkout is not
-touched) or `TOOLS_PATH=<dir>`.
+and Ninja come with it) and Python 3.10+. `npm run build:tools` builds this repository's `tools/`
+as it is in the working tree (`tools-dist/build-info.json` names the commit, with `-dirty` when
+`tools/` has uncommitted changes); `TOOLS_REF=<ref>` builds `tools/` at that ref (exported with
+`git archive`; the working tree is not touched); `TOOLS_PATH=<dir>` builds another tools folder.
+The tools' own tests run on GitHub for every push that changes them
+(`.github/workflows/tools-native.yml`, `tools-python.yml`).
 
 macOS and Linux (`CLEW_TOOLS_POSIX=1`): a C++17 compiler, CMake (Ninja when it is there, Make
 otherwise) and Python 3.10+ with `venv`. On Linux (Ubuntu 24.04) the tools build, `npm test`
@@ -343,12 +351,12 @@ For development: `CLEW_STT_PROGRAM=<…/clew-stt-server.exe>` uses a dictation s
 `release-dictation/clew-stt-server-<version>-<platform>-<arch>.tar.gz` and adds it to
 `release-dictation/dictation.json`; attach both to the `v<version>` release of
 `yaqalab/clew-tools`. The package carries the dictation server's `THIRD-PARTY-NOTICES.txt` (its
-GPL parts; Clew docs/32, section 2). `npm run smoke:dictation` checks a built server (the tiny
+GPL parts, with where to get their source). `npm run smoke:dictation` checks a built server (the tiny
 model, a file, live transcription with voices); `-- --release release-dictation` installs the
 package first, as the app does.
 
 macOS and Linux are built on GitHub's machines by `.github/workflows/dictation.yml` (dispatch;
-secret `GIT_TOKEN`): build, the server's tests, pack, the smoke from the installed package, then
+no secret needed): build, the server's tests, pack, the smoke from the installed package, then
 the artifact `dictation-release`: the new packages and the release's live `dictation.json` with
 them added ([scripts/merge-dictation.mjs](../scripts/merge-dictation.mjs)). Attach its files to
 the clew-tools release by hand. A Linux package runs on systems with a glibc at least as new as

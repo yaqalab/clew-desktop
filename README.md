@@ -140,15 +140,17 @@ delete `%APPDATA%\Clew` and `Documents\Clew` yourself.
 
 ## Licence
 
-The code in this repository is under the [MIT licence](LICENSE). The installer also carries
-software under its own terms: Electron and Chromium (their notices ship beside `Clew.exe`),
-Clew (ISC), Clew's local tools (MIT, with the third-party notices in their folders) and yaqatw
-(proprietary, © its authors).
+The code in this repository is under the [MIT licence](LICENSE), Clew's local tools in
+[tools/](tools/) included ([tools/LICENSE](tools/LICENSE)). The installer also carries software
+under its own terms: Electron and Chromium (their notices ship beside `Clew.exe`), the tools'
+third-party parts (their notices in the tools' folders), Clew (ISC) and yaqatw (proprietary, ©
+its authors).
 
 ## For developers
 
 How the app works and how to build it:
-[docs/development.md](docs/development.md).
+[docs/development.md](docs/development.md). Clew's local tools (the audio server, dictation and
+analysis) are in [tools/](tools/) and build from this repository alone (`npm run build:tools`).
 
 The installer is built from this repository together with the sources of Clew and yaqatw, which
 are private: without access to them, `npm run dist` stops at `npm run sources`. Problems and

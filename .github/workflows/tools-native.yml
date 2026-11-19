@@ -1,0 +1,43 @@
+# The native audio server (tools/native) on Linux and macOS, on every push that changes it: the
+# CMake build, the unit tests, and the black-box tests against the real program, headless. The
+# Windows program is built and tested on the publisher's machine (`npm run build:tools`).
+name: Tools - native audio server
+
+on:
+  push:
+    paths:
+      - 'tools/native/**'
+      - 'tools/VERSION'
+      - '.github/workflows/tools-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: ffmpeg (Linux; makes the fixtures and converts there)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - name: Configure
+        run: cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build native/build -j 3
+      - name: Unit tests
+        run: ctest --test-dir native/build --output-on-failure --timeout 300
+      - name: The program over HTTP
+        run: python -m unittest discover -s native/test -p "test_native.py" -v

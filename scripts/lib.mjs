@@ -58,6 +58,11 @@ export function loadSites(only = []) {
     });
 }
 
+/** Clew's local tools' source: this repository's `tools/`, or `TOOLS_PATH=<dir>`. */
+export function toolsDir() {
+  return process.env.TOOLS_PATH ? abs(process.env.TOOLS_PATH) : join(ROOT, 'tools');
+}
+
 /** The environment for an app's own tools: no Electron-as-Node, no inherited NODE_ENV. */
 export function childEnv(extra = {}) {
   const env = { ...process.env, ...extra };

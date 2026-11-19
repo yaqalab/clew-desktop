@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { fail, loadSites } from './lib.mjs';
+import { fail, toolsDir } from './lib.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -32,8 +32,7 @@ const expect = option('--expect');
 const release = option('--release');
 
 function defaultDist() {
-  const [clew] = loadSites(['clew']);
-  return join(process.env.TOOLS_PATH || join(clew.dir, 'tools'), 'stt-server', 'dist', 'clew-stt-server');
+  return join(toolsDir(), 'stt-server', 'dist', 'clew-stt-server');
 }
 
 const models = mkdtempSync(join(tmpdir(), 'clew-stt-smoke-'));

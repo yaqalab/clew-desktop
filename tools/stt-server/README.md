@@ -1,0 +1,108 @@
+# clew-stt-server — dictation on this computer
+
+> **TL;DR** The stt.alefa.net speech server, run on the researcher's own computer with
+> faster-whisper on the CPU instead of a Hailo-8 on a Raspberry Pi. Same protocol, so Clew talks
+> to it unchanged. It listens on 127.0.0.1 only: the audio never leaves the computer. The audio
+> server starts and stops it as a child process (Clew Desktop: Settings › Dictation); you rarely
+> run it by hand. Adapted from the author's own stt.alefa.net server, which runs on a Raspberry
+> Pi with a Hailo-8 and keeps its own copy of this code.
+
+## What it adds to the Pi's server
+
+- **Engine `whisper`:** faster-whisper, int8, Whisper's own 30 s window (a sentence is never cut).
+- **Languages:** `?language=` on `/v1/listen` and `language` on `/v1/audio/transcriptions`;
+  `/api/me` lists what the model knows (or only the one fixed with `--language`).
+- **Spelling hints:** `?prompt=` (and `prompt` for files), given to Whisper as its
+  `initial_prompt`, ended like a sentence so Whisper keeps its punctuation. Capped at 400
+  characters. The Pi's server ignores it.
+- **`serve --local`:** binds 127.0.0.1, refuses a request whose `Host` is not this computer,
+  accepts pages served from `http://localhost:*` and `http://127.0.0.1:*` besides `--origins`,
+  and decodes with PyAV (FFmpeg's libraries, already a faster-whisper dependency), so no ffmpeg
+  program is needed.
+- **`serve --key-stdin`:** one key, `stt.<name>.<secret>`, read from the first line of stdin and
+  held in memory. The audio server makes it, keeps it sealed (DPAPI on Windows) and hands it
+  over at each start.
+- **`download <model>` / `models`:** models live in `<models-dir>/<name>/`; the default folder
+  is `%LOCALAPPDATA%\clew-stt\models` (macOS: `~/Library/Application Support/clew-stt/models`,
+  Linux: `$XDG_DATA_HOME` or `~/.local/share`, then `clew-stt/models`). A download writes `<name>.part` and renames it when
+  complete, resumes file by file, and prints `total <bytes>`, then `progress N` once per percent,
+  then `done <folder>` or `error <reason>`. `ALEFA_STT_HUB` points it at another address that
+  answers like Hugging Face (the audio server's tests).
+- **`--device auto|cpu|cuda`:** `auto` uses an NVIDIA GPU when CUDA sees one (int8 with
+  float16), else the processor (int8). A GPU whose libraries (cuBLAS, cuDNN) do not load falls
+  back to the processor with a log line. `/api/me` says which (`device`). `system` prints
+  `cuda N`, which the settings read to grey out models that need a GPU.
+
+| Model | Download | Use | Source |
+|---|---|---|---|
+| `tiny`, `base` | 78, 148 MB | live, least accurate | `Systran/faster-whisper-tiny`, `-base` |
+| `small` | 486 MB | live dictation; measured word-perfect in English and French, Japanese with hints | `Systran/faster-whisper-small` |
+| `medium` | 1.53 GB | an NVIDIA GPU | `Systran/faster-whisper-medium` |
+| `large-v3-turbo` | 1.62 GB | files; about 8–10 s a sentence on a laptop processor | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` |
+| `distil-large-v3` | 1.52 GB | files, English only | `Systran/faster-distil-whisper-large-v3` |
+| `large-v3` | 3.09 GB | an NVIDIA GPU | `Systran/faster-whisper-large-v3` |
+| `small.en` | 486 MB | English only; no better than `small` here; not in the settings' list | `Systran/faster-whisper-small.en` |
+
+## Words with their times
+
+`POST /v1/words` (JSON, the dictation key as `Authorization: Bearer`): the words of one stretch
+of a recording, each with its time in the recording, for a training cut placed between two words
+(tools 1.4). Body: `source` `"folder"` (with `path`, in the audio server's folder, checked
+like `/v1/transcribe`'s) or `"url"` (the audio server's link), `start` and `end` in seconds (at
+most 600 apart), `language`. Answer: `{ language, start, words: [{ word, start, end }] }`. Whisper
+runs with word timestamps and **no prompt**: given the typed text, it repeats it instead of
+listening. An engine without word times answers 501.
+
+## Live transcription
+
+`/v1/transcribe` (WebSocket): a recording's turns with their voices, worked through as fast as
+the machine allows. `source=upload` (the client sends the file, held in memory) or
+`source=folder&path=...` (read from `--audio-root`, the audio server's folder). `language=auto`
+lets Whisper tell each piece's language. Speakers: 3D-Speaker CAM++ (Apache-2.0) through
+`sherpa-onnx` (added for this; it replaces nothing and brings its own ONNX runtime), fetched
+with `download speakers` into `<models-dir>/speakers/`. Messages: `transcribe.py`'s header.
+
+## Run it by hand
+
+```powershell
+# once: a virtual environment with the server, faster-whisper and PyAV
+python -m venv $env:TEMP\clew-stt-server-build
+& $env:TEMP\clew-stt-server-build\Scripts\python.exe -m pip install -e "tools/stt-server[local,test]"
+
+clew-stt-server download small
+"stt.local.$(New-Guid)" | clew-stt-server serve --local --engine whisper --model small --port 47822 --key-stdin
+clew-stt-server stream http://127.0.0.1:47822 talk.wav --key stt.local.… --language ja --prompt "協働学習, 第二言語"
+```
+
+## Build the program
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/stt-server/build_exe.ps1   # Windows
+```
+
+```sh
+sh tools/stt-server/build_dist.sh                                          # macOS, Linux
+```
+
+Result: `tools/stt-server/dist/clew-stt-server/` (`--onedir`; about 200 MB on Windows, 420 MB
+on Linux), with `THIRD-PARTY-NOTICES.txt` for that system (`third_party_notices.py`).
+`npm run package:dictation` packs it for the release Clew Desktop downloads it from on demand
+(`docs/development.md`). No model is inside. A Linux build
+runs on systems with a glibc at least as new as the build machine's.
+
+**Dependencies** (`[local]`): `faster-whisper` (the engine; brings CTranslate2, tokenizers,
+huggingface_hub) and `av` (decoding without ffmpeg). Left out of the build: `onnxruntime`
+(faster-whisper's own VAD; the segmenter finds the speech), and everything the Hailo engine
+imports.
+
+## Tests
+
+```powershell
+& $env:TEMP\clew-stt-server-build\Scripts\python.exe -m pytest -q tools/stt-server
+```
+
+`tests/test_local.py` covers the local additions with the fake engine; the Pi's tests run
+unchanged. Real models were checked by hand; `npm run smoke:dictation` checks a built server
+with the tiny model, and `.github/workflows/tools-python.yml` runs these tests on every push that
+changes them. Spelling hints are ended like a
+sentence before Whisper sees them, because a bare list made it drop its full stops.
