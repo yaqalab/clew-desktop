@@ -15,10 +15,12 @@
 //   - otherwise: `tools/` of the Clew source in use (`.sources/clew` or the local checkout).
 //
 // Needs, on Windows: Visual Studio (or Build Tools) with the C++ workload, which brings CMake and
-// Ninja; Python 3.10+ for the analysis engine. macOS and Linux: written, not yet run (no machines
-// to test on); `CLEW_TOOLS_POSIX=1` tries it.
+// Ninja; Python 3.10+ for the analysis engine. macOS and Linux: a C++17 compiler, CMake and
+// Python 3.10+ with venv. Built on Linux (Ubuntu 24.04); not yet on macOS. Until the apps are
+// released there, `CLEW_TOOLS_POSIX=1` turns it on.
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { ROOT, fail, git, loadSites, run, upperDrive } from './lib.mjs';
 
 const win = process.platform === 'win32';
@@ -67,10 +69,12 @@ async function buildWindows(tools) {
   };
 }
 
-// Not yet run: there is no macOS or Linux machine to test on.
+// Run on Linux (Ubuntu 24.04, 2026-11-19); not yet on macOS.
 async function buildPosix(tools) {
   const nb = join(tools, 'native', 'build');
-  await run(`cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/unit_tests`, {
+  // Ninja when it is there, else CMake's default (Make), which every Mac and Linux has.
+  const generator = spawnSync('ninja', ['--version'], { stdio: 'ignore' }).status === 0 ? '-G Ninja ' : '';
+  await run(`cmake -S . -B build ${generator}-DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ./build/unit_tests`, {
     cwd: join(tools, 'native'),
     label: 'tools',
   });
@@ -82,7 +86,8 @@ async function buildPosix(tools) {
       `"${py}" -m pip install --quiet --disable-pip-version-check pyinstaller`,
       `"${py}" -m PyInstaller --noconfirm --clean --onedir --console --name clew-analysis-server` +
         ` --distpath dist --workpath "${join(venv, 'work')}" --specpath "${join(venv, 'spec')}"` +
-        ` --paths . --add-data "clew_analysis/commands:clew_analysis/commands"` +
+        // --add-data is read from the spec's folder: the source folder must be absolute.
+        ` --paths . --add-data "${join(tools, 'analysis-server', 'clew_analysis', 'commands')}:clew_analysis/commands"` +
         ' --exclude-module tkinter --exclude-module sqlite3 --exclude-module unittest --exclude-module pydoc' +
         ' --exclude-module xmlrpc --exclude-module multiprocessing --exclude-module asyncio' +
         ' clew_analysis_server.py',

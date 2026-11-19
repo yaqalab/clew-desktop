@@ -139,7 +139,11 @@ class ToolsEngine extends EventEmitter {
     });
   }
 
-  /** Ends the server: "quit", then the end of its stdin; killed if it does not go within 5 s. */
+  /**
+   * Ends the server: "quit", then the end of its stdin; killed if it does not go within 5 s.
+   * SIGKILL: on macOS and Linux the server catches SIGTERM, and in --control mode it then goes on
+   * reading its stdin. (On Windows every kill ends the process at once.)
+   */
   stop() {
     clearTimeout(this.restartTimer);
     this.stopping = true;
@@ -149,7 +153,7 @@ class ToolsEngine extends EventEmitter {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
-      const kill = setTimeout(() => child.kill(), 5000);
+      const kill = setTimeout(() => child.kill('SIGKILL'), 5000);
       child.once('exit', () => {
         clearTimeout(kill);
         resolve();
@@ -158,7 +162,7 @@ class ToolsEngine extends EventEmitter {
         child.stdin.write(`${JSON.stringify({ id: 0, cmd: 'quit' })}\n`);
         child.stdin.end();
       } catch {
-        child.kill();
+        child.kill('SIGKILL');
       }
     });
   }

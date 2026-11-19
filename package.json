@@ -5,6 +5,7 @@
   "private": true,
   "description": "Clew: a thread through your research. Clew and yaqatw as one desktop app, served under their real origins.",
   "license": "MIT",
+  "homepage": "https://github.com/yaqalab/clew-desktop",
   "main": "src/main.js",
   "engines": {
     "node": ">=22"
@@ -91,13 +92,21 @@
         "NSMicrophoneUsageDescription": "Clew uses the microphone for dictation, recordings and calls."
       },
       "files": [
+        "src/**/*",
         "!node_modules/better-sqlite3-multiple-ciphers/prebuilds/{win32,linux,linuxmusl}-*"
       ]
     },
     "linux": {
-      "target": "AppImage",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Education",
+      "executableName": "clew",
+      "maintainer": "Yaqalab",
+      "synopsis": "Clew: a thread through your research.",
       "files": [
+        "src/**/*",
         "!node_modules/better-sqlite3-multiple-ciphers/prebuilds/{win32,darwin}-*"
       ]
     },

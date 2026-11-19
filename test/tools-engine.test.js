@@ -66,7 +66,7 @@ test('starts the server again when it dies unasked', { skip }, async () => {
   await once(engine, 'state', (s) => s === 'running');
   const first = engine.child.pid;
   const again = once(engine, 'state', (s) => s === 'running', 20000);
-  engine.child.kill();
+  engine.child.kill('SIGKILL'); // a crash: the server catches SIGTERM on macOS and Linux
   await again;
   assert.notEqual(engine.child.pid, first);
   await engine.stop();
