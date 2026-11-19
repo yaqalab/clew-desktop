@@ -43,7 +43,8 @@ works and what does not.
   then run it) and updates itself; `clew-desktop_<version>_amd64.deb` installs on Debian, Ubuntu
   and their relatives (`sudo apt install ./clew-desktop_<version>_amd64.deb`), and a new version
   is installed the same way.
-- On both, Yaqatw for Word and dictation are Windows only, and converting recordings needs
+- On both, Yaqatw for Word is Windows only, dictation runs on the processor (no graphics card),
+  and converting recordings needs
   [FFmpeg](https://ffmpeg.org) (**Settings › Conversion** says where it is).
 
 **Nothing to install:** [Clew](https://clew.alefa.net) also runs in your browser, on any
