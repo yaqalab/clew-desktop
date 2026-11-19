@@ -11,6 +11,10 @@ calls working as they do there, plus:
 - **Nothing typed is lost to Quit**: the app waits for Clew to save before it closes.
 - **Clew and yaqatw keep themselves up to date** without a new installer.
 
+> **Beta.** Clew Desktop has not been fully tested yet. Keep a copy of your work in a vault's
+> cloud or elsewhere, and report problems in this repository's
+> [Issues](https://github.com/yaqalab/clew-desktop/issues).
+
 ## Install
 
 **Windows 10 and 11.** Download `Clew-Setup-<version>.exe` from the
