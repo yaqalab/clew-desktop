@@ -150,5 +150,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          files=(release/*.dmg release/*.zip release/*.AppImage release/*.deb release/latest-linux.yml)
+          files=(release/*.dmg release/*.zip release/*.AppImage release/*.deb release/latest-linux*.yml)
           gh release upload "${{ inputs.release }}" "${files[@]}" --clobber
