@@ -1,11 +1,14 @@
-# The native audio server's portable core on Linux and macOS (docs/22 §10.7, A19), on every push:
-# the CMake build, the unit tests, and the black-box tests against the real program, headless.
-# The Windows program is built, signed and tested on the publisher's machine. This repository is
-# public, so these runners cost nothing.
-name: Native server (Linux, macOS)
+# The native audio server (tools/native) on Linux and macOS, on every push that changes it: the
+# CMake build, the unit tests, and the black-box tests against the real program, headless. The
+# Windows program is built and tested on the publisher's machine (`npm run build:tools`).
+name: Tools - native audio server
 
 on:
   push:
+    paths:
+      - 'tools/native/**'
+      - 'tools/VERSION'
+      - '.github/workflows/tools-native.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,11 +22,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: tools
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - name: ffmpeg (Linux; makes the fixtures and converts there)
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
