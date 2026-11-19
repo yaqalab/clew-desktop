@@ -125,7 +125,10 @@ for (const p of Object.values(built)) if (!existsSync(p)) fail(`[tools] expected
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 cpSync(built.server, join(OUT, win ? 'clew-audio-server.exe' : 'clew-audio-server'));
-cpSync(built.analysis, join(OUT, 'clew-analysis-server'), { recursive: true });
+// verbatimSymlinks: links stay as PyInstaller made them (relative, inside the folder). Resolved,
+// they would point at this build machine's folders, and on macOS codesign refuses Python.framework
+// ("unsealed contents present in the root directory of an embedded framework").
+cpSync(built.analysis, join(OUT, 'clew-analysis-server'), { recursive: true, verbatimSymlinks: true });
 writeFileSync(
   join(OUT, 'build-info.json'),
   `${JSON.stringify({ version, ref: source.ref, commit: source.commit, builtAt: new Date().toISOString() }, null, 2)}\n`,

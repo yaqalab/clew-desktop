@@ -55,8 +55,9 @@ jobs:
       - name: Linux libraries (Electron, the smoke run's display)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb libnss3 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxtst6 libsecret-1-0 libnotify4
+          # The mirrors fail now and then: retry each download.
+          sudo apt-get update -qq -o Acquire::Retries=5
+          sudo apt-get install -y -qq -o Acquire::Retries=5 xvfb libnss3 libgtk-3-0t64 libgbm1 libasound2t64 libxss1 libxtst6 libsecret-1-0 libnotify4
           # Ubuntu 24.04 restricts unprivileged user namespaces, which Chromium's sandbox needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
@@ -89,8 +90,18 @@ jobs:
             npm run smoke
           fi
 
+      - name: The analysis engine's links (macOS)
+        if: runner.os == 'macOS'
+        run: ls -la tools-dist/clew-analysis-server/_internal/Python.framework tools-dist/clew-analysis-server/_internal/Python.framework/Versions || true
+
+      # Ad hoc: no hardened runtime. It serves notarization, which needs a Developer ID; with an
+      # ad hoc signature it would stop the tools from loading their own libraries.
       - name: Package
-        run: npx electron-builder ${{ matrix.builder }} --publish never -c.mac.identity=-
+        run: npx electron-builder ${{ matrix.builder }} --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
+
+      - name: What the packaged framework holds (on failure)
+        if: failure() && runner.os == 'macOS'
+        run: find release -maxdepth 9 -path '*Python.framework*' -exec ls -ld {} + 2>/dev/null | head -40 || true
 
       - uses: actions/upload-artifact@v4
         with:
