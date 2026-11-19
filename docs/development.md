@@ -313,8 +313,13 @@ tray icon, one settings window.**
 Building the tools needs, on Windows, Visual Studio or Build Tools with the C++ workload (CMake
 and Ninja come with it) and Python 3.10+. Where they come from: `tools/` of the Clew source in
 use, `TOOLS_REF=<ref>` (exported from the Clew repository with `git archive`; the checkout is not
-touched) or `TOOLS_PATH=<dir>`. macOS and Linux: the C++ side is ported but has never been
-compiled (`CLEW_TOOLS_POSIX=1` tries).
+touched) or `TOOLS_PATH=<dir>`.
+
+macOS and Linux (`CLEW_TOOLS_POSIX=1`): a C++17 compiler, CMake (Ninja when it is there, Make
+otherwise) and Python 3.10+ with `venv`. On Linux (Ubuntu 24.04) the tools build, `npm test`
+passes and the smoke run passes with the tools (`CLEW_SMOKE_TOOLS=1`); `electron-builder --linux`
+makes an AppImage and a deb. macOS has not been built. On both, the audio server keeps its secret
+in its settings file, readable by the user only, and converts with FFmpeg.
 
 For development: `CLEW_STT_PROGRAM=<…/clew-stt-server.exe>` uses a dictation server you built,
 `CLEW_TOOLS_CONFIG=<file>` another settings file, `CLEW_TOOLS_DIR=<dir>` other tool binaries.

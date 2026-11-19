@@ -126,6 +126,12 @@ async function run(win, ses, server, tools, folder, db, api) {
       results.push({ name, ok: false, detail: err.message });
     }
   };
+  // Yaqatw for Word is Windows only: elsewhere nothing opens a Word window, so its check is skipped.
+  const windowsOnly = (name, fn) => {
+    if (process.platform === 'win32') return check(name, fn);
+    console.log(`SKIP  ${name}  — Windows only`);
+    return Promise.resolve();
+  };
   const js = (code) => win.webContents.executeJavaScript(code, true);
   const assert = (cond, msg) => {
     if (!cond) throw new Error(msg);
@@ -315,7 +321,7 @@ async function run(win, ses, server, tools, folder, db, api) {
       return `port ${st.port}; hello, 401 unpaired; Clew's page refused`;
     });
 
-    await check('a Word window: host page, yaqatw in its frame, its calls reach Word (a fake one)', async () => {
+    await windowsOnly('a Word window: host page, yaqatw in its frame, its calls reach Word (a fake one)', async () => {
       const base = `http://127.0.0.1:${api.status().port}`;
       const auth = { authorization: `Bearer ${api.clients.add('Smoke Word', { kind: 'word-template' }).token}` };
       const opened = await programPost(`${base}/v1/word/open`, { title: 'Smoke.docx', path: 'C:\\Smoke.docx' }, auth);
