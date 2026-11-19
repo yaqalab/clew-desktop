@@ -268,3 +268,23 @@ test("work waiting while Word does not ask: onStall, again later, never while Wo
   await sleep(300);
   assert.equal(stalls.length, 2);
 });
+
+test('a Word that never asks again (it quit) is reached for three times, not more, until it asks', async (t) => {
+  const stalls = [];
+  const { bridge, post, open } = await fresh(t, { stallMs: 20, busyMs: 5000, onStall: (s) => stalls.push(s.id) });
+  const session = await open();
+  const first = bridge.call(session, 'ping');
+  // Checks at 20, 40, 80, 160, 320 ms: three restarts, then none.
+  await sleep(700);
+  assert.equal(stalls.length, 3);
+  // Word asks: the work goes; work that waits later may be restarted again.
+  const next = await post('/v1/word/next', { session });
+  await post('/v1/word/next', { session, result: { id: next.body.op.id, ok: true, value: 'pong' } });
+  assert.equal(await first, 'pong');
+  const second = bridge.call(session, 'ping');
+  const gone = assert.rejects(second, /closed/);
+  await sleep(100);
+  assert.ok(stalls.length > 3 && stalls.length <= 6, `${stalls.length} restarts`);
+  bridge.close(session);
+  await gone;
+});

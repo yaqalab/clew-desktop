@@ -345,6 +345,8 @@
     // Handshake: yaqatw announces itself; Word is there already.
     pluginConnected: () => {
       emit('ready');
+      // A yaqatw loaded again may answer other methods: ask it again.
+      capabilities = undefined;
       if (markReady) {
         const ready = markReady;
         markReady = null;
@@ -579,6 +581,7 @@
   // that part, which passes through this page, carries the type as it now is.
 
   const TYPE_VARIABLE = 'yaqatw.fileType';
+  const FEATURES_VARIABLE = 'yaqatw.features';
   const SETTINGS_NS = 'http://yaqat.alefa.net/xml/settings';
   let fileType = null;
 
@@ -596,10 +599,58 @@
     (async () => {
       const current = await op('getVariable', { key: TYPE_VARIABLE });
       if ((current || null) !== wanted) await op('setVariable', { key: TYPE_VARIABLE, value: wanted });
+      // What this yaqatw can do, for the right-click entries that depend on it (Ribbon.bas
+      // HasFeature): "categories,relationships,…".
+      const features = (await featureList()).join(',');
+      const known = await op('getVariable', { key: FEATURES_VARIABLE });
+      if ((known || '') !== features) await op('setVariable', { key: FEATURES_VARIABLE, value: features || null });
       await op('refreshRibbon');
     })().catch(() => {
       /* the document closed meanwhile */
     });
+  }
+
+  // ─── What this yaqatw can do (its getCapabilities), so Word shows only that ────────────────
+
+  /** Each feature of Word's windows and menus, and the yaqatw methods it needs. */
+  const FEATURES = {
+    categories: ['getCategoryMenuItems', 'getCategoriesForCode', 'attachCategoryToCode', 'detachCategoryFromCode', 'createCategoryAndAttach'],
+    editCode: ['updateCode'],
+    editCategory: ['updateCategory'],
+    relationships: [
+      'getRelationshipMenu',
+      'getRelationshipsForCode',
+      'addCodeToInstance',
+      'removeCodeFromInstance',
+      'createRelationshipAndAttach',
+      'addInstanceWithCode',
+    ],
+    removeHighlight: ['deleteHighlight'],
+    manage: ['getCodeUsage', 'deprecateCode', 'mergeCode', 'removeCodeFromFile', 'deleteCode'],
+    showPassages: ['showHighlightsForCode'],
+    // A category, not only a code, in a relationship.
+    relationshipCategories: ['getCategoriesForCode', 'getCategoryMenuItems', 'addItemToInstance', 'addInstanceWithItem', 'createRelationshipWithItem'],
+  };
+  // A yaqatw from before getCapabilities: what Word offered then (callNewer still says when a
+  // method is missing). test/word-yaqatw-rpc.test.js checks every method named on this page
+  // against yaqatw's HostRpcServer, when YAQATW_PATH says where yaqatw is.
+  const BEFORE_CAPABILITIES = ['categories', 'editCode'];
+  /** The method names yaqatw answers; undefined until asked, null when it cannot say. */
+  let capabilities;
+
+  async function featureList() {
+    if (capabilities === undefined) {
+      try {
+        const c = await callPlugin('getCapabilities');
+        capabilities = new Set(((c && c.methods) || []).map(String));
+      } catch {
+        capabilities = null;
+      }
+    }
+    const methods = capabilities;
+    return Object.keys(FEATURES).filter((f) =>
+      methods ? FEATURES[f].every((m) => methods.has(m)) : BEFORE_CAPABILITIES.includes(f),
+    );
   }
 
   async function syncFileType() {
@@ -629,31 +680,65 @@
 
   // ─── Actions: what Word's ribbon (and the code picker) ask of yaqatw ───────────────────────
 
+  /** Why codes cannot be applied in this document, or "" when they can. */
+  function codingNote() {
+    if (fileType === 'analyze') return '';
+    return fileType === 'write'
+      ? 'This is a writing document: codes are applied in analysis documents.'
+      : "Choose this document's type first: Yaqatw › Open Yaqatw, then Settings › Document type: Analysis.";
+  }
+
   function requireAnalysis() {
-    if (fileType === 'analyze') return;
-    throw new Error(
-      fileType === 'write'
-        ? 'This is a writing document: codes are applied in analysis documents.'
-        : "Choose this document's type first: Yaqatw › Open Yaqatw, then Settings › Document type: Analysis.",
-    );
+    const note = codingNote();
+    if (note) throw new Error(note);
+  }
+
+  // Codes applied here lately, most recent first: kept in this origin's storage, which the code
+  // picker (picker.js) shares, so Word's menus and the picker put the same codes first.
+  const RECENT_KEY = 'picker.recent';
+  function recentCodes() {
+    try {
+      const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+      return Array.isArray(list) ? list.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  function rememberCode(codeId) {
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify([codeId, ...recentCodes().filter((id) => id !== codeId)].slice(0, 20)));
+    } catch {
+      /* storage unavailable */
+    }
   }
 
   const actions = {
     /** The state the ribbon needs: is yaqatw there, and the document's type. */
     state: async () => ({ ready: true, fileType }),
-    /** The project's codes, colours as Word shows them. */
-    codes: async () => ({
-      fileType,
-      codes: ((await callPlugin('getCodeMenuItems')) || []).map((c) => ({
+    /**
+     * The project's codes as yaqatw offers them, colours as Word shows them, the ones applied
+     * here lately first (one list for Word's menus and the picker). `note`: why codes cannot be
+     * applied in this document, for the menus to say ("" when they can).
+     */
+    codes: async () => {
+      const codes = ((await callPlugin('getCodeMenuItems')) || []).map((c) => ({
         id: String(c.id),
         name: String(c.name || ''),
         description: c.description ? String(c.description) : '',
         color: wordColor(c.color),
-      })),
-    }),
+      }));
+      const order = recentCodes();
+      const rank = (c) => (order.includes(c.id) ? order.indexOf(c.id) : Infinity);
+      // A stable sort: the others keep yaqatw's order.
+      codes.sort((a, b) => rank(a) - rank(b));
+      return { fileType, note: codingNote(), codes };
+    },
+    // Actions from Word's menus answer `{ status }`: one line Word shows in its status bar.
     applyCode: async ({ codeId }) => {
       requireAnalysis();
       await callPlugin('applyCodeToSelection', String(codeId));
+      rememberCode(String(codeId));
+      return { status: `${await codeName(codeId)} applied.` };
     },
     newCode: async ({ name, description, color }) => {
       requireAnalysis();
@@ -663,7 +748,270 @@
     inVivo: async () => {
       requireAnalysis();
       await callPlugin('createInVivoCodeAndApply');
+      return { status: 'In vivo code applied.' };
     },
+    /** What this yaqatw can do, by feature (FEATURES): the windows show only that. */
+    features: async () => ({ features: await featureList() }),
+
+    // Highlight info (the ribbon, Word's right-click menu): what yaqatw shows when a coded passage
+    // is clicked, for the passage at Word's cursor. Text fields are saved together; codes at once.
+    // Each code comes with its categories and relationships when yaqatw can say, and the
+    // project's categories to add one.
+    highlightInfo: async ({ hid }) => {
+      requireAnalysis();
+      const h = await passage(hid);
+      const features = await featureList();
+      const has = (f) => features.includes(f);
+      const codes = [];
+      for (const c of h.codes || []) {
+        const code = { id: String(c.id), name: String(c.name || ''), color: wordColor(c.color) };
+        if (has('categories')) {
+          const inAlready = await callPlugin('getCategoriesForCode', code.id).catch(() => null);
+          if (Array.isArray(inAlready)) {
+            code.categories = inAlready.map((k) => ({ id: String(k.id), name: String(k.name || ''), description: String(k.description || '') }));
+          }
+        }
+        if (has('relationships')) {
+          const links = await callPlugin('getRelationshipsForCode', code.id).catch(() => null);
+          if (Array.isArray(links)) {
+            code.relationships = links.map((r) => ({
+              relationshipId: String(r.relationshipId),
+              name: String(r.name || ''),
+              instanceId: String(r.instanceId),
+              instanceName: String(r.instanceName || ''),
+            }));
+          }
+        }
+        codes.push(code);
+      }
+      const categories = has('categories') ? (await callPlugin('getCategoryMenuItems').catch(() => null)) || [] : [];
+      return {
+        text: String(h.text || ''),
+        translation: String(h.translation || ''),
+        comment: String(h.comment || ''),
+        codes,
+        categories: categories.map((k) => ({ id: String(k.id), name: String(k.name || '') })),
+        features,
+      };
+    },
+    /** Remove highlight: to yaqatw's Trash, its mark leaves the document (the text stays). */
+    removeHighlight: async ({ hid }) => {
+      requireAnalysis();
+      await callNewer('deleteHighlight', String(hid));
+      return { status: "Highlight removed: it is in Yaqatw's Trash." };
+    },
+    saveHighlightInfo: async ({ hid, translation, comment }) => {
+      requireAnalysis();
+      await callNewer('updateHighlightDetails', String(hid), { translation: String(translation ?? ''), comment: String(comment ?? '') });
+    },
+    /** `{ deleted }`: true when it was the passage's last code, and the highlight went with it. */
+    detachCode: async ({ hid, codeId }) => {
+      requireAnalysis();
+      const r = await callNewer('detachCodeFromHighlight', String(hid), String(codeId));
+      return { deleted: Boolean(r && r.deleted) };
+    },
+    attachCode: async ({ hid, codeId }) => {
+      requireAnalysis();
+      await callNewer('attachCodeToHighlight', String(hid), String(codeId));
+    },
+    // Add to category (Word's right-click menu, in a coded passage): a category holds codes, so
+    // the passage's codes, each with the categories it is in, and all the categories.
+    categoryMenu: async ({ hid }) => {
+      requireAnalysis();
+      const h = await passage(hid);
+      const all = (await callNewer('getCategoryMenuItems')) || [];
+      const codes = [];
+      for (const c of h.codes || []) {
+        const inAlready = (await callNewer('getCategoriesForCode', String(c.id))) || [];
+        codes.push({ id: String(c.id), name: String(c.name || ''), color: wordColor(c.color), categories: inAlready.map((k) => String(k.id)) });
+      }
+      return { codes, categories: all.map((k) => ({ id: String(k.id), name: String(k.name || '') })) };
+    },
+    addToCategory: async ({ categoryId, codeId }) => {
+      requireAnalysis();
+      await callNewer('attachCategoryToCode', String(categoryId), String(codeId));
+      return { status: `${await codeName(codeId)} added to ${await categoryName(categoryId)}.` };
+    },
+    removeFromCategory: async ({ categoryId, codeId }) => {
+      requireAnalysis();
+      await callNewer('detachCategoryFromCode', String(categoryId), String(codeId));
+      return { status: `${await codeName(codeId)} taken out of ${await categoryName(categoryId)}.` };
+    },
+
+    // Add to relationship (Word's right-click menu, in a coded passage). A relationship holds
+    // codes and categories in its instances: the passage's codes, then the categories they are
+    // directly in (once each, when yaqatw can put a category in a relationship), each with every
+    // relationship and its instances (`holds`: the item is in it). Parent categories are the
+    // window's (relateItems).
+    relationshipMenu: async ({ hid }) => {
+      requireAnalysis();
+      const h = await passage(hid);
+      const items = (h.codes || []).map((c) => ({ kind: 'code', id: String(c.id), name: String(c.name || ''), color: wordColor(c.color) }));
+      if ((await featureList()).includes('relationshipCategories')) {
+        const seen = new Set();
+        for (const code of items.slice()) {
+          for (const k of (await callNewer('getCategoriesForCode', code.id)) || []) {
+            if (seen.has(String(k.id))) continue;
+            seen.add(String(k.id));
+            items.push({ kind: 'category', id: String(k.id), name: String(k.name || '') });
+          }
+        }
+      }
+      for (const item of items) item.relationships = await relationshipsOf(item.id);
+      return { items };
+    },
+    /**
+     * The window's list (Add to relationship › More…): the passage's codes, each with the
+     * categories it is in and their parents, as an indented tree (`depth`).
+     */
+    relateItems: async ({ hid }) => {
+      requireAnalysis();
+      const h = await passage(hid);
+      const withCategories = (await featureList()).includes('relationshipCategories');
+      const all = withCategories ? (await callNewer('getCategoryMenuItems')) || [] : [];
+      const byId = new Map(all.map((k) => [String(k.id), k]));
+      const items = [];
+      for (const c of h.codes || []) {
+        items.push({ kind: 'code', id: String(c.id), name: String(c.name || ''), color: wordColor(c.color), depth: 0 });
+        if (!withCategories) continue;
+        for (const k of (await callNewer('getCategoriesForCode', String(c.id))) || []) {
+          // The category, then its parent, its parent's parent… (a loop in the data stops it).
+          const seen = new Set();
+          let at = byId.get(String(k.id)) || k;
+          for (let depth = 1; at && !seen.has(String(at.id)) && depth < 12; depth++) {
+            seen.add(String(at.id));
+            items.push({ kind: 'category', id: String(at.id), name: String(at.name || ''), depth });
+            at = at.parentId ? byId.get(String(at.parentId)) : null;
+          }
+        }
+      }
+      return { items, categories: withCategories };
+    },
+    /** Every relationship and its instances, each saying whether it holds `itemId`. */
+    itemRelationships: async ({ itemId }) => {
+      requireAnalysis();
+      return { relationships: await relationshipsOf(String(itemId)) };
+    },
+    addToRelationship: async (args) => {
+      requireAnalysis();
+      const item = itemOf(args);
+      const rel = String(args.relationshipId);
+      const inst = String(args.instanceId);
+      if (item.category) await callNewer('addItemToInstance', rel, inst, item.id, 'CategoryXml');
+      else await callNewer('addCodeToInstance', rel, inst, item.id);
+      return { status: `${await itemName(item)} added to ${await instanceName(rel, inst)}.` };
+    },
+    removeFromRelationship: async (args) => {
+      requireAnalysis();
+      const item = itemOf(args);
+      // yaqatw takes any item out by its id.
+      await callNewer('removeCodeFromInstance', String(args.relationshipId), String(args.instanceId), item.id);
+      return { status: `${await itemName(item)} taken out of ${await instanceName(args.relationshipId, args.instanceId)}.` };
+    },
+    /** A new instance of a relationship (yaqatw names it "<relationship> N"), holding the item. */
+    newInstance: async (args) => {
+      requireAnalysis();
+      const item = itemOf(args);
+      const rel = String(args.relationshipId);
+      if (item.category) await callNewer('addInstanceWithItem', rel, item.id, 'CategoryXml');
+      else await callNewer('addInstanceWithCode', rel, item.id);
+      return { status: `A new instance of ${await instanceName(rel)} holds ${lower(await itemName(item))}.` };
+    },
+    /** A new relationship (name, description) whose first instance holds the item. */
+    newRelationship: async (args) => {
+      requireAnalysis();
+      const item = itemOf(args);
+      const wanted = String(args.name || '').trim();
+      if (!wanted) throw new Error('A relationship needs a name.');
+      const description = String(args.description || '').trim();
+      const r = item.category
+        ? await callNewer('createRelationshipWithItem', wanted, description, item.id, 'CategoryXml')
+        : await callNewer('createRelationshipAndAttach', wanted, description, item.id);
+      return { id: String(r && r.id) };
+    },
+    /** The project's categories (the form window names the one it is for). */
+    categories: async () => ({
+      categories: ((await callNewer('getCategoryMenuItems')) || []).map((k) => ({ id: String(k.id), name: String(k.name || '') })),
+    }),
+
+    // Managing a code (Highlight info › Manage): its reach first (codeUsage), then the action.
+    // Each one is undone in Yaqatw (Reactivate, Unmerge, Trash), never by Word's Undo.
+    codeUsage: async ({ codeId }) => {
+      requireAnalysis();
+      const u = (await callNewer('getCodeUsage', String(codeId))) || {};
+      return { here: Number(u.here) || 0, elsewhere: Number(u.elsewhere) || 0, files: Number(u.files) || 0 };
+    },
+    deprecateCode: async ({ codeId, reason }) => {
+      requireAnalysis();
+      await callNewer('deprecateCode', String(codeId), String(reason || '').trim());
+    },
+    mergeCode: async ({ codeId, targetId }) => {
+      requireAnalysis();
+      if (!targetId || String(targetId) === String(codeId)) throw new Error('Choose another code to merge into.');
+      const r = await callNewer('mergeCode', String(codeId), String(targetId));
+      return { targetId: String((r && r.targetId) || targetId) };
+    },
+    removeCodeFromFile: async ({ codeId }) => {
+      requireAnalysis();
+      const r = (await callNewer('removeCodeFromFile', String(codeId))) || {};
+      return { removedHighlights: Number(r.removedHighlights) || 0, updatedHighlights: Number(r.updatedHighlights) || 0 };
+    },
+    deleteCode: async ({ codeId }) => {
+      requireAnalysis();
+      await callNewer('deleteCode', String(codeId));
+    },
+    /** The code's passages in yaqatw's window (main.js shows the window). */
+    showPassages: async ({ codeId }) => {
+      await callNewer('showHighlightsForCode', String(codeId));
+    },
+    /**
+     * A new category (name, description) holding the code, from the New category window; a name
+     * already taken puts the code in that category instead (its description stays as it is).
+     */
+    newCategory: async ({ codeId, name, description }) => {
+      requireAnalysis();
+      const wanted = String(name || '').trim();
+      if (!wanted) throw new Error('A category needs a name.');
+      const all = (await callNewer('getCategoryMenuItems')) || [];
+      const same = all.find((k) => String(k.name || '').trim().toLowerCase() === wanted.toLowerCase());
+      if (same) {
+        await callNewer('attachCategoryToCode', String(same.id), String(codeId));
+        return { id: String(same.id), existed: true };
+      }
+      const r = await callNewer('createCategoryAndAttach', wanted, String(description || '').trim(), String(codeId));
+      return { id: String(r && r.id), existed: false };
+    },
+    /** A code's name, description, colour (only those given); yaqatw repaints its passages. */
+    editCode: async ({ codeId, name, description, color }) => {
+      requireAnalysis();
+      const updates = {};
+      if (name !== undefined) {
+        if (!String(name).trim()) throw new Error('A code needs a name.');
+        updates.name = String(name).trim();
+      }
+      if (description !== undefined) updates.description = String(description);
+      if (color) updates.color = String(color);
+      await callNewer('updateCode', String(codeId), updates);
+    },
+    /** A category's name and description (only those given); a name another category has is refused by yaqatw. */
+    editCategory: async ({ categoryId, name, description }) => {
+      requireAnalysis();
+      const updates = {};
+      if (name !== undefined) {
+        if (!String(name).trim()) throw new Error('A category needs a name.');
+        updates.name = String(name).trim();
+      }
+      if (description !== undefined) updates.description = String(description).trim();
+      await callNewer('updateCategory', String(categoryId), updates);
+    },
+    /** The translators that have their settings in yaqatw (none: no Translate button). */
+    translateProviders: async () => {
+      const list = await callNewer('getTranslateProviders');
+      return { providers: (Array.isArray(list) ? list : []).map((p) => ({ key: String(p.key), label: String(p.label || p.key) })) };
+    },
+    translateHighlight: async ({ hid, provider }) => ({
+      text: String((await callNewer('translateHighlightText', String(hid), String(provider))) ?? ''),
+    }),
 
     // Writing: what yaqatw's Writing › Cite does, from Word's ribbon and the insert window.
     /** Quotes, artifacts, notes, tables, figures matching `query`, each with how it can go in. */
@@ -685,6 +1033,74 @@
       await callWriting('unlinkAllCitations');
     },
   };
+
+  /** A yaqatw method recent ones have; one too old to have it says so plainly. */
+  async function callNewer(method, ...args) {
+    try {
+      return await callPlugin(method, ...args);
+    } catch (err) {
+      if (/Unknown method/.test(cleanError(err))) {
+        throw new Error('This needs a newer Yaqatw: update Clew Desktop, then try again.');
+      }
+      throw err;
+    }
+  }
+
+  /** The coded passage `hid` as yaqatw keeps it; one it has no record of is said so. */
+  async function passage(hid) {
+    const h = await callNewer('getHighlightDetails', String(hid));
+    if (!h) throw new Error('Yaqatw has no record of this passage: it was deleted, or not saved yet.');
+    return h;
+  }
+
+  // Names for the status line, looked up after the action: a lookup that fails leaves a plain word.
+  const quoted = (name) => `“${name}”`;
+  async function codeName(codeId) {
+    const list = await callPlugin('getCodeMenuItems').catch(() => null);
+    const c = (Array.isArray(list) ? list : []).find((x) => String(x.id) === String(codeId));
+    return c && c.name ? quoted(c.name) : 'The code';
+  }
+  async function categoryName(categoryId) {
+    const list = await callPlugin('getCategoryMenuItems').catch(() => null);
+    const k = (Array.isArray(list) ? list : []).find((x) => String(x.id) === String(categoryId));
+    return k && k.name ? quoted(k.name) : 'the category';
+  }
+  /**
+   * What a relationship action is about: `{ itemId, kind }` ("code" or "category"), or a code's
+   * `codeId` as the first menus sent it.
+   */
+  function itemOf({ itemId, kind, codeId }) {
+    const id = String(itemId ?? codeId ?? '');
+    if (!id) throw new Error('No code or category to put in the relationship.');
+    return { id, category: kind === 'category' };
+  }
+  /** “Name” of a code, or the category “Name”, for the status line. */
+  async function itemName(item) {
+    if (!item.category) return codeName(item.id);
+    const name = await categoryName(item.id);
+    return name === 'the category' ? 'The category' : `The category ${name}`;
+  }
+  const lower = (s) => (/^The /.test(s) ? `t${s.slice(1)}` : s);
+
+  /** Every relationship with its instances, `holds` when the instance has `itemId`. */
+  async function relationshipsOf(itemId) {
+    const rels = (await callNewer('getRelationshipMenu', String(itemId))) || [];
+    return rels.map((r) => ({
+      id: String(r.id),
+      name: String(r.name || ''),
+      instances: (r.instances || []).map((i) => ({ id: String(i.id), name: String(i.name || ''), holds: Boolean(i.hasCode) })),
+    }));
+  }
+
+  /** “Relationship”, or “Relationship › Instance” when it has several instances. */
+  async function instanceName(relationshipId, instanceId) {
+    const list = await callPlugin('getRelationshipMenu').catch(() => null);
+    const r = (Array.isArray(list) ? list : []).find((x) => String(x.id) === String(relationshipId));
+    if (!r || !r.name) return 'the relationship';
+    const instances = r.instances || [];
+    const i = instances.find((x) => String(x.id) === String(instanceId));
+    return instanceId && i && instances.length > 1 ? quoted(`${r.name} › ${i.name}`) : quoted(r.name);
+  }
 
   /** A yaqatw method for writing; one too old to have it says so plainly. */
   async function callWriting(method, ...args) {

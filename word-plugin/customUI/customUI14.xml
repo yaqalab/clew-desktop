@@ -2,7 +2,9 @@
 <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui" onLoad="Ribbon_OnLoad">
   <ribbon>
     <tabs>
-      <tab id="yaqatwTab" label="Yaqatw">
+      <!-- Before Help, as Zotero's tab: before Add-ins (there in every Word since 2010, usually
+           hidden, just before Help). Help itself is newer: older Words have no TabHelp. -->
+      <tab id="yaqatwTab" label="Yaqatw" insertBeforeMso="TabAddIns">
         <!-- Icons are Office's own (imageMso), grey with one accent colour like Word's. A name
              Office does not have shows an empty space and no error: check new ones in Word. -->
         <!-- Shown for analysis documents only (Ribbon.bas): a document without a type has Clew Desktop alone. -->
@@ -23,6 +25,10 @@
                   screentip="In vivo code"
                   supertip="Creates a code named after the selected text and applies it."
                   onAction="Ribbon_InVivo"/>
+          <button id="yaqatwInfo" label="Highlight info" size="large" imageMso="ReviewNewComment"
+                  screentip="Highlight info"
+                  supertip="The coded passage at the cursor: its text, translation, notes and codes."
+                  onAction="Ribbon_HighlightInfo"/>
         </group>
         <!-- Shown for writing documents only. The tag of each
              Insert button is what the insert window searches first. -->
@@ -49,7 +55,8 @@
                   onAction="Ribbon_UnlinkCitations"/>
         </group>
         <group id="yaqatwClew" label="Clew Desktop">
-          <button id="yaqatwOpen" label="Open Yaqatw" size="large" imageMso="FileOpen"
+          <!-- image: customUI/images/yaqatw.png, yaqatw's own logo (build.ps1 packs it). -->
+          <button id="yaqatwOpen" label="Open Yaqatw" size="large" image="yaqatw"
                   screentip="Open Yaqatw for this document"
                   supertip="Opens Yaqatw in a Clew Desktop window, working on this document."
                   onAction="Ribbon_Open"/>
@@ -61,4 +68,52 @@
       </tab>
     </tabs>
   </ribbon>
+  <!-- Word's right-click menus on text, in a list and on a misspelled word, in analysis
+       documents only (coding is the job there; other documents see Word's menus unchanged):
+       Apply code (as in the ribbon, with In vivo); then, in a coded passage only
+       (Ribbon_PassageVisible), Add to category (its codes into a category,
+       Ribbon_CategoriesMenu), Add to relationship (into a relationship's instance,
+       Ribbon_RelationshipsMenu; only when the document's Yaqatw can, Ribbon_RelationsVisible)
+       and Highlight info (the passage's hub: tags, Manage, Remove highlight).
+       Before Cut in each: first in the text and list menus; in the misspelled-word one, after
+       Word's Spelling submenu (where its suggestions are; transcripts in other languages are
+       underlined throughout, so that menu is often the one shown). A separator after them,
+       before Cut: one cannot be hidden, so in other documents it stands beside Word's own above
+       the entries, and Word draws the two as one. Ids are unique in the whole file: each menu
+       has its own (Ribbon_CodesMenu, Ribbon_CategoriesMenu, Ribbon_RelationshipsMenu read them). -->
+  <contextMenus>
+    <contextMenu idMso="ContextMenuText">
+      <dynamicMenu id="yaqatwCtxApply" label="Apply code" imageMso="Highlight" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_GetVisible" getContent="Ribbon_CodesMenu" invalidateContentOnDrop="true"/>
+      <dynamicMenu id="yaqatwCtxCat" label="Add to category" imageMso="CategorizeMenu" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_PassageVisible" getContent="Ribbon_CategoriesMenu" invalidateContentOnDrop="true"/>
+      <dynamicMenu id="yaqatwCtxRel" label="Add to relationship" imageMso="SmartArtInsert" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_RelationsVisible" getContent="Ribbon_RelationshipsMenu" invalidateContentOnDrop="true"/>
+      <button id="yaqatwCtxInfo" label="Highlight info" imageMso="ReviewNewComment" tag="analyze" insertBeforeMso="Cut"
+              getVisible="Ribbon_PassageVisible" onAction="Ribbon_HighlightInfo"/>
+      <menuSeparator id="yaqatwCtxSep" insertBeforeMso="Cut"/>
+    </contextMenu>
+    <contextMenu idMso="ContextMenuList">
+      <dynamicMenu id="yaqatwCtxApplyList" label="Apply code" imageMso="Highlight" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_GetVisible" getContent="Ribbon_CodesMenu" invalidateContentOnDrop="true"/>
+      <dynamicMenu id="yaqatwCtxCatList" label="Add to category" imageMso="CategorizeMenu" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_PassageVisible" getContent="Ribbon_CategoriesMenu" invalidateContentOnDrop="true"/>
+      <dynamicMenu id="yaqatwCtxRelList" label="Add to relationship" imageMso="SmartArtInsert" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_RelationsVisible" getContent="Ribbon_RelationshipsMenu" invalidateContentOnDrop="true"/>
+      <button id="yaqatwCtxInfoList" label="Highlight info" imageMso="ReviewNewComment" tag="analyze" insertBeforeMso="Cut"
+              getVisible="Ribbon_PassageVisible" onAction="Ribbon_HighlightInfo"/>
+      <menuSeparator id="yaqatwCtxSepList" insertBeforeMso="Cut"/>
+    </contextMenu>
+    <contextMenu idMso="ContextMenuSpell">
+      <dynamicMenu id="yaqatwCtxApplySpell" label="Apply code" imageMso="Highlight" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_GetVisible" getContent="Ribbon_CodesMenu" invalidateContentOnDrop="true"/>
+      <dynamicMenu id="yaqatwCtxCatSpell" label="Add to category" imageMso="CategorizeMenu" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_PassageVisible" getContent="Ribbon_CategoriesMenu" invalidateContentOnDrop="true"/>
+      <dynamicMenu id="yaqatwCtxRelSpell" label="Add to relationship" imageMso="SmartArtInsert" tag="analyze" insertBeforeMso="Cut"
+                   getVisible="Ribbon_RelationsVisible" getContent="Ribbon_RelationshipsMenu" invalidateContentOnDrop="true"/>
+      <button id="yaqatwCtxInfoSpell" label="Highlight info" imageMso="ReviewNewComment" tag="analyze" insertBeforeMso="Cut"
+              getVisible="Ribbon_PassageVisible" onAction="Ribbon_HighlightInfo"/>
+      <menuSeparator id="yaqatwCtxSepSpell" insertBeforeMso="Cut"/>
+    </contextMenu>
+  </contextMenus>
 </customUI>

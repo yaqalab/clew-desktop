@@ -85,7 +85,7 @@ Worth knowing before you rely on it:
   can open.
 - **Removing a vault in Clew does not delete its folder copy**, and **uninstalling the app keeps
   both the data folder and `Documents\Clew`**. On a shared or borrowed computer, use
-  **Settings › General › Remove all Clew data from this computer** when you are done: it lists
+  **Settings › General › Remove all Clew data** when you are done: it lists
   what goes, offers an encrypted backup first (a zip protected by a passphrase, which 7-Zip and
   most archivers open), checks the backup, then closes Clew and deletes the folders.
 - **Quit waits for what you are typing** (a few seconds at most). Switching the computer off
@@ -107,7 +107,7 @@ Worth knowing before you rely on it:
 
 Uninstall **Clew** from Windows Settings › Apps. Yaqatw for Word and the start at sign-in go
 with it (close Word first). Your data stays (see above). To remove it too,
-use **Settings › General › Remove all Clew data from this computer** before uninstalling, or
+use **Settings › General › Remove all Clew data** before uninstalling, or
 delete `%APPDATA%\Clew` and `Documents\Clew` yourself.
 
 ## Licence

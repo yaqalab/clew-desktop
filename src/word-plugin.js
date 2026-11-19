@@ -8,8 +8,10 @@
  *   `word-template` and hands it its token through the registry key the template reads
  *   (`HKCU\Software\VB and VBA Program Settings\yaqatw\Clew`, `Token`, plus `Port` when not
  *   the default). Installing is the user's consent: no pairing question.
- * - refresh, at start: an installed template older than the app's own is replaced (unless Word
- *   holds it), and one whose client is gone is given a new token.
+ * - refresh, at start: an installed template older than the app's own is replaced, and one whose
+ *   client is gone is given a new token. While Word holds the installed one (Word is running),
+ *   the update waits: status says `waiting`, and the copy is tried again every minute until Word
+ *   lets go (`onChange` then says so).
  * - remove: the file, the registry key and the client.
  *
  * Writing the registry goes through `reg.exe`, so the token is on a command line for a moment:
@@ -59,16 +61,70 @@ const busy = (err) => ['EBUSY', 'EPERM', 'EACCES'].includes(err?.code);
  * @param {() => number} opts.port the local API's port
  * @param {number} opts.defaultPort the port the template uses when told nothing
  * @param {typeof windowsRegistry} [opts.registry]
+ * @param {() => void} [opts.onChange] a waiting update was installed
+ * @param {number} [opts.retryMs] how often a waiting update is tried again
  */
-function createWordPlugin({ template, startupDir, clients, port, defaultPort, registry = windowsRegistry, log = console }) {
+function createWordPlugin({
+  template,
+  startupDir,
+  clients,
+  port,
+  defaultPort,
+  registry = windowsRegistry,
+  log = console,
+  onChange = () => {},
+  retryMs = 60000,
+}) {
   const installed = () => path.join(startupDir, FILE);
+  /** An update Word kept out (it holds the installed template), tried again by `retry`. */
+  let waiting = false;
+  let retry = null;
 
   function status() {
     return {
       available: fs.existsSync(template),
       installed: fs.existsSync(installed()),
       connected: clients.list().some((c) => c.kind === KIND),
+      waiting,
     };
+  }
+
+  function stopWaiting() {
+    waiting = false;
+    clearTimeout(retry);
+    retry = null;
+  }
+
+  /**
+   * The installed template made the same as the app's, if it differs. Word holding it: the
+   * update waits, tried again every `retryMs`. True when the copy was made.
+   */
+  function update() {
+    if (!fs.existsSync(template) || !fs.existsSync(installed())) {
+      stopWaiting();
+      return false;
+    }
+    if (sha256(template) === sha256(installed())) {
+      stopWaiting();
+      return false;
+    }
+    try {
+      copy();
+    } catch (err) {
+      log.warn(`[word-plugin] template not updated: ${err.message}`);
+      if (err.code !== 'word-busy') return false;
+      waiting = true;
+      clearTimeout(retry);
+      retry = setTimeout(() => {
+        retry = null;
+        if (update()) onChange();
+      }, retryMs);
+      retry.unref?.();
+      return false;
+    }
+    stopWaiting();
+    log.log('[word-plugin] template updated');
+    return true;
   }
 
   function copy() {
@@ -100,10 +156,12 @@ function createWordPlugin({ template, startupDir, clients, port, defaultPort, re
     async install() {
       if (!fs.existsSync(template)) throw new WordPluginError('no-template', 'This build of the app has no Word template.');
       copy();
+      stopWaiting();
       await connect();
       return status();
     },
     async remove() {
+      stopWaiting();
       try {
         fs.rmSync(installed(), { force: true });
       } catch (err) {
@@ -120,6 +178,7 @@ function createWordPlugin({ template, startupDir, clients, port, defaultPort, re
         const s = status();
         // Removed from outside the app (uninstalled, deleted by hand): its connection goes too.
         if (!s.installed) {
+          stopWaiting();
           if (clients.list().some((c) => c.kind === KIND)) {
             clients.removeKind(KIND);
             log.log('[word-plugin] template gone: its connection removed');
@@ -127,14 +186,7 @@ function createWordPlugin({ template, startupDir, clients, port, defaultPort, re
           return status();
         }
         if (!s.available) return s;
-        if (sha256(template) !== sha256(installed())) {
-          try {
-            copy();
-            log.log('[word-plugin] template updated');
-          } catch (err) {
-            log.warn(`[word-plugin] template not updated: ${err.message}`);
-          }
-        }
+        update();
         if (!s.connected) await connect();
         else await syncPort();
         return status();
@@ -143,6 +195,8 @@ function createWordPlugin({ template, startupDir, clients, port, defaultPort, re
         return status();
       }
     },
+    /** No more tries of a waiting update (the app quits). */
+    stop: stopWaiting,
   };
 }
 

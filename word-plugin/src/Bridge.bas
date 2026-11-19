@@ -238,6 +238,23 @@ Private Function TickLost() As Boolean
     TickLost = (nextAt <> 0 And Now > nextAt + TimeSerial(0, 0, 3))
 End Function
 
+' Word quits: every session ends, and Clew is told (each window says its document was closed).
+' Otherwise the sessions would live on in Clew, their work waiting for a Word that no longer asks,
+' and Clew would reach for Word to restart its tick while Word shuts down.
+Public Sub BridgeQuit()
+    Dim i As Long
+    Dim id As String
+    Dim status As Long
+    EnsureCollections
+    nextAt = 0
+    On Error Resume Next
+    For i = ids.Count To 1 Step -1
+        id = ids(i)
+        ClewPost "/v1/word/close", "{""session"":" & JsonStr(id) & "}", status, 2, False
+        Forget id
+    Next i
+End Sub
+
 ' Sets the tick again if it was lost (from Word's events and the ribbon's actions).
 Public Sub BridgeKeepTicking()
     EnsureCollections

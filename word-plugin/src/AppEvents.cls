@@ -27,3 +27,8 @@ End Sub
 Private Sub App_DocumentChange()
     RibbonRefresh
 End Sub
+
+' Word quits: the sessions with Clew Desktop end now, not at a tick that will never come.
+Private Sub App_Quit()
+    BridgeQuit
+End Sub

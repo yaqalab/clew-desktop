@@ -27,6 +27,10 @@ certs/
 .env.*
 !.env.example
 
+# A profile folder named literally "%TEMP%": what --user-data-dir=%TEMP%\... becomes in a shell
+# that does not expand %TEMP% (Git Bash). Never data to keep in Git.
+/%TEMP%/
+
 # Logs and OS/editor files
 *.log
 npm-debug.log*
