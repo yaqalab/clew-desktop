@@ -655,8 +655,11 @@ async function run(win, ses, server, tools, folder, db, api) {
           document.getElementById('wipe-dialog').close();
           return r;
         })()`);
+        // Two places, plus the app updater's downloads in a packaged app. `go` is the button's
+        // disabled state: removing never runs in a smoke run (wipeData refuses it as well).
+        const wipeItems = app.isPackaged ? 3 : 2;
         assert(
-          wipeShown.open && wipeShown.items === 2 && wipeShown.kept >= 2 && wipeShown.go && !wipeShown.afterCancel,
+          wipeShown.open && wipeShown.items === wipeItems && wipeShown.kept >= 2 && wipeShown.go && !wipeShown.afterCancel,
           `wipe dialog: ${JSON.stringify(wipeShown)}`,
         );
         // The analysis key: masked, shown on Show (to select and copy), masked again on Hide.
