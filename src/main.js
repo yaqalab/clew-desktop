@@ -24,6 +24,20 @@ const PARTITION = 'persist:alefa';
 const WORD_SCHEME = 'clew-word';
 protocol.registerSchemesAsPrivileged([{ scheme: WORD_SCHEME, privileges: { standard: true, secure: true } }]);
 const SMOKE = process.argv.includes('--smoke');
+// A smoke run has a profile of its own: the default one is the installed app's (`%APPDATA%\Clew`),
+// with the person's vaults in its storage, and is locked while that app runs. Older smoke
+// profiles go; one still in use by another run stays (its files are held open).
+if (SMOKE && !app.commandLine.hasSwitch('user-data-dir')) {
+  const tmp = require('node:os').tmpdir();
+  for (const name of fs.readdirSync(tmp).filter((n) => n.startsWith('clew-smoke-profile-'))) {
+    try {
+      fs.rmSync(path.join(tmp, name), { recursive: true, force: true, maxRetries: 0 });
+    } catch {
+      // held by a run still going
+    }
+  }
+  app.setPath('userData', path.join(tmp, `clew-smoke-profile-${process.pid}`));
+}
 // Started at login: the tray only, no window until asked for.
 const HIDDEN = process.argv.includes('--hidden');
 // The tools (tray, audio server) stay out of the smoke run unless asked for: it would bind the
