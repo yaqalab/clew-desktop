@@ -42,7 +42,9 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
           python clew_analysis_server.py --check
+      # The dictation server needs Python 3.11 or later (its pyproject.toml); 3.10 is for the engine.
       - name: Dictation server (fake engine; PyAV for the decoding tests)
+        if: matrix.python != '3.10'
         working-directory: tools/stt-server
         run: |
           python -m pip install --quiet --disable-pip-version-check -e ".[test]" av
