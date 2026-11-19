@@ -340,7 +340,9 @@ document) and
   client of kind `word-template` and writes its token to
   `HKCU\Software\VB and VBA Program Settings\yaqatw\Clew` (`Token`, and `Port` when not 47830).
   Installing is the consent: no pairing question. At each start the app replaces an installed
-  template older than its own (unless Word holds it) and reconnects one whose client is gone.
+  template older than its own and reconnects one whose client is gone. Word holds the template
+  while it runs: the update then waits, tried again every minute until Word is closed, and
+  Settings › General says an update is waiting.
   File › Remove Yaqatw for Word… takes away the file, the key and the client. Settings › General
   shows the same (Word: install / remove) and lists the programs connected to the local API,
   each but the template's own with Disconnect.
@@ -388,7 +390,12 @@ document) and
     one); a click in Word sets it again, but with nobody in Word nothing would. So when work has
     waited 4 s without Word asking (`onStall` in word-bridge.js), the app sets it again itself,
     as the click would: `Run("BridgeKeepTicking")` in the running Word through COM (PowerShell;
-    never in a smoke run). Again at 8, 16 s… until Word asks or the work fails as busy (30 s).
+    never in a smoke run). Again at 8 and 16 s, three times at most until Word asks again: a
+    Word that quit does not answer, and reaching into one that is shutting down can keep it
+    running.
+  - Word quitting ends its sessions at once (`App_Quit` → `Bridge.BridgeQuit`, which tells the
+    app through `/v1/word/close`): otherwise they would live on in the app, their work waiting
+    for a Word that no longer asks.
 - **The ribbon's actions** ([Ribbon.bas](../word-plugin/src/Ribbon.bas)) are carried out by the
   document's yaqatw, through its host channel (`HostRpcServer`, as Euro-Office's menu uses it):
   `POST /v1/word/action { session, action, args }` → the app → the window's host page → yaqatw.

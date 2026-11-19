@@ -1122,8 +1122,10 @@ function startWordPlugin() {
     clients: api.clients,
     port: () => api.status().port,
     defaultPort: localApi.DEFAULT_PORT,
+    // An update that waited for Word to let go of the template is in: Settings says so.
+    onChange: () => wordChanged(),
   });
-  wordPlugin.refresh().then(() => buildMenu());
+  wordPlugin.refresh().then(() => wordChanged());
 }
 
 /** Over the window in use (Settings, when asked from there), else Clew's. */
@@ -1136,7 +1138,7 @@ function wordDialog(opts) {
 /** What Settings › General shows: the template, and the programs connected to the local API. */
 function wordSnapshot() {
   return {
-    plugin: wordPlugin?.status() ?? { available: false, installed: false, connected: false },
+    plugin: wordPlugin?.status() ?? { available: false, installed: false, connected: false, waiting: false },
     clients: api ? api.clients.list() : [],
   };
 }

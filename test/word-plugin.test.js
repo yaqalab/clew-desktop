@@ -24,7 +24,7 @@ function fresh(t, { port = 47830 } = {}) {
     unset: async (name) => void values.delete(name),
     removeAll: async () => values.clear(),
   };
-  const state = { port };
+  const state = { port, changes: 0 };
   const plugin = createWordPlugin({
     template,
     startupDir,
@@ -33,14 +33,17 @@ function fresh(t, { port = 47830 } = {}) {
     port: () => state.port,
     defaultPort: 47830,
     log: quiet,
+    onChange: () => state.changes++,
+    retryMs: 20,
   });
+  t.after(() => plugin.stop());
   return { dir, template, startupDir, clients, values, plugin, state, installed: path.join(startupDir, 'yaqatw.dotm') };
 }
 
 test('install: copied to Startup, connected, token in the registry, no Port for the default', async (t) => {
   const { plugin, clients, values, installed } = fresh(t);
-  assert.deepEqual(plugin.status(), { available: true, installed: false, connected: false });
-  assert.deepEqual(await plugin.install(), { available: true, installed: true, connected: true });
+  assert.deepEqual(plugin.status(), { available: true, installed: false, connected: false, waiting: false });
+  assert.deepEqual(await plugin.install(), { available: true, installed: true, connected: true, waiting: false });
   assert.equal(fs.readFileSync(installed, 'utf8'), 'template v1');
   const token = values.get('Token');
   assert.match(token, /^[A-Za-z0-9_-]{43}$/);
@@ -75,7 +78,7 @@ test('remove: file, registry and client gone; other clients kept', async (t) => 
   const { plugin, clients, values, installed } = fresh(t);
   await plugin.install();
   clients.add('Something else');
-  assert.deepEqual(await plugin.remove(), { available: true, installed: false, connected: false });
+  assert.deepEqual(await plugin.remove(), { available: true, installed: false, connected: false, waiting: false });
   assert.equal(fs.existsSync(installed), false);
   assert.equal(values.size, 0);
   assert.deepEqual(
@@ -86,14 +89,14 @@ test('remove: file, registry and client gone; other clients kept', async (t) => 
 
 test('refresh: updates an older template, reconnects a lost client, leaves an uninstalled one alone', async (t) => {
   const { plugin, template, clients, values, installed } = fresh(t);
-  assert.deepEqual(await plugin.refresh(), { available: true, installed: false, connected: false });
+  assert.deepEqual(await plugin.refresh(), { available: true, installed: false, connected: false, waiting: false });
   assert.equal(values.size, 0);
 
   await plugin.install();
   fs.writeFileSync(template, 'template v2');
   clients.removeKind(KIND);
   const old = values.get('Token');
-  assert.deepEqual(await plugin.refresh(), { available: true, installed: true, connected: true });
+  assert.deepEqual(await plugin.refresh(), { available: true, installed: true, connected: true, waiting: false });
   assert.equal(fs.readFileSync(installed, 'utf8'), 'template v2');
   assert.notEqual(values.get('Token'), old);
   assert.equal(clients.find(values.get('Token')).kind, KIND);
@@ -109,7 +112,7 @@ test('refresh: a template removed from outside (uninstalled) takes its connectio
   await plugin.install();
   clients.add('Something else');
   fs.rmSync(installed);
-  assert.deepEqual(await plugin.refresh(), { available: true, installed: false, connected: false });
+  assert.deepEqual(await plugin.refresh(), { available: true, installed: false, connected: false, waiting: false });
   assert.deepEqual(
     clients.list().map((c) => c.name),
     ['Something else'],
@@ -123,6 +126,30 @@ test('no template in this build: install says so, nothing is written', async (t)
   assert.equal(fs.existsSync(installed), false);
   assert.equal(values.size, 0);
   assert.equal(plugin.status().available, false);
+});
+
+test('a template Word holds open: the update waits, and goes in once Word lets go', async (t) => {
+  const { plugin, template, installed, state } = fresh(t);
+  await plugin.install();
+  fs.writeFileSync(template, 'template v2');
+  const copy = fs.copyFileSync;
+  let held = true;
+  fs.copyFileSync = (...a) => {
+    if (held) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+    return copy(...a);
+  };
+  t.after(() => (fs.copyFileSync = copy));
+  assert.equal((await plugin.refresh()).waiting, true);
+  // Tried again while Word still holds it: still waiting, nothing said.
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(plugin.status().waiting, true);
+  assert.equal(state.changes, 0);
+  // Word closed.
+  held = false;
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(fs.readFileSync(installed, 'utf8'), 'template v2');
+  assert.equal(plugin.status().waiting, false);
+  assert.equal(state.changes, 1);
 });
 
 test('a template Word holds open: install reports word-busy, refresh carries on', async (t) => {

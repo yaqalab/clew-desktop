@@ -39,6 +39,8 @@ const RUN_MS = 60000;
 // Work waiting this long while Word has not asked for any: Word's tick may have stopped (Word
 // keeps one OnTime timer, and something can take it); `onStall` can restart it.
 const STALL_MS = 4000;
+// Restarts tried without Word asking in between, before the bridge stops trying (until it asks).
+const MAX_STALLS = 3;
 
 const MESSAGES = {
   'word-busy': 'Word did not answer for 30 seconds: if a dialog is open in Word, close it, then try again.',
@@ -124,10 +126,15 @@ function createWordBridge({
       for (const item of queued) settle(s, item.id, (p) => p.reject(failure('word-busy')));
     }, busyMs);
     // Word asks every second while its tick runs: silence with work waiting is a stopped tick.
+    // At most MAX_STALLS restarts without Word asking in between: a Word that quit (or is
+    // quitting) does not answer, and reaching into it again and again can keep it running.
     const check = (delay) => {
       s.stall = setTimeout(() => {
         if (!sessions.has(s.id) || !s.queue.length || s.running) return;
-        if (Date.now() - s.lastAsk >= stallMs) onStall(pub(s));
+        if (Date.now() - s.lastAsk >= stallMs && (s.stalls || 0) < MAX_STALLS) {
+          s.stalls = (s.stalls || 0) + 1;
+          onStall(pub(s));
+        }
         check(delay * 2);
       }, delay);
     };
@@ -192,6 +199,8 @@ function createWordBridge({
         const s = own(body, client);
         if (!s) return { closed: true };
         s.lastAsk = Date.now();
+        // Word answers: its tick runs, so later stalls may be restarted again.
+        s.stalls = 0;
         const r = body.result;
         if (r && typeof r === 'object' && s.running && r.id === s.running.id) {
           clearTimeout(s.running.timer);
