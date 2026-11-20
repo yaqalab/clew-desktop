@@ -104,7 +104,11 @@ async function finalUrl(ses, url) {
   }
 }
 
-async function run(win, ses, server, tools, folder, db, api) {
+/**
+ * `shell.tabs` and `shell.strip`: the main window's tabs and its strip page (`src/tabs`), when
+ * it holds tabs. `win` is then only `{ webContents }`, the first tab's page.
+ */
+async function run(win, ses, server, tools, folder, db, api, shell = {}) {
   const { stats } = server;
   setTimeout(() => {
     console.error('smoke: timed out');
@@ -680,6 +684,40 @@ async function run(win, ses, server, tools, folder, db, api) {
         assert(errors.length === 0, errors.join(' | '));
         sw.destroy();
         return `"${text}", ${tabs} tabs`;
+      });
+    }
+
+    const mainTabs = shell.tabs;
+    if (mainTabs) {
+      await check('tabs: a project opens in a tab of its own, once, and closes', async () => {
+        const ask = (hash, newTab) => js(`window.alefaDesktop.tabs.open(${JSON.stringify(hash)}, { newTab: ${newTab} })`);
+        const stripTabs = async () => {
+          for (let i = 0; i < 20; i++) {
+            const n = await shell.strip.executeJavaScript("document.querySelectorAll('.tab').length");
+            if (n === mainTabs.contents().length) return n;
+            await wait(100);
+          }
+          return shell.strip.executeJavaScript("document.querySelectorAll('.tab').length");
+        };
+        assert(mainTabs.contents().length === 1, `${mainTabs.contents().length} tabs at start`);
+        assert((await ask('#/p/notes', false)) === 'here', 'a plain move with no tab for it stays here');
+        const opened = await ask('#/p/notes', true);
+        assert(opened === 'opened', `Shift opened: ${opened}`);
+        assert(mainTabs.contents().length === 2, `${mainTabs.contents().length} tabs after Shift`);
+        const second = mainTabs.contents()[1];
+        await new Promise((resolve) => (second.isLoading() ? second.once('did-finish-load', resolve) : resolve()));
+        assert(new URL(second.getURL()).hash === '#/p/notes', `the tab shows ${second.getURL()}`);
+        assert(mainTabs.active() === second, 'the new tab is in front');
+        // The same project again goes to its tab, never a second one.
+        const again = await ask('#/p/notes?x=1', true);
+        assert(again === 'shown', `the project's own tab: ${again}`);
+        assert(mainTabs.contents().length === 2, 'no second tab for one project');
+        assert((await stripTabs()) === 2, 'the strip shows two tabs');
+        const label = await shell.strip.executeJavaScript("document.querySelector('[aria-selected=true] .label').textContent");
+        assert(await mainTabs.closeExtra(), 'the extra tab closed');
+        assert(mainTabs.contents().length === 1 && mainTabs.active() === win.webContents, 'back to the first tab');
+        assert(await mainTabs.closeExtra(), 'nothing left to close');
+        return `opened, shown again, closed; strip label "${label}"`;
       });
     }
 
