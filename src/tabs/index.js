@@ -120,11 +120,18 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
       pushState();
     });
     contents.on('destroyed', () => remove(tab));
-    // Ctrl+Tab and Ctrl+Shift+Tab, Ctrl+PageDown and Ctrl+PageUp, as in a browser.
+    // As in a browser: Ctrl+Tab and Ctrl+Shift+Tab, Ctrl+PageDown and Ctrl+PageUp go to the next
+    // and previous tab; Ctrl+Shift+PageDown and Ctrl+Shift+PageUp move the tab in front.
     contents.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return;
-      const step = input.key === 'Tab' ? (input.shift ? -1 : 1) : input.key === 'PageDown' ? 1 : input.key === 'PageUp' ? -1 : 0;
-      if (!step || tabs.length < 2) return;
+      if (input.type !== 'keyDown' || !input.control || input.alt || input.meta || tabs.length < 2) return;
+      const page = input.key === 'PageDown' ? 1 : input.key === 'PageUp' ? -1 : 0;
+      if (page && input.shift) {
+        event.preventDefault();
+        if (active) move(active.id, tabs.indexOf(active) + page);
+        return;
+      }
+      const step = input.key === 'Tab' ? (input.shift ? -1 : 1) : page;
+      if (!step) return;
       event.preventDefault();
       cycle(step);
     });
@@ -136,6 +143,19 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
     contents.loadURL(url).catch(() => {});
     pushState();
     return tab;
+  }
+
+  /** Puts tab `id` at `index` (clamped to the strip); the tab in front stays in front. */
+  function move(id, index) {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab || !Number.isFinite(index)) return;
+    const from = tabs.indexOf(tab);
+    const to = Math.max(0, Math.min(tabs.length - 1, Math.trunc(index)));
+    if (from !== to) {
+      tabs.splice(from, 1);
+      tabs.splice(to, 0, tab);
+    }
+    pushState();
   }
 
   function cycle(step) {
@@ -201,9 +221,13 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
   const onReady = (event) => {
     if (fromStrip(event)) pushState();
   };
+  const onMove = (event, id, index) => {
+    if (fromStrip(event)) move(id, index);
+  };
   ipcMain.on('tabs:activate', onActivate);
   ipcMain.on('tabs:close', onClose);
   ipcMain.on('tabs:ready', onReady);
+  ipcMain.on('tabs:move', onMove);
 
   // The strip is a fixed local page: it goes nowhere and opens nothing.
   strip.on('will-navigate', (event) => event.preventDefault());
@@ -232,6 +256,7 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
     ipcMain.off('tabs:activate', onActivate);
     ipcMain.off('tabs:close', onClose);
     ipcMain.off('tabs:ready', onReady);
+    ipcMain.off('tabs:move', onMove);
     for (const tab of tabs.slice()) if (alive(tab)) tab.view.webContents.close();
   });
 

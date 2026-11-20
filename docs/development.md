@@ -98,7 +98,10 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
   - The View and Edit menus act on the page in use (`commandTarget` in main.js): the stock
     roles would reach the strip.
   - Ctrl+Tab / Ctrl+Shift+Tab (Ctrl+PageDown / PageUp) switch tabs; the middle button or × on
-    the strip closes one.
+    the strip closes one. A tab dragged along the strip (pointer events, not HTML drag and drop:
+    nothing can be dropped outside the strip) moves when let go, the others sliding aside
+    meanwhile; Ctrl+Shift+PageDown / PageUp moves the tab in front. The first tab is the one
+    the app treats as Clew's page (shown, wiped), whichever it is after a move.
   - `CLEW_TABS=0` turns tabs off (the window holds Clew itself, as on macOS and Linux for now);
     `CLEW_TABS=1` turns them on anywhere.
 - **`window.alefaDesktop.db`** (any bundled origin; absent when the database cannot load, so a

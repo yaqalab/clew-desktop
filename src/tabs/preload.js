@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld(
     },
     activate: (id) => ipcRenderer.send('tabs:activate', Number(id)),
     close: (id) => ipcRenderer.send('tabs:close', Number(id)),
+    /** Puts tab `id` at position `index` (from 0) on the strip. */
+    move: (id, index) => ipcRenderer.send('tabs:move', Number(id), Number(index)),
     ready: () => ipcRenderer.send('tabs:ready'),
   }),
 );

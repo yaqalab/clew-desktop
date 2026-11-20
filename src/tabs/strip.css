@@ -85,9 +85,22 @@ body {
 .close:hover {
   background: var(--tab-hover);
 }
+/* A tab being dragged rides above the others, which slide aside to show where it will land. */
+.tab.dragging {
+  position: relative;
+  z-index: 1;
+  background: var(--active);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.18);
+}
 @media (prefers-reduced-motion: no-preference) {
   .tab,
   .close {
     transition: background-color 120ms ease;
+  }
+  .sorting .tab:not(.dragging) {
+    transition:
+      background-color 120ms ease,
+      transform 150ms ease;
   }
 }
