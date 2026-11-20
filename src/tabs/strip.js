@@ -36,6 +36,11 @@
 
   function moveDrag(e) {
     if (!drag) return;
+    // The button was let go where the strip could not hear it (outside the window).
+    if (e.buttons === 0) {
+      endDrag(false);
+      return;
+    }
     const { rects, from } = drag;
     let dx = e.clientX - drag.startX;
     if (!drag.moved) {
@@ -74,6 +79,9 @@
       t.classList.remove('dragging');
     }
     if (commit && moved && to !== from) bridge.move(id, to);
+    // Only now does the keyboard go to the tab's page: had it gone on the press, the strip would
+    // have lost focus under the pointer in the middle of the drag.
+    bridge.activate(id, true);
     if (pending) {
       const state = pending;
       pending = null;
@@ -100,8 +108,10 @@
       el.append(label);
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
-        bridge.activate(tab.id);
+        // In front at once, the keyboard left with the strip until the button is let go.
+        bridge.activate(tab.id, false);
         if (state.tabs.length > 1) startDrag(e, tab.id, el);
+        else bridge.activate(tab.id, true);
       });
       // The middle button closes a tab, as in a browser.
       el.addEventListener('auxclick', (e) => {
@@ -131,7 +141,6 @@
   window.addEventListener('pointermove', moveDrag);
   window.addEventListener('pointerup', () => endDrag(true));
   window.addEventListener('pointercancel', () => endDrag(false));
-  window.addEventListener('blur', () => endDrag(false));
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') endDrag(false);
   });

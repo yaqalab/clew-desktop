@@ -210,9 +210,9 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
   // --- From the strip ------------------------------------------------------------------------
 
   const fromStrip = (event) => event.sender === strip;
-  const onActivate = (event, id) => {
+  const onActivate = (event, id, focus) => {
     if (!fromStrip(event)) return;
-    activate(tabs.find((t) => t.id === id));
+    activate(tabs.find((t) => t.id === id), { focus: focus !== false });
   };
   const onClose = (event, id) => {
     if (!fromStrip(event) || tabs.length < 2) return;
