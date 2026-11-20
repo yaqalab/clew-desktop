@@ -102,6 +102,13 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
     nothing can be dropped outside the strip) moves when let go, the others sliding aside
     meanwhile; Ctrl+Shift+PageDown / PageUp moves the tab in front. The first tab is the one
     the app treats as Clew's page (shown, wiped), whichever it is after a move.
+  - **Kept per vault.** Each tab page is told the tabs (`alefaDesktop.tabs.state()` and
+    `onState(fn)`: every tab's hash and title in order, the one in front, and `writer`, true for
+    the first loaded tab only). Clew keeps that layout in the vault (encrypted, local, never
+    synced) and, when the vault opens in the only tab, asks for it back with
+    `alefaDesktop.tabs.restore(saved, activeAt)`: the other tabs come back unvisited (no page
+    loaded) and load the first time they come to the front. Pages are not told while every tab
+    closes (quit, wipe), so a quit does not save a shrinking layout. Clew's `docs/47` §4.
   - `CLEW_TABS=0` turns tabs off (the window holds Clew itself, as on macOS and Linux for now);
     `CLEW_TABS=1` turns them on anywhere.
 - **`window.alefaDesktop.db`** (any bundled origin; absent when the database cannot load, so a

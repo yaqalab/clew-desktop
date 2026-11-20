@@ -82,6 +82,20 @@ const db = Object.freeze({
 const tabs = Object.freeze({
   open: (hash, opts) =>
     ipcRenderer.invoke('tabs:open', String(hash), { newTab: Boolean(opts && opts.newTab) }),
+  /**
+   * The tabs as they are: `{ tabs: [{ hash, title }], active, writer }`, `writer` true for the
+   * one page that keeps the layout (Clew saves it in the vault, to bring back next time).
+   */
+  state: () => ipcRenderer.invoke('tabs:state'),
+  /** Runs `fn` with the same, each time the tabs change; returns the stop. */
+  onState: (fn) => {
+    if (typeof fn !== 'function') return () => {};
+    const heard = (_event, state) => fn(state);
+    ipcRenderer.on('tabs:pages', heard);
+    return () => ipcRenderer.off('tabs:pages', heard);
+  },
+  /** Brings back a saved layout, asked by the only tab once its vault is open. */
+  restore: (saved, activeAt) => ipcRenderer.invoke('tabs:restore', saved, Number(activeAt)),
 });
 
 /**

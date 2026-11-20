@@ -45,16 +45,43 @@ const labelOf = (tab) => labelFor(tab.title, tab.url, app.name);
  * @param {(contents: import('electron').WebContents) => void} [opts.onTabCreated]
  */
 function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
-  /** @type {{ id: number, view: WebContentsView, url: string, title: string }[]} */
+  /**
+   * `loaded` is false for a tab brought back from the vault's saved layout and not visited yet:
+   * its page loads the first time it comes to the front, as a browser restores tabs.
+   * @type {{ id: number, view: WebContentsView, url: string, title: string, loaded: boolean }[]}
+   */
   const tabs = [];
   let active = null;
   let seq = 0;
   let creating = false;
   let closingAll = null;
+  /** While every tab closes (the window, a wipe): the pages are not told, so none saves a layout of fewer and fewer tabs. */
+  let quiet = false;
   const strip = win.webContents;
 
   const alive = (tab) => !tab.view.webContents.isDestroyed();
   const byContents = (contents) => tabs.find((t) => t.view.webContents === contents) ?? null;
+  const hashOf = (url) => {
+    try {
+      return new URL(url).hash || '#/';
+    } catch {
+      return '#/';
+    }
+  };
+
+  /**
+   * What a page is told of the tabs (Clew keeps it in the vault, `docs/47`): every tab's place and
+   * title in order, which is in front, and whether this page is the one that saves it (the first
+   * loaded tab, so exactly one does).
+   */
+  function pagesState(tab) {
+    const writer = tabs.find((t) => alive(t) && t.loaded) ?? null;
+    return {
+      tabs: tabs.map((t) => ({ hash: hashOf(t.url), title: t.title })),
+      active: tabs.indexOf(active),
+      writer: tab === writer,
+    };
+  }
 
   function layout() {
     if (win.isDestroyed()) return;
@@ -71,10 +98,22 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
       tabs: tabs.map((t) => ({ id: t.id, label: labelOf(t), active: t === active })),
       closable: tabs.length > 1,
     });
+    if (quiet) return;
+    for (const tab of tabs) {
+      if (alive(tab) && tab.loaded) tab.view.webContents.send('tabs:pages', pagesState(tab));
+    }
+  }
+
+  /** A tab brought back unvisited loads its page now. */
+  function load(tab) {
+    if (tab.loaded) return;
+    tab.loaded = true;
+    tab.view.webContents.loadURL(tab.url).catch(() => {});
   }
 
   function activate(tab, { focus = true } = {}) {
     if (!tab || !alive(tab) || win.isDestroyed()) return;
+    load(tab);
     active = tab;
     // Raised: the last child is drawn on top. The others count as hidden, as background tabs.
     win.contentView.addChildView(tab.view);
@@ -94,7 +133,8 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
     pushState();
   }
 
-  function add(url, { activate: show = true } = {}) {
+  /** `lazy`: a tab brought back from a saved layout, loaded when it first comes to the front. */
+  function add(url, { activate: show = true, lazy = false, title = '' } = {}) {
     creating = true;
     let view;
     try {
@@ -103,7 +143,7 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
       creating = false;
     }
     view.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#1f1f1f' : '#ffffff');
-    const tab = { id: ++seq, view, url, title: '' };
+    const tab = { id: ++seq, view, url, title, loaded: !lazy || show };
     tabs.push(tab);
     const contents = view.webContents;
     contents.on('page-title-updated', (_event, title) => {
@@ -140,7 +180,7 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
     if (show) activate(tab);
     else if (active) activate(active, { focus: false });
     layout();
-    contents.loadURL(url).catch(() => {});
+    if (tab.loaded) contents.loadURL(url).catch(() => {});
     pushState();
     return tab;
   }
@@ -171,6 +211,11 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
   function closeTab(tab, settle) {
     if (!tab || !alive(tab)) return Promise.resolve(true);
     const contents = tab.view.webContents;
+    // A tab never visited has no page to settle or to ask.
+    if (!tab.loaded) {
+      contents.close();
+      return Promise.resolve(true);
+    }
     return Promise.resolve(settle ? settle([contents]) : undefined).then(
       () =>
         new Promise((resolve) => {
@@ -201,9 +246,16 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
   async function closeTabs({ keepFirst = false, settle } = {}) {
     const going = keepFirst ? tabs.slice(1) : tabs.slice();
     let all = true;
-    for (const tab of going) {
-      if (!(await closeTab(tab, settle))) all = false;
+    quiet = true;
+    try {
+      for (const tab of going) {
+        if (!(await closeTab(tab, settle))) all = false;
+      }
+    } finally {
+      quiet = false;
     }
+    // A tab kept open (Stay): the pages hear the tabs as they now are.
+    if (!all) pushState();
     return all;
   }
 
@@ -270,14 +322,48 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
       add(mainUrl);
     },
 
-    /** The first tab's page: the one the app treats as "Clew" (shown, reloaded, wiped). */
-    main: () => tabs.find(alive)?.view.webContents ?? null,
+    /** The first loaded tab's page: the one the app treats as "Clew" (shown, reloaded, wiped). */
+    main: () => tabs.find((t) => alive(t) && t.loaded)?.view.webContents ?? null,
     /** The tab in front. */
     active: () => (active && alive(active) ? active.view.webContents : null),
-    /** Every tab's page. */
-    contents: () => tabs.filter(alive).map((t) => t.view.webContents),
+    /** Every loaded tab's page (one never visited has nothing to settle or reload). */
+    contents: () => tabs.filter((t) => alive(t) && t.loaded).map((t) => t.view.webContents),
     /** Whether `contents` is a tab's page, or the one being made now. */
     owns: (contents) => creating || Boolean(byContents(contents)),
+
+    /** What `sender`'s page is told of the tabs (`pagesState`), or null for a page not a tab. */
+    stateFor(sender) {
+      const tab = byContents(sender);
+      return tab ? pagesState(tab) : null;
+    },
+
+    /**
+     * Brings back a vault's saved layout (`[{ hash, title }]`, the one in front at `activeAt`),
+     * asked by the only tab once its vault is open; that tab takes the first place itself. The
+     * others come back unvisited and load when first in front. One tab per project, at most 30.
+     * False when there is more than one tab already, or `sender` is not it.
+     */
+    restore(sender, saved, activeAt) {
+      if (tabs.length !== 1 || tabs[0].view.webContents !== sender || !Array.isArray(saved)) return false;
+      const entries = saved.slice(0, 30).filter((e) => e && isRoute(e.hash));
+      if (entries.length === 0) return false;
+      const seen = new Set([projectOf(new URL(entries[0].hash, mainUrl).toString())]);
+      const placed = [tabs[0]];
+      for (const entry of entries.slice(1)) {
+        const url = new URL(entry.hash, mainUrl).toString();
+        const project = projectOf(url);
+        if (project && seen.has(project)) {
+          placed.push(null);
+          continue;
+        }
+        if (project) seen.add(project);
+        const title = typeof entry.title === 'string' ? entry.title.slice(0, 200) : '';
+        placed.push(add(url, { activate: false, lazy: true, title }));
+      }
+      const front = placed[Number.isInteger(activeAt) ? activeAt : 0];
+      if (front && front !== active) activate(front);
+      return true;
+    },
 
     /**
      * Clew asks to go to `hash`: to the tab already showing that project (brought to the front
@@ -290,8 +376,11 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
         const showing = tabs.find((t) => alive(t) && projectOf(t.url) === project);
         if (showing) {
           if (showing.view.webContents === sender) return 'here';
+          // A tab never visited loads straight at the place asked for.
+          const visited = showing.loaded;
+          if (!visited) showing.url = new URL(hash, mainUrl).toString();
           activate(showing);
-          if (new URL(showing.url).hash !== hash) {
+          if (visited && new URL(showing.url).hash !== hash) {
             showing.view.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)}`).catch(() => {});
           }
           return 'shown';
@@ -320,13 +409,17 @@ function stripPreferences() {
   };
 }
 
-/** Clew's `alefaDesktop.tabs.open` (the page's preload) arrives here. */
+/** Clew's `alefaDesktop.tabs` (the page's preload) arrives here. */
 function installIpc(getTabs) {
   ipcMain.handle('tabs:open', (event, hash, opts) => {
     const tabs = getTabs();
     if (!tabs) return 'here';
     return tabs.open(event.sender, hash, Boolean(opts?.newTab));
   });
+  ipcMain.handle('tabs:state', (event) => getTabs()?.stateFor(event.sender) ?? null);
+  ipcMain.handle('tabs:restore', (event, saved, activeAt) =>
+    Boolean(getTabs()?.restore(event.sender, saved, Number(activeAt))),
+  );
 }
 
 module.exports = { createTabs, disableNativeOcclusion, installIpc, projectOf, stripPreferences, tabsWanted, STRIP_HEIGHT };
