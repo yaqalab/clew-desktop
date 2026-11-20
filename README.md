@@ -68,6 +68,13 @@ way. Use it if the app does not suit your computer, or alongside it.
     time; then the model, the language and the key;
   - *Analysis*: the statistics program and your own R scripts;
   - *General*: start at login, and which version of the app, Clew and yaqatw is running.
+- **Tabs** (Windows): hold **Shift** while you click a place in Clew (a project, Settings, the
+  map) to open it in a tab of its own, for example a manuscript in one tab and a transcript in
+  another. A project is open in one tab at a time: going to it again brings its tab to the front.
+  Every tab shows the same vault, and **Lock** locks them all. Drag a tab along the strip to
+  move it (or Ctrl+Shift+PageUp / PageDown). Ctrl+Tab switches tabs; the × or the middle mouse
+  button closes one. Each vault remembers its tabs on this computer: open it again and they come
+  back in the same order, each loading the first time you click it.
 - **Zoom**: Ctrl+= / Ctrl+− / Ctrl+0, or Ctrl + mouse wheel.
 - **Help › About** shows the app's version and the build of Clew and yaqatw inside it.
 

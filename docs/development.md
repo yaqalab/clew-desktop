@@ -79,6 +79,44 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
   [src/folder-ipc.js](../src/folder-ipc.js)). A folder in OneDrive (from its environment
   variables), iCloud Drive, Dropbox or Google Drive (by folder name) is said once per place, when
   Clew's window first shows and the folder exists.
+- **Tabs** (Windows; [src/tabs/](../src/tabs/)): the main window shows Clew in tabs, so two
+  places can be open at once (a manuscript and a transcript). The window's own page is the tab
+  strip ([strip.html](../src/tabs/strip.html)), in a session of its own with nothing in it; each
+  tab is a whole Clew page in a `WebContentsView` over it, in the app's session, stacked with the
+  active one raised. With one tab the strip is out of sight. Clew asks for a tab through
+  **`window.alefaDesktop.tabs.open(hash, { newTab })`** (Clew's top page only): Shift with a
+  click, or a project another tab shows; it answers `"here"`, `"shown"` or `"opened"`. A
+  project is shown in one tab only; Clew keeps the other rules (one vault in every tab, Lock
+  locks them all; Clew's `docs/47`). A Clew link opened with Shift becomes a tab too
+  ([src/policy.js](../src/policy.js) `openInTab`).
+  - Stacked views report visible and hidden as a browser's tabs do only with Chromium's
+    `CalculateNativeWinOcclusion` off: with it, the active tab was left "hidden" about one switch
+    in two, and a hidden Clew page ends its work session. So the app turns it off; a window that
+    another program covers no longer counts as hidden.
+  - Closing the window closes the tabs first, each as a page closes (settled, its
+    `beforeunload` asked): a view's page is otherwise destroyed with its window unasked.
+  - The View and Edit menus act on the page in use (`commandTarget` in main.js): the stock
+    roles would reach the strip.
+  - Ctrl+Tab / Ctrl+Shift+Tab (Ctrl+PageDown / PageUp) switch tabs; the middle button or × on
+    the strip closes one. A tab dragged along the strip (pointer events, not HTML drag and drop:
+    nothing can be dropped outside the strip) moves when let go, the others sliding aside
+    meanwhile; Ctrl+Shift+PageDown / PageUp moves the tab in front. The first tab is the one
+    the app treats as Clew's page (shown, wiped), whichever it is after a move.
+  - **Kept per vault.** Each tab page is told the tabs (`alefaDesktop.tabs.state()` and
+    `onState(fn)`: every tab's hash and title in order, the one in front, and `writer`, true for
+    the first loaded tab only). Clew keeps that layout in the vault (encrypted, local, never
+    synced) and, when the vault opens in the only tab, asks for it back with
+    `alefaDesktop.tabs.restore(saved, activeAt)`: the other tabs come back unvisited (no page
+    loaded) and load the first time they come to the front. Pages are not told while every tab
+    closes (quit, wipe), so a quit does not save a shrinking layout. Clew's `docs/47` §4.
+  - **A tab whose page stops** (a crash, out of memory) is loaded again by itself, once a minute
+    at most: Electron draws no "page stopped" screen, so it otherwise stayed on its last picture
+    and looked frozen. The log says why (`[tabs] tab N (#/…): page stopped, oom`), and when a
+    page stops or starts answering. A page being replaced (a reload, a crash) is not sent the
+    tabs; it asks for them once it is there. In dev mode a tab takes about 380 MB, against about
+    140 MB with the built Clew.
+  - `CLEW_TABS=0` turns tabs off (the window holds Clew itself, as on macOS and Linux for now);
+    `CLEW_TABS=1` turns them on anywhere.
 - **`window.alefaDesktop.db`** (any bundled origin; absent when the database cannot load, so a
   page checks for it and otherwise works as on the web): encrypted SQLite databases (SQLCipher 4
   format, through `better-sqlite3-multiple-ciphers`). Each site has its own folder,

@@ -75,6 +75,30 @@ const db = Object.freeze({
 });
 
 /**
+ * The main window's tabs (`src/tabs`), for Clew's top page only: Clew goes to the tab already
+ * showing a project, or opens a tab with Shift (Clew's `docs/47`). Answers where it went:
+ * `"here"` (nowhere else: the page goes itself), `"shown"` or `"opened"`.
+ */
+const tabs = Object.freeze({
+  open: (hash, opts) =>
+    ipcRenderer.invoke('tabs:open', String(hash), { newTab: Boolean(opts && opts.newTab) }),
+  /**
+   * The tabs as they are: `{ tabs: [{ hash, title }], active, writer }`, `writer` true for the
+   * one page that keeps the layout (Clew saves it in the vault, to bring back next time).
+   */
+  state: () => ipcRenderer.invoke('tabs:state'),
+  /** Runs `fn` with the same, each time the tabs change; returns the stop. */
+  onState: (fn) => {
+    if (typeof fn !== 'function') return () => {};
+    const heard = (_event, state) => fn(state);
+    ipcRenderer.on('tabs:pages', heard);
+    return () => ipcRenderer.off('tabs:pages', heard);
+  },
+  /** Brings back a saved layout, asked by the only tab once its vault is open. */
+  restore: (saved, activeAt) => ipcRenderer.invoke('tabs:restore', saved, Number(activeAt)),
+});
+
+/**
  * What the page asked to finish before the app quits, restarts or reloads it: Clew writes out
  * the edits it still holds (`src/settle.js`). The main process sends `alefa:settle`; the answer
  * goes back once every handler has finished, whatever it did. With no handler — yaqatw, a
@@ -106,6 +130,7 @@ if (info && info.origins.includes(location.origin)) {
         if (typeof fn === 'function') beforeQuit.add(fn);
       },
       ...(location.origin === info.folderOrigin ? { folder } : {}),
+      ...(info.tabs && location.origin === info.folderOrigin && process.isMainFrame ? { tabs } : {}),
       ...(info.db ? { db } : {}),
     }),
   );

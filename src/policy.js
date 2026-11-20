@@ -39,11 +39,14 @@ function openExternal(url) {
 
 /**
  * Applies the policy to one webContents. `childOptions()` gives the options for windows it
- * may open; `isPopup` marks a window that was itself opened as an in-app popup.
+ * may open; `isPopup` marks a window that was itself opened as an in-app popup. `openInTab`,
+ * for a tab of the main window, may take an app link opened with Shift as a tab (`src/tabs`):
+ * true when it did.
  */
-function apply(contents, sites, childOptions, isPopup = false) {
-  contents.setWindowOpenHandler(({ url }) => {
+function apply(contents, sites, childOptions, isPopup = false, { openInTab } = {}) {
+  contents.setWindowOpenHandler(({ url, disposition, features }) => {
     const kind = classify(url, sites);
+    if (kind === 'app' && openInTab?.(url, { disposition, features })) return { action: 'deny' };
     if (kind === 'app' || kind === 'popup' || kind === 'blank') {
       return { action: 'allow', overrideBrowserWindowOptions: childOptions() };
     }

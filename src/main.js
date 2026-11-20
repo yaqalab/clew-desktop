@@ -2,7 +2,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFile } = require('node:child_process');
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerMonitor, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerMonitor, protocol, session, shell, webContents } = require('electron');
 const desktopConfig = require('../desktop.config.json');
 const sites = require('./sites');
 const siteUpdates = require('./site-updates');
@@ -18,6 +18,7 @@ const localApi = require('./local-api');
 const { createWordPlugin } = require('./word-plugin');
 const { createWordBridge } = require('./word-bridge');
 const { createAppSettings } = require('./app-settings');
+const tabsModule = require('./tabs');
 
 const PARTITION = 'persist:alefa';
 // The host page of Word windows (src/word-host/), on an origin of its own.
@@ -52,11 +53,29 @@ const SITE_UPDATES =
 // Updates of the app itself (src/app-update.js): the installed app only.
 const APP_UPDATES = app.isPackaged && !SMOKE && process.env.CLEW_APP_UPDATES !== '0';
 
+// Clew in tabs in the main window (`src/tabs`): Windows for now; CLEW_TABS=0 or 1 overrides.
+const TABS = tabsModule.tabsWanted();
+if (TABS) tabsModule.disableNativeOcclusion();
+
 if (!SMOKE && !app.requestSingleInstanceLock()) {
   app.quit();
 }
 
 let mainWindow = null;
+/** The main window's tabs (`src/tabs`), when it holds them. */
+let tabs = null;
+/** The main window's Clew page: the first tab's, or the window's own without tabs. */
+const mainContents = () => (tabs ? tabs.main() : mainWindow?.webContents) ?? null;
+/**
+ * The page a menu command is for: the one with the keyboard (a popup, DevTools, a tab), else the
+ * tab in front when the main window is chosen (its own page is only the tab strip).
+ */
+function commandTarget(win) {
+  const focused = webContents.getFocusedWebContents();
+  if (focused && !focused.isDestroyed() && focused !== mainWindow?.webContents) return focused;
+  if (tabs && win && win === mainWindow) return tabs.active();
+  return win?.webContents ?? null;
+}
 let appSession = null;
 let tools = null;
 let quitting = false;
@@ -81,8 +100,9 @@ function devToolsAllowed() {
 function setDevTools(on) {
   const next = appSettings.set({ devTools: Boolean(on) });
   if (!devToolsAllowed()) {
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed() && w.webContents.isDevToolsOpened()) w.webContents.closeDevTools();
+    const pages = [...BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.webContents), ...(tabs?.contents() ?? [])];
+    for (const c of pages) {
+      if (!c.isDestroyed() && c.isDevToolsOpened()) c.closeDevTools();
     }
   }
   buildMenu();
@@ -167,7 +187,8 @@ async function moveClewFolder() {
       folderRoot: folderLocation.samePath(target, defaultFolderRoot()) ? '' : target,
       folderWarned: syncedThere ? target : '',
     });
-    if (mainWindow) reloadSettled(mainWindow);
+    // Every Clew page, every tab, reads the folder from its new place.
+    for (const page of tabs ? tabs.contents() : [mainContents()]) reloadSettled(page);
     await folderDialog({
       type: 'info',
       message: 'Clew’s folder was moved.',
@@ -311,11 +332,14 @@ async function wipeData({ includeFolder, passphrase }) {
   wipeProgress({ phase: 'closing' });
   await settle(appContents());
   const settingsWin = tools?.settingsWin;
-  const closed = await closeWindows((w) => w !== mainWindow && w !== settingsWin);
+  // The other windows, then the main window's tabs but its first (`src/tabs`), close.
+  const closed =
+    (await closeWindows((w) => w !== mainWindow && w !== settingsWin)) && (tabs ? await tabs.closeExtra() : true);
   let unloaded = closed;
-  if (closed && mainWindow && !mainWindow.isDestroyed()) {
-    await mainWindow.webContents.loadURL('about:blank').catch(() => {});
-    unloaded = mainWindow.webContents.getURL() === 'about:blank';
+  const page = mainContents();
+  if (closed && mainWindow && !mainWindow.isDestroyed() && page) {
+    await page.loadURL('about:blank').catch(() => {});
+    unloaded = page.getURL() === 'about:blank';
     if (unloaded) mainWindow.hide();
   }
   if (!unloaded) {
@@ -400,16 +424,18 @@ async function wipeData({ includeFolder, passphrase }) {
 /** Asks pages to write out what they still hold, and waits for it (`settle.js`). */
 const settle = createSettler(ipcMain);
 
-/** The app's own pages: the main window and its in-app popups, not the Settings window. */
+/**
+ * The app's own pages: the main window's (or its tabs'), its in-app popups, not the Settings
+ * window. The tab strip has a session of its own and is left out.
+ */
 function appContents() {
-  return BrowserWindow.getAllWindows()
-    .map((w) => w.webContents)
-    .filter((c) => c && !c.isDestroyed() && c.session === appSession);
+  return [...BrowserWindow.getAllWindows().map((w) => w.webContents), ...(tabs?.contents() ?? [])].filter(
+    (c) => c && !c.isDestroyed() && c.session === appSession,
+  );
 }
 
-/** Reloads a window once its page has written out what it holds. */
-function reloadSettled(win, ignoreCache = false) {
-  const contents = win?.webContents;
+/** Reloads a page once it has written out what it holds. */
+function reloadSettled(contents, ignoreCache = false) {
   if (!contents || contents.isDestroyed()) return;
   const reload = () => {
     if (contents.isDestroyed()) return;
@@ -421,7 +447,7 @@ function reloadSettled(win, ignoreCache = false) {
 }
 
 const preloadArg = `--alefa-desktop=${encodeURIComponent(
-  JSON.stringify({ version: app.getVersion(), origins: sites.origins, folderOrigin: sites.main.origin, db: DB }),
+  JSON.stringify({ version: app.getVersion(), origins: sites.origins, folderOrigin: sites.main.origin, db: DB, tabs: TABS }),
 )}`;
 
 /** The webPreferences every app window and in-app popup gets. */
@@ -1320,6 +1346,60 @@ function hiddenZoomKeys() {
   ];
 }
 
+/** A menu command for the page in use (`commandTarget`): with tabs, the stock roles would reach the strip. */
+function pageCommand(label, accelerator, run, extra = {}) {
+  return {
+    label,
+    ...(accelerator ? { accelerator } : {}),
+    click: (_item, win) => {
+      const target = commandTarget(win);
+      if (target && !target.isDestroyed()) run(target);
+    },
+    ...extra,
+  };
+}
+
+/** The page DevTools inspects, when `contents` is DevTools; else `contents` itself. */
+function pageOf(contents) {
+  return webContents.getAllWebContents().find((w) => !w.isDestroyed() && w.devToolsWebContents === contents) ?? contents;
+}
+
+/** Windows' Edit menu, each command for the page in use. */
+function editMenuForTabs() {
+  return {
+    label: 'Edit',
+    submenu: [
+      pageCommand('Undo', 'CmdOrCtrl+Z', (c) => c.undo()),
+      pageCommand('Redo', 'CmdOrCtrl+Y', (c) => c.redo()),
+      { type: 'separator' },
+      pageCommand('Cut', 'CmdOrCtrl+X', (c) => c.cut()),
+      pageCommand('Copy', 'CmdOrCtrl+C', (c) => c.copy()),
+      pageCommand('Paste', 'CmdOrCtrl+V', (c) => c.paste()),
+      pageCommand('Delete', null, (c) => c.delete()),
+      { type: 'separator' },
+      pageCommand('Select All', 'CmdOrCtrl+A', (c) => c.selectAll()),
+    ],
+  };
+}
+
+/** The zooms of the View menu, for the page in use; the hidden keys as `hiddenZoomKeys`. */
+function zoomItemsForTabs() {
+  const zoom = (step) => (c) => {
+    const page = pageOf(c);
+    page.setZoomLevel(step === 0 ? 0 : Math.min(5, Math.max(-3, page.getZoomLevel() + step)));
+  };
+  const hidden = { visible: false, acceleratorWorksWhenHidden: true };
+  return [
+    pageCommand('Actual Size', 'CommandOrControl+0', zoom(0)),
+    pageCommand('Zoom In', 'CommandOrControl+=', zoom(0.5)),
+    pageCommand('Zoom Out', 'CommandOrControl+-', zoom(-0.5)),
+    pageCommand('Zoom In', 'CommandOrControl+Plus', zoom(0.5), hidden),
+    pageCommand('Zoom In', 'CommandOrControl+numadd', zoom(0.5), hidden),
+    pageCommand('Zoom Out', 'CommandOrControl+numsub', zoom(-0.5), hidden),
+    pageCommand('Actual Size', 'CommandOrControl+num0', zoom(0), hidden),
+  ];
+}
+
 const REPO_URL = 'https://github.com/yaqalab/clew-desktop';
 
 function buildMenu() {
@@ -1359,27 +1439,24 @@ function buildMenu() {
             ],
           },
         ]),
-    { role: 'editMenu' },
+    TABS ? editMenuForTabs() : { role: 'editMenu' },
     {
       label: 'View',
       submenu: [
         // Not the stock roles: those reload at once, in the middle of a save.
-        { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: (_item, win) => reloadSettled(win) },
-        {
-          label: 'Force Reload',
-          accelerator: 'CmdOrCtrl+Shift+R',
-          click: (_item, win) => reloadSettled(win, true),
-        },
+        pageCommand('Reload', 'CmdOrCtrl+R', (c) => reloadSettled(pageOf(c))),
+        pageCommand('Force Reload', 'CmdOrCtrl+Shift+R', (c) => reloadSettled(pageOf(c), true)),
         // On a shared computer DevTools would show an open vault's data: off unless allowed.
-        ...(devToolsAllowed() ? [{ role: 'toggleDevTools' }] : []),
+        ...(devToolsAllowed()
+          ? [TABS ? pageCommand('Toggle Developer Tools', 'CmdOrCtrl+Shift+I', (c) => pageOf(c).toggleDevTools()) : { role: 'toggleDevTools' }]
+          : []),
         { type: 'separator' },
         // Electron's own Zoom In listens for Ctrl+Shift+= ("Plus") only. Ctrl+= first, as in
         // Chrome; the other presses people use follow, unseen. A press the page took for itself
         // (Clew's editors zoom their own text) never reaches these.
-        { role: 'resetZoom' },
-        { role: 'zoomIn', accelerator: 'CommandOrControl+=' },
-        { role: 'zoomOut' },
-        ...hiddenZoomKeys(),
+        ...(TABS
+          ? zoomItemsForTabs()
+          : [{ role: 'resetZoom' }, { role: 'zoomIn', accelerator: 'CommandOrControl+=' }, { role: 'zoomOut' }, ...hiddenZoomKeys()]),
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
@@ -1409,11 +1486,12 @@ function createMainWindow() {
     minHeight: 400,
     title: app.name,
     show: false,
-    webPreferences: webPreferences(),
+    // With tabs the window's own page is the tab strip (`src/tabs`); Clew is in the tabs.
+    webPreferences: TABS ? tabsModule.stripPreferences() : webPreferences(),
   });
-  mainWindow.once('ready-to-show', () => {
-    if (!SMOKE && !mainWindow.hiddenAtStart) mainWindow.show();
-  });
+  const showWhenReady = () => {
+    if (!SMOKE && mainWindow && !mainWindow.hiddenAtStart) mainWindow.show();
+  };
   // Once the user sees Clew: a word about its folder, if a cloud drive syncs it.
   if (!SMOKE) mainWindow.once('show', () => setTimeout(() => warnSyncedFolder().catch(() => {}), 3000));
   // With the tray, closing the window hides it: Clew stays as it was, and the tools keep running.
@@ -1425,6 +1503,7 @@ function createMainWindow() {
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
+    tabs = null;
   });
   // Windows shutting down, restarting or signing out: held back while the pages write out what
   // they hold (the quit below), then let go. Windows lists Clew as "preventing shutdown" for those
@@ -1433,8 +1512,31 @@ function createMainWindow() {
   mainWindow.on('session-end', () => {
     if (!readyToQuit) quitApp();
   });
-  mainWindow.loadURL(sites.mainUrl);
+  if (TABS) {
+    // After the tray's close handler above: a close that only hides leaves the tabs alone.
+    tabs = tabsModule.createTabs({ win: mainWindow, webPreferences, mainUrl: sites.mainUrl });
+    tabs.settle = settle;
+    tabs.start();
+    // Shown once Clew is there, not when the strip is.
+    whenLoaded(tabs.main(), showWhenReady);
+  } else {
+    mainWindow.once('ready-to-show', showWhenReady);
+    mainWindow.loadURL(sites.mainUrl);
+  }
   return mainWindow;
+}
+
+/** Runs `fn` once `contents` has loaded (or failed to), at once if it is not loading. */
+function whenLoaded(contents, fn) {
+  if (!contents || contents.isDestroyed()) return fn();
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    fn();
+  };
+  contents.once('did-finish-load', once);
+  contents.once('did-fail-load', once);
 }
 
 app.on('web-contents-created', (_event, contents) => {
@@ -1446,17 +1548,44 @@ app.on('web-contents-created', (_event, contents) => {
     contents.on('will-prevent-unload', (event) => askBeforeUnload(contents, event));
   }
   if (contents.getType() !== 'window' || contents.session !== appSession) return;
-  // A window opened by another is an in-app popup.
-  const isPopup = mainWindow !== null && contents !== mainWindow.webContents;
-  policy.apply(contents, sites, childWindowOptions, isPopup);
+  // A window opened by another is an in-app popup; a tab of the main window is not.
+  const isTab = Boolean(tabs?.owns(contents));
+  const isPopup = mainWindow !== null && contents !== mainWindow.webContents && !isTab;
+  policy.apply(contents, sites, childWindowOptions, isPopup, isTab ? { openInTab: (url, how) => openLinkInTab(contents, url, how) } : {});
 });
+
+/**
+ * A link of Clew's opened with Shift (or the middle button) from a tab: a tab of its own rather
+ * than a window, as the router's own navigation does (`src/tabs`). A `window.open` that asked
+ * for a window's size and shape (`features`) is a popup and stays one.
+ */
+function openLinkInTab(contents, url, { disposition, features }) {
+  if (!tabs || features) return false;
+  if (!['new-window', 'foreground-tab', 'background-tab'].includes(disposition)) return false;
+  let target;
+  try {
+    target = new URL(url);
+  } catch {
+    return false;
+  }
+  if (target.origin !== sites.main.origin || !target.hash.startsWith('#/')) return false;
+  const where = tabs.open(contents, target.hash, true);
+  if (where === 'here' && !contents.isDestroyed()) {
+    contents.executeJavaScript(`location.hash = ${JSON.stringify(target.hash)}`).catch(() => {});
+  }
+  return true;
+}
+
+// Clew asks for a tab (`alefaDesktop.tabs.open`): see `src/tabs`.
+tabsModule.installIpc(() => tabs);
 
 function showMainWindow() {
   if (!mainWindow) createMainWindow();
   mainWindow.hiddenAtStart = false;
   if (mainWindow.isMinimized()) mainWindow.restore();
-  if (!mainWindow.webContents.isLoading()) mainWindow.show();
-  else mainWindow.once('ready-to-show', () => mainWindow.show());
+  const page = mainContents();
+  if (page && !page.isLoading()) mainWindow.show();
+  else whenLoaded(page, () => mainWindow?.show());
   mainWindow.focus();
 }
 
@@ -1638,8 +1767,9 @@ app.whenReady().then(async () => {
   const win = createMainWindow();
   win.hiddenAtStart = HIDDEN;
   if (SMOKE) {
+    // The smoke run checks Clew's page: with tabs, the first tab's rather than the strip.
     require('./smoke')
-      .run(win, appSession, server, tools, folder, db, api)
+      .run(tabs ? { webContents: tabs.main() } : win, appSession, server, tools, folder, db, api, { tabs, strip: tabs ? win.webContents : null })
       .catch((err) => {
         console.error(err);
         app.exit(1);
