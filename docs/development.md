@@ -79,6 +79,28 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
   [src/folder-ipc.js](../src/folder-ipc.js)). A folder in OneDrive (from its environment
   variables), iCloud Drive, Dropbox or Google Drive (by folder name) is said once per place, when
   Clew's window first shows and the folder exists.
+- **Tabs** (Windows; [src/tabs/](../src/tabs/)): the main window shows Clew in tabs, so two
+  places can be open at once (a manuscript and a transcript). The window's own page is the tab
+  strip ([strip.html](../src/tabs/strip.html)), in a session of its own with nothing in it; each
+  tab is a whole Clew page in a `WebContentsView` over it, in the app's session, stacked with the
+  active one raised. With one tab the strip is out of sight. Clew asks for a tab through
+  **`window.alefaDesktop.tabs.open(hash, { newTab })`** (Clew's top page only): Shift with a
+  click, or a project another tab shows; it answers `"here"`, `"shown"` or `"opened"`. A
+  project is shown in one tab only; Clew keeps the other rules (one vault in every tab, Lock
+  locks them all; Clew's `docs/47`). A Clew link opened with Shift becomes a tab too
+  ([src/policy.js](../src/policy.js) `openInTab`).
+  - Stacked views report visible and hidden as a browser's tabs do only with Chromium's
+    `CalculateNativeWinOcclusion` off: with it, the active tab was left "hidden" about one switch
+    in two, and a hidden Clew page ends its work session. So the app turns it off; a window that
+    another program covers no longer counts as hidden.
+  - Closing the window closes the tabs first, each as a page closes (settled, its
+    `beforeunload` asked): a view's page is otherwise destroyed with its window unasked.
+  - The View and Edit menus act on the page in use (`commandTarget` in main.js): the stock
+    roles would reach the strip.
+  - Ctrl+Tab / Ctrl+Shift+Tab (Ctrl+PageDown / PageUp) switch tabs; the middle button or × on
+    the strip closes one.
+  - `CLEW_TABS=0` turns tabs off (the window holds Clew itself, as on macOS and Linux for now);
+    `CLEW_TABS=1` turns them on anywhere.
 - **`window.alefaDesktop.db`** (any bundled origin; absent when the database cannot load, so a
   page checks for it and otherwise works as on the web): encrypted SQLite databases (SQLCipher 4
   format, through `better-sqlite3-multiple-ciphers`). Each site has its own folder,
