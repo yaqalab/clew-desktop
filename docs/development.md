@@ -109,6 +109,12 @@ All of it is in [sites.config.json](../sites.config.json). A third app is one mo
     `alefaDesktop.tabs.restore(saved, activeAt)`: the other tabs come back unvisited (no page
     loaded) and load the first time they come to the front. Pages are not told while every tab
     closes (quit, wipe), so a quit does not save a shrinking layout. Clew's `docs/47` §4.
+  - **A tab whose page stops** (a crash, out of memory) is loaded again by itself, once a minute
+    at most: Electron draws no "page stopped" screen, so it otherwise stayed on its last picture
+    and looked frozen. The log says why (`[tabs] tab N (#/…): page stopped, oom`), and when a
+    page stops or starts answering. A page being replaced (a reload, a crash) is not sent the
+    tabs; it asks for them once it is there. In dev mode a tab takes about 380 MB, against about
+    140 MB with the built Clew.
   - `CLEW_TABS=0` turns tabs off (the window holds Clew itself, as on macOS and Linux for now);
     `CLEW_TABS=1` turns them on anywhere.
 - **`window.alefaDesktop.db`** (any bundled origin; absent when the database cannot load, so a

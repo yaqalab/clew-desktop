@@ -100,7 +100,15 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
     });
     if (quiet) return;
     for (const tab of tabs) {
-      if (alive(tab) && tab.loaded) tab.view.webContents.send('tabs:pages', pagesState(tab));
+      // Not to a page being replaced (a reload, a crash): it has no frame to hear it, and asks
+      // for the tabs itself once it is there (`alefaDesktop.tabs.state`).
+      const contents = tab.view.webContents;
+      if (!alive(tab) || !tab.loaded || contents.isCrashed() || contents.isLoadingMainFrame()) continue;
+      try {
+        contents.send('tabs:pages', pagesState(tab));
+      } catch {
+        // Gone between the check and the send: the same as above.
+      }
     }
   }
 
@@ -160,6 +168,19 @@ function createTabs({ win, webPreferences, mainUrl, onTabCreated }) {
       pushState();
     });
     contents.on('destroyed', () => remove(tab));
+    // A tab whose page stopped (out of memory, a crash) showed its last picture and nothing
+    // more: Electron draws no "this page stopped" screen as a browser does. It is loaded again,
+    // once a minute at most so a page that keeps stopping does not loop, and the reason is logged.
+    let lastRevived = 0;
+    contents.on('render-process-gone', (_event, details) => {
+      console.warn(`[tabs] tab ${tab.id} (${hashOf(tab.url)}): page stopped, ${details.reason} (${details.exitCode})`);
+      if (details.reason === 'clean-exit' || win.isDestroyed() || contents.isDestroyed()) return;
+      if (Date.now() - lastRevived < 60_000) return;
+      lastRevived = Date.now();
+      contents.loadURL(tab.url).catch(() => {});
+    });
+    contents.on('unresponsive', () => console.warn(`[tabs] tab ${tab.id} (${hashOf(tab.url)}): page not answering`));
+    contents.on('responsive', () => console.warn(`[tabs] tab ${tab.id}: page answering again`));
     // As in a browser: Ctrl+Tab and Ctrl+Shift+Tab, Ctrl+PageDown and Ctrl+PageUp go to the next
     // and previous tab; Ctrl+Shift+PageDown and Ctrl+Shift+PageUp move the tab in front.
     contents.on('before-input-event', (event, input) => {
